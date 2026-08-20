@@ -2,10 +2,10 @@ name: gelato-management
 
 services:
   rabbitmq:
-    image: rabbitmq:3.13-management-alpine
+    image: rabbitmq:3-management-alpine
     container_name: rabbitmq
     ports:
-      - "15672:15672" # HTTP management UI
+      - "127.0.0.1:15672:15672" # HTTP management UI restricted to localhost
     env_file:
       - ../.env
     networks:
