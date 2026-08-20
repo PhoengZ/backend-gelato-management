@@ -7,9 +7,8 @@ services:
     ports:
       - "5672:5672"   # AMQP protocol port
       - "15672:15672" # HTTP management UI
-    environment:
-      - RABBITMQ_DEFAULT_USER=${RABBITMQ_DEFAULT_USER:-admin}
-      - RABBITMQ_DEFAULT_PASS=${RABBITMQ_DEFAULT_PASS:-admin}
+    env_file:
+      - ../.env
     volumes:
       - ../rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
       - ../rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
