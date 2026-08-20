@@ -1,0 +1,8 @@
+# Environments
+.env
+.env.*
+!.env.example
+
+# Docker / Volumes
+data/
+docker-compose.override.yml
