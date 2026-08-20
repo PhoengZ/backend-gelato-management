@@ -1,4 +1,4 @@
-package handler
+package v1
 
 import (
 	"analytics-service/internal/service"
@@ -27,9 +27,4 @@ func (h *AnalyticsHandler) GetAnalytics(c *fiber.Ctx) error {
 		"period": period,
 		"data":   analytics,
 	})
-}
-
-func (h *AnalyticsHandler) SetupRoutes(app *fiber.App) {
-	api := app.Group("/api/v1")
-	api.Get("/analytics", h.GetAnalytics)
 }

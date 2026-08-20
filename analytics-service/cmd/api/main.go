@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"analytics-service/config"
-	"analytics-service/internal/handler"
 	"analytics-service/internal/messaging"
 	"analytics-service/internal/repository"
+	"analytics-service/internal/router"
 	"analytics-service/internal/service"
 
 	"github.com/gofiber/fiber/v2"
@@ -50,8 +50,7 @@ func main() {
 
 	// Setup Fiber App
 	app := fiber.New()
-	apiHandler := handler.NewAnalyticsHandler(svc)
-	apiHandler.SetupRoutes(app)
+	router.SetupRoutes(app, svc)
 
 	// Start server gracefully
 	go func() {
