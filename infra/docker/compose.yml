@@ -1,14 +1,15 @@
-version: '3.8'
+name: gelato-management
 
 services:
   rabbitmq:
     image: rabbitmq:3.13-management-alpine
     container_name: rabbitmq
     ports:
-      - "5672:5672"   # AMQP protocol port
       - "15672:15672" # HTTP management UI
     env_file:
       - ../.env
+    networks:
+      - gelato_network
     volumes:
       - ../rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
       - ../rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
@@ -20,6 +21,10 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
+
+networks:
+  gelato_network:
+    driver: bridge
 
 volumes:
   rabbitmq_data:
