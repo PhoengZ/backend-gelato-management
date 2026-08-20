@@ -1,47 +1,14 @@
 {
+  "__comment__": "Example for future services: Add users with a password_hash, create a vhost for the service, and map permissions connecting the user to the vhost. Example: {\"users\": [{\"name\": \"service_a\", \"password_hash\": \"base64_hash_here\", \"tags\": []}], \"vhosts\": [{\"name\": \"service_a_vhost\"}], \"permissions\": [{\"user\": \"service_a\", \"vhost\": \"service_a_vhost\", \"configure\": \".*\", \"write\": \".*\", \"read\": \".*\"}]}",
   "rabbit_version": "3.13",
   "rabbitmq_version": "3.13",
-  "users": [
-    {
-      "name": "service_a",
-      "password_hash": "b2RldmZhc3RfcGFzc3dvcmRfaGFzaA==",
-      "hashing_algorithm": "rabbit_password_hashing_sha256",
-      "tags": []
-    },
-    {
-      "name": "service_b",
-      "password_hash": "b2RldmZhc3RfcGFzc3dvcmRfaGFzaA==",
-      "hashing_algorithm": "rabbit_password_hashing_sha256",
-      "tags": []
-    }
-  ],
+  "users": [],
   "vhosts": [
     {
       "name": "/"
-    },
-    {
-      "name": "service_a_vhost"
-    },
-    {
-      "name": "service_b_vhost"
     }
   ],
-  "permissions": [
-    {
-      "user": "service_a",
-      "vhost": "service_a_vhost",
-      "configure": ".*",
-      "write": ".*",
-      "read": ".*"
-    },
-    {
-      "user": "service_b",
-      "vhost": "service_b_vhost",
-      "configure": ".*",
-      "write": ".*",
-      "read": ".*"
-    }
-  ],
+  "permissions": [],
   "policies": [],
   "queues": [],
   "exchanges": [],
