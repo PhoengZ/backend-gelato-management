@@ -27,11 +27,26 @@ services:
       - ../.env
     networks:
       - gelato_network
-    ports:
-      - "27017:27017"
     volumes:
       - mongodb_data:/data/db
     restart: unless-stopped
+
+  analytics-service:
+    build:
+      context: ../../analytics-service
+      dockerfile: Dockerfile
+    container_name: analytics-service
+    env_file:
+      - ../.env
+    networks:
+      - gelato_network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      mongodb:
+        condition: service_started
+    restart: unless-stopped
+
 
 networks:
   gelato_network:
