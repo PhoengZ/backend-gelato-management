@@ -2,7 +2,7 @@ name: gelato-management
 
 services:
   rabbitmq:
-    image: rabbitmq:3-management-alpine
+    image: rabbitmq:4-management-alpine
     container_name: rabbitmq
     env_file:
       - ../.env
