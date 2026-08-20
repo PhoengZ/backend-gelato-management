@@ -20,6 +20,19 @@ services:
       timeout: 10s
       retries: 5
 
+  mongodb:
+    image: mongo:latest
+    container_name: mongodb
+    env_file:
+      - ../.env
+    networks:
+      - gelato_network
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    restart: unless-stopped
+
 networks:
   gelato_network:
     driver: bridge
@@ -27,3 +40,4 @@ networks:
 
 volumes:
   rabbitmq_data:
+  mongodb_data:
