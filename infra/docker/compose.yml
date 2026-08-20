@@ -37,7 +37,7 @@ services:
       dockerfile: Dockerfile
     container_name: analytics-service
     env_file:
-      - ../.env
+      - ../.env.analytics
     networks:
       - gelato_network
     depends_on:

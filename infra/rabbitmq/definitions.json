@@ -1,13 +1,31 @@
 {
   "rabbit_version": "3.13",
   "rabbitmq_version": "3.13",
-  "users": [],
+  "users": [
+    {
+      "name": "analytics_service",
+      "password_hash": "5eLyU8+74FXs6jTGzWS7T8mDtTJw4GHumkrHj51lNQDixOhS",
+      "hashing_algorithm": "rabbit_password_hashing_sha256",
+      "tags": []
+    }
+  ],
   "vhosts": [
     {
       "name": "/"
+    },
+    {
+      "name": "analytics_vhost"
     }
   ],
-  "permissions": [],
+  "permissions": [
+    {
+      "user": "analytics_service",
+      "vhost": "analytics_vhost",
+      "configure": "^analytics_queue$",
+      "write": "^analytics_queue$",
+      "read": "^analytics_queue$"
+    }
+  ],
   "policies": [],
   "queues": [],
   "exchanges": [],
