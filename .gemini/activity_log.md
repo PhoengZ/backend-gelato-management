@@ -35,3 +35,8 @@
 - **Attempted:** Fix PR-Agent crash when using unknown model names.
 - **Hypothesis:** PR-Agent doesn't know the context window size of \groq/qwen/qwen3.6-27b\. Setting \CONFIG.CUSTOM_MODEL_MAX_TOKENS: "32000" will bypass this check and allow the agent to run.
 - **Outcome:** File successfully updated, committed, and pushed.
+
+### 2026-08-21 17:28:00
+- **Attempted:** Fix Invalid API Key error for Groq.
+- **Hypothesis:** LiteLLM expects the environment variable \GROQ_API_KEY\ for models prefixed with \groq/\, but the workflow only exported \OPENAI_KEY\. Exporting \GROQ_API_KEY\ will allow LiteLLM to authenticate with Groq correctly.
+- **Outcome:** File successfully updated, committed, and pushed.
