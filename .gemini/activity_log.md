@@ -60,3 +60,8 @@
 - **Attempted:** Fix decommissioned Llama 3.1 models on Groq.
 - **Hypothesis:** Groq has deprecated Llama 3.1 and 3.3 models for this tier in favor of the active openai/gpt-oss series. By switching to \openai/gpt-oss-120b\ and \openai/gpt-oss-20b\ and re-enabling \CONFIG.CUSTOM_REASONING_MODEL\, it should bypass the model_not_found errors and correctly parse reasoning tokens.
 - **Outcome:** File successfully updated, committed, and pushed.
+
+### 2026-08-21 17:49:57
+- **Attempted:** Switch PR-Agent from Groq to Gemini API.
+- **Hypothesis:** By setting \GEMINI_API_KEY\ and updating \CONFIG.MODEL\ to \gemini/gemini-2.5-flash\ and fallback to \gemini/gemma-4-31b-it\, LiteLLM will route the requests to Google AI Studio instead of Groq. Also disabled reasoning model support since these are standard models.
+- **Outcome:** File successfully updated, committed, and pushed.
