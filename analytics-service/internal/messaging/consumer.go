@@ -3,7 +3,9 @@ package messaging
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
+	"os"
 
 	"analytics-service/internal/models"
 	"analytics-service/internal/service"
@@ -74,8 +76,25 @@ func (c *Consumer) Start() error {
 		return err
 	}
 
+	// Set QoS to prevent one worker from receiving more workload than others.
+	// A prefetch count of 10 provides a balance between workload fairness and throughput.
+	err = c.ch.Qos(
+		10,    // prefetch count
+		0,     // prefetch size
+		false, // global
+	)
+	if err != nil {
+		return err
+	}
+
+	hostname, err := os.Hostname()
+	if err != nil {
+		hostname = "unknown"
+	}
+	consumerTag := fmt.Sprintf("analytics-worker-%s", hostname)
+
 	msgs, err := c.ch.Consume(
-		q.Name, "", false, false, false, false, nil,
+		q.Name, consumerTag, false, false, false, false, nil,
 	)
 	if err != nil {
 		return err
