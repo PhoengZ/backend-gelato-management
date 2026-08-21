@@ -20,23 +20,21 @@ jobs:
         id: pragent
         uses: the-pr-agent/pr-agent@main
         env:
-          # LiteLLM needs GROQ_API_KEY for groq/ prefixed models
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          # PR-Agent might still expect OPENAI_KEY to be set
-          OPENAI_KEY: ${{ secrets.GROQ_API_KEY }}
+          # LiteLLM needs GEMINI_API_KEY for gemini/ prefixed models
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          # PR-Agent might still expect OPENAI_KEY to be set in its core logic
+          OPENAI_KEY: ${{ secrets.GEMINI_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           
-          # LiteLLM routing prefix for Groq API
-          CONFIG.MODEL: "groq/openai/gpt-oss-120b"
+          # LiteLLM routing for Google AI Studio
+          CONFIG.MODEL: "gemini/gemini-2.5-flash"
           
-          # Fallback model in case of rate limits or errors
-          CONFIG.FALLBACK_MODELS: "groq/openai/gpt-oss-20b"
+          # Fallback model
+          CONFIG.FALLBACK_MODELS: "gemini/gemma-4-31b-it"
           
           # Specify max tokens for custom models not built into PR-Agent
           CONFIG.CUSTOM_MODEL_MAX_TOKENS: "65000"
-          
-          # Enable parsing for reasoning models (<think> blocks)
-          CONFIG.CUSTOM_REASONING_MODEL: "true"
+          CONFIG.CUSTOM_REASONING_MODEL: "false"
           
           # Enable automatic AI features when a PR is opened
           github_action_config.auto_review: "true"
