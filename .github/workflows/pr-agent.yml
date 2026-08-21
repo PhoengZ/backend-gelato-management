@@ -27,7 +27,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           
           # LiteLLM routing for Google AI Studio
-          CONFIG.MODEL: "gemini/gemini-2.5-flash"
+          CONFIG.MODEL: "gemini/gemini-3.6-flash"
           
           # Fallback model
           CONFIG.FALLBACK_MODELS: "gemini/gemma-4-31b-it"
@@ -35,6 +35,9 @@ jobs:
           # Specify max tokens for custom models not built into PR-Agent
           CONFIG.CUSTOM_MODEL_MAX_TOKENS: "65000"
           CONFIG.CUSTOM_REASONING_MODEL: "false"
+          
+          # Increase AI timeout because Gemma 4 31B can take a long time to respond
+          CONFIG.AI_TIMEOUT: "300"
           
           # Enable automatic AI features when a PR is opened
           github_action_config.auto_review: "true"

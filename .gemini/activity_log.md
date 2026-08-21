@@ -65,3 +65,8 @@
 - **Attempted:** Switch PR-Agent from Groq to Gemini API.
 - **Hypothesis:** By setting \GEMINI_API_KEY\ and updating \CONFIG.MODEL\ to \gemini/gemini-2.5-flash\ and fallback to \gemini/gemma-4-31b-it\, LiteLLM will route the requests to Google AI Studio instead of Groq. Also disabled reasoning model support since these are standard models.
 - **Outcome:** File successfully updated, committed, and pushed.
+
+### 2026-08-21 17:56:23
+- **Attempted:** Fix Gemini 2.5 Flash unavailability and Gemma timeout.
+- **Hypothesis:** Google AI Studio has disabled \gemini-2.5-flash\ for new users, demanding an upgrade to \gemini-3.6-flash\. Also, the \gemma-4-31b-it\ fallback timed out because PR-Agent's default timeout is 120s. Bumping it to 300s resolves this.
+- **Outcome:** File successfully updated, committed, and pushed.
