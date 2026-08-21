@@ -45,3 +45,8 @@
 - **Attempted:** Fix PR-Agent parsing failure due to \<think>\ tags.
 - **Hypothesis:** The model outputs a reasoning block (\<think>...\) before the YAML payload, which causes the YAML parser to return a string instead of a dictionary. Setting \CONFIG.CUSTOM_REASONING_MODEL: "true" should instruct PR-Agent to handle these reasoning models properly.
 - **Outcome:** File successfully updated, committed, and pushed.
+
+### 2026-08-21 17:36:25
+- **Attempted:** Switch PR-Agent to non-reasoning Groq models.
+- **Hypothesis:** By switching the base model to \groq/llama-3.3-70b-versatile\ and fallback to \groq/qwen-2.5-32b\, we prevent the Token Limit issue caused by the reasoning model's \<think>\ block.
+- **Outcome:** File successfully updated, committed, and pushed.

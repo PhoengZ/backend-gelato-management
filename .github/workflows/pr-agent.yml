@@ -27,16 +27,13 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           
           # LiteLLM routing prefix for Groq API
-          CONFIG.MODEL: "groq/qwen/qwen3.6-27b"
+          CONFIG.MODEL: "groq/llama-3.3-70b-versatile"
           
           # Fallback model in case of rate limits or errors
-          CONFIG.FALLBACK_MODELS: "openai/gpt-oss-120b"
+          CONFIG.FALLBACK_MODELS: "groq/qwen-2.5-32b"
           
           # Specify max tokens for custom models not built into PR-Agent
           CONFIG.CUSTOM_MODEL_MAX_TOKENS: "32000"
-          
-          # Enable custom reasoning model to properly parse <think> tags
-          CONFIG.CUSTOM_REASONING_MODEL: "true"
           
           # Enable automatic AI features when a PR is opened
           github_action_config.auto_review: "true"
