@@ -15,3 +15,13 @@
 - **Observed outcome**: Identified go.mod requires go >= 1.24.2 (running go 1.21.13).
 - **Root Cause**: The local go mod init used Go 1.24.2, but the Dockerfile and CI were hardcoded to Go 1.21.
 - **Resolution**: Upgraded Dockerfile and CI workflow to use Go 1.24 to match the module requirements.
+
+### 2026-08-21 16:58:31
+- **Attempted:** Create Qodo PR Agent CI/CD for GitHub Actions using Qwen model via Groq API.
+- **Hypothesis:** By creating .github/workflows/pr-agent.yml using LiteLLM configuration for Groq, it should automatically route the PR-Agent reviews to the chosen Qwen model.
+- **Outcome:** File successfully created, committed, and pushed to eature/cicd-workflows.
+
+### 2026-08-21 17:00:25
+- **Attempted:** Update PR Agent fallback model to openai/gpt-oss-120b.
+- **Hypothesis:** Updating the YAML config CONFIG.FALLBACK_MODELS ensures it falls back to this model when Groq hits rate limits.
+- **Outcome:** File successfully updated, committed, and pushed.
