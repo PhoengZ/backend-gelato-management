@@ -30,3 +30,8 @@
 - **Attempted:** Fix PR-Agent not providing suggestions and skipping synchronize event.
 - **Hypothesis:** By default, PR-Agent requires explicit flags to auto-review and handle new commits. Adding github_action_config.auto_review and handle_push_trigger to the env block resolves this.
 - **Outcome:** File successfully updated, committed, and pushed.
+
+### 2026-08-21 17:17:35
+- **Attempted:** Fix PR-Agent crash when using unknown model names.
+- **Hypothesis:** PR-Agent doesn't know the context window size of \groq/qwen/qwen3.6-27b\. Setting \CONFIG.CUSTOM_MODEL_MAX_TOKENS: "32000" will bypass this check and allow the agent to run.
+- **Outcome:** File successfully updated, committed, and pushed.
