@@ -70,3 +70,8 @@
 - **Attempted:** Fix Gemini 2.5 Flash unavailability and Gemma timeout.
 - **Hypothesis:** Google AI Studio has disabled \gemini-2.5-flash\ for new users, demanding an upgrade to \gemini-3.6-flash\. Also, the \gemma-4-31b-it\ fallback timed out because PR-Agent's default timeout is 120s. Bumping it to 300s resolves this.
 - **Outcome:** File successfully updated, committed, and pushed.
+
+### 2026-08-21 17:58:21
+- **Attempted:** Update Gemini models per user request.
+- **Hypothesis:** Switching the base model to \gemini-3.7-flash\ and fallback to \gemini-3.6-flash\ will provide a faster and more reliable fallback than Gemma 4.
+- **Outcome:** File successfully updated, committed, and pushed.
