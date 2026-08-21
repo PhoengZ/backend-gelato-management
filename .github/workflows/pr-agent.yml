@@ -35,6 +35,9 @@ jobs:
           # Specify max tokens for custom models not built into PR-Agent
           CONFIG.CUSTOM_MODEL_MAX_TOKENS: "32000"
           
+          # Enable custom reasoning model to properly parse <think> tags
+          CONFIG.CUSTOM_REASONING_MODEL: "true"
+          
           # Enable automatic AI features when a PR is opened
           github_action_config.auto_review: "true"
           github_action_config.auto_describe: "true"

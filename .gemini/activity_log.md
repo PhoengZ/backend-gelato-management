@@ -40,3 +40,8 @@
 - **Attempted:** Fix Invalid API Key error for Groq.
 - **Hypothesis:** LiteLLM expects the environment variable \GROQ_API_KEY\ for models prefixed with \groq/\, but the workflow only exported \OPENAI_KEY\. Exporting \GROQ_API_KEY\ will allow LiteLLM to authenticate with Groq correctly.
 - **Outcome:** File successfully updated, committed, and pushed.
+
+### 2026-08-21 17:30:43
+- **Attempted:** Fix PR-Agent parsing failure due to \<think>\ tags.
+- **Hypothesis:** The model outputs a reasoning block (\<think>...\) before the YAML payload, which causes the YAML parser to return a string instead of a dictionary. Setting \CONFIG.CUSTOM_REASONING_MODEL: "true" should instruct PR-Agent to handle these reasoning models properly.
+- **Outcome:** File successfully updated, committed, and pushed.
