@@ -1,0 +1,31 @@
+name: PR-Agent
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+  issue_comment:
+    types: [created, edited]
+
+permissions:
+  issues: write
+  pull-requests: write
+  contents: write
+
+jobs:
+  pr_agent_job:
+    if: ${{ github.event.sender.type != 'Bot' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: PR Agent action step
+        id: pragent
+        uses: the-pr-agent/pr-agent@main
+        env:
+          # Use GROQ_API_KEY secret for Groq API
+          OPENAI_KEY: ${{ secrets.GROQ_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
+          # LiteLLM routing prefix for Groq API
+          CONFIG.MODEL: "groq/qwen/qwen3.6-27b"
+          
+          # Optional fallback model in case of rate limits or errors
+          # CONFIG.FALLBACK_MODELS: "groq/llama-3.1-8b-instant"
