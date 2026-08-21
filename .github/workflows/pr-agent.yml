@@ -27,5 +27,5 @@ jobs:
           # LiteLLM routing prefix for Groq API
           CONFIG.MODEL: "groq/qwen/qwen3.6-27b"
           
-          # Optional fallback model in case of rate limits or errors
-          # CONFIG.FALLBACK_MODELS: "groq/llama-3.1-8b-instant"
+          # Fallback model in case of rate limits or errors
+          CONFIG.FALLBACK_MODELS: "openai/gpt-oss-120b"
