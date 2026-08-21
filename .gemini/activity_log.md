@@ -25,3 +25,8 @@
 - **Attempted:** Update PR Agent fallback model to openai/gpt-oss-120b.
 - **Hypothesis:** Updating the YAML config CONFIG.FALLBACK_MODELS ensures it falls back to this model when Groq hits rate limits.
 - **Outcome:** File successfully updated, committed, and pushed.
+
+### 2026-08-21 17:13:02
+- **Attempted:** Fix PR-Agent not providing suggestions and skipping synchronize event.
+- **Hypothesis:** By default, PR-Agent requires explicit flags to auto-review and handle new commits. Adding github_action_config.auto_review and handle_push_trigger to the env block resolves this.
+- **Outcome:** File successfully updated, committed, and pushed.

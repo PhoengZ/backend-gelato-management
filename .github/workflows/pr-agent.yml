@@ -29,3 +29,12 @@ jobs:
           
           # Fallback model in case of rate limits or errors
           CONFIG.FALLBACK_MODELS: "openai/gpt-oss-120b"
+          
+          # Enable automatic AI features when a PR is opened
+          github_action_config.auto_review: "true"
+          github_action_config.auto_describe: "true"
+          github_action_config.auto_improve: "true"
+          
+          # Enable reviewing again when new commits are pushed (synchronize event)
+          github_action_config.handle_push_trigger: "true"
+          github_action_config.push_commands: '["review"]'
