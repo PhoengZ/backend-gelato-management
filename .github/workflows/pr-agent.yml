@@ -27,10 +27,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           
           # LiteLLM routing prefix for Groq API
-          CONFIG.MODEL: "groq/llama-3.3-70b-versatile"
+          CONFIG.MODEL: "groq/llama-3.1-70b-versatile"
           
           # Fallback model in case of rate limits or errors
-          CONFIG.FALLBACK_MODELS: "groq/qwen-2.5-32b"
+          CONFIG.FALLBACK_MODELS: "groq/llama-3.1-8b-instant"
           
           # Specify max tokens for custom models not built into PR-Agent
           CONFIG.CUSTOM_MODEL_MAX_TOKENS: "32000"

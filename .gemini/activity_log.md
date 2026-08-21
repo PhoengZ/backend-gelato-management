@@ -50,3 +50,8 @@
 - **Attempted:** Switch PR-Agent to non-reasoning Groq models.
 - **Hypothesis:** By switching the base model to \groq/llama-3.3-70b-versatile\ and fallback to \groq/qwen-2.5-32b\, we prevent the Token Limit issue caused by the reasoning model's \<think>\ block.
 - **Outcome:** File successfully updated, committed, and pushed.
+
+### 2026-08-21 17:39:47
+- **Attempted:** Fix Model Not Found / Decommissioned errors on Groq.
+- **Hypothesis:** Groq has decommissioned \qwen-2.5-32b\ and \llama-3.3-70b-versatile\ may not be accessible to this API tier or is named differently. Switching to the standard, stable \llama-3.1-70b-versatile\ and \llama-3.1-8b-instant\ should resolve the API resolution errors.
+- **Outcome:** File successfully updated, committed, and pushed.
