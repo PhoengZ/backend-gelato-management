@@ -37,7 +37,7 @@ services:
       dockerfile: Dockerfile
     container_name: analytics-service
     env_file:
-      - ../.env.analytics
+      - ../../analytics-service/.env
     networks:
       - gelato_network
     depends_on:
@@ -47,11 +47,9 @@ services:
         condition: service_started
     restart: unless-stopped
 
-
 networks:
   gelato_network:
     driver: bridge
-    internal: true
 
 volumes:
   rabbitmq_data:

@@ -3,8 +3,14 @@
   "rabbitmq_version": "3.13",
   "users": [
     {
+      "name": "admin",
+      "password_hash": "G7pMe8NeRjPU5OZCBPup8XBDJR9giurhaf12xMPfa3K6avxr",
+      "hashing_algorithm": "rabbit_password_hashing_sha256",
+      "tags": ["administrator"]
+    },
+    {
       "name": "analytics_service",
-      "password_hash": "5eLyU8+74FXs6jTGzWS7T8mDtTJw4GHumkrHj51lNQDixOhS",
+      "password_hash": "DgJ0pWHy0mhg22+XSmEtVpLSyASxJsrfwHrzTt5LW3udo7wo",
       "hashing_algorithm": "rabbit_password_hashing_sha256",
       "tags": []
     }
@@ -19,11 +25,18 @@
   ],
   "permissions": [
     {
+      "user": "admin",
+      "vhost": "/",
+      "configure": ".*",
+      "write": ".*",
+      "read": ".*"
+    },
+    {
       "user": "analytics_service",
       "vhost": "analytics_vhost",
-      "configure": "^analytics_queue$",
-      "write": "^analytics_queue$",
-      "read": "^analytics_queue$"
+      "configure": ".*",
+      "write": ".*",
+      "read": ".*"
     }
   ],
   "policies": [],
