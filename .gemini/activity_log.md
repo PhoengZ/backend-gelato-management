@@ -55,3 +55,8 @@
 - **Attempted:** Fix Model Not Found / Decommissioned errors on Groq.
 - **Hypothesis:** Groq has decommissioned \qwen-2.5-32b\ and \llama-3.3-70b-versatile\ may not be accessible to this API tier or is named differently. Switching to the standard, stable \llama-3.1-70b-versatile\ and \llama-3.1-8b-instant\ should resolve the API resolution errors.
 - **Outcome:** File successfully updated, committed, and pushed.
+
+### 2026-08-21 17:45:25
+- **Attempted:** Fix decommissioned Llama 3.1 models on Groq.
+- **Hypothesis:** Groq has deprecated Llama 3.1 and 3.3 models for this tier in favor of the active openai/gpt-oss series. By switching to \openai/gpt-oss-120b\ and \openai/gpt-oss-20b\ and re-enabling \CONFIG.CUSTOM_REASONING_MODEL\, it should bypass the model_not_found errors and correctly parse reasoning tokens.
+- **Outcome:** File successfully updated, committed, and pushed.
