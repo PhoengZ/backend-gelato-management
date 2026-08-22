@@ -198,17 +198,17 @@ The application requires the following environment variables. Ensure these are s
 # Database Configurations
 # ==========================================
 # [Required] Connection string for the MongoDB instance
-MONGO_URI=mongodb://root:password@localhost:27017
+MONGO_URI=mongodb://<username>:<password>@localhost:27017
 
 # ==========================================
 # Message Broker Configurations
 # ==========================================
 # [Required] Connection string for RabbitMQ server
-RABBITMQ_URL=amqp://guest:guest@localhost:5672/
+RABBITMQ_URL=amqp://<username>:<password>@localhost:5672/
 
 # ==========================================
 # Application Configurations
 # ==========================================
 # [Optional] Port for the Fiber HTTP Server (Default: 3000)
-PORT=8080
+PORT=3000
 ```

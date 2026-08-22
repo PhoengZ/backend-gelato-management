@@ -2,6 +2,7 @@ package tests
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -9,18 +10,25 @@ import (
 	"analytics-service/internal/service"
 )
 
-// MockRepository implements repository.AnalyticsRepository
+// MockRepository implements repository.AnalyticsRepository with
+// thread-safe access via sync.RWMutex and a Saved channel for
+// signaling test waiters when Save completes.
 type MockRepository struct {
+	mu      sync.RWMutex
 	Records map[string]*models.Analytics
+	Saved   chan string // signals the date key on every Save
 }
 
 func NewMockRepository() *MockRepository {
 	return &MockRepository{
 		Records: make(map[string]*models.Analytics),
+		Saved:   make(chan string, 100), // buffered to avoid blocking in unit tests
 	}
 }
 
 func (m *MockRepository) FindByDate(ctx context.Context, date string) (*models.Analytics, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	if record, exists := m.Records[date]; exists {
 		// return a copy so service modifications don't instantly apply without Save
 		cp := *record
@@ -30,11 +38,20 @@ func (m *MockRepository) FindByDate(ctx context.Context, date string) (*models.A
 }
 
 func (m *MockRepository) Save(ctx context.Context, analytics *models.Analytics) error {
+	m.mu.Lock()
 	m.Records[analytics.Date] = analytics
+	m.mu.Unlock()
+	// Non-blocking send to signal save completion
+	select {
+	case m.Saved <- analytics.Date:
+	default:
+	}
 	return nil
 }
 
 func (m *MockRepository) FindByDateRange(ctx context.Context, startDate, endDate string) ([]models.Analytics, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	var result []models.Analytics
 	for date, record := range m.Records {
 		if date >= startDate && date <= endDate {
@@ -42,6 +59,17 @@ func (m *MockRepository) FindByDateRange(ctx context.Context, startDate, endDate
 		}
 	}
 	return result, nil
+}
+
+// Get returns a thread-safe copy of the record for the given date.
+func (m *MockRepository) Get(date string) *models.Analytics {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if record, exists := m.Records[date]; exists {
+		cp := *record
+		return &cp
+	}
+	return nil
 }
 
 func TestProcessOrderSuccess(t *testing.T) {
@@ -118,7 +146,7 @@ func TestProcessInventoryWaste(t *testing.T) {
 	}
 
 	record := mockRepo.Records["2026-08-20"]
-	
+
 	if record.WasteStats.TotalWastePortions != 10 {
 		t.Errorf("Expected TotalWastePortions 10, got %d", record.WasteStats.TotalWastePortions)
 	}

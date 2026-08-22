@@ -40,7 +40,14 @@ func (r *analyticsRepository) FindByDate(ctx context.Context, date string) (*mod
 
 func (r *analyticsRepository) Save(ctx context.Context, analytics *models.Analytics) error {
 	filter := bson.M{"date": analytics.Date}
-	update := bson.M{"$set": analytics}
+	// Exclude _id from $set to avoid modifying MongoDB's immutable field
+	update := bson.M{"$set": bson.M{
+		"date":         analytics.Date,
+		"financials":   analytics.Financials,
+		"operations":   analytics.Operations,
+		"waste_stats":  analytics.WasteStats,
+		"flavor_stats": analytics.FlavorStats,
+	}}
 	opts := options.Update().SetUpsert(true)
 
 	_, err := r.collection.UpdateOne(ctx, filter, update, opts)

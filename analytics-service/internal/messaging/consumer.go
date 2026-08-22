@@ -3,6 +3,7 @@ package messaging
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -110,36 +111,55 @@ func (c *Consumer) Start() error {
 	return nil
 }
 
+// isPermanentError returns true for errors that should not be retried
+// (e.g., validation failures). Retryable errors (DB down, network issues)
+// will be requeued for later processing.
+func isPermanentError(err error) bool {
+	return errors.Is(err, service.ErrInvalidDate) || errors.Is(err, service.ErrInvalidPeriod)
+}
+
 func (c *Consumer) processMessage(d amqp.Delivery) {
 	ctx := context.Background()
 	switch d.RoutingKey {
 	case "order.success":
 		var msg models.OrderSuccessMessage
-		if err := json.Unmarshal(d.Body, &msg); err == nil {
-			err = c.service.ProcessOrderSuccess(ctx, msg)
-			if err != nil {
-				log.Println("Error processing order success:", err)
-			} else {
-				d.Ack(false)
-			}
-		} else {
-			log.Println("Error unmarshaling order success:", err)
+		if err := json.Unmarshal(d.Body, &msg); err != nil {
+			log.Printf("Permanent error unmarshaling order success (nacking without requeue): %v", err)
+			d.Nack(false, false)
+			return
 		}
+		if err := c.service.ProcessOrderSuccess(ctx, msg); err != nil {
+			log.Printf("Error processing order success: %v", err)
+			if isPermanentError(err) {
+				d.Nack(false, false) // don't requeue permanent errors
+			} else {
+				d.Nack(false, true) // requeue retryable errors
+			}
+			return
+		}
+		d.Ack(false)
 
 	case "inventory.waste":
 		var msg models.InventoryWasteMessage
-		if err := json.Unmarshal(d.Body, &msg); err == nil {
-			err = c.service.ProcessInventoryWaste(ctx, msg)
-			if err != nil {
-				log.Println("Error processing inventory waste:", err)
-			} else {
-				d.Ack(false)
-			}
-		} else {
-			log.Println("Error unmarshaling inventory waste:", err)
+		if err := json.Unmarshal(d.Body, &msg); err != nil {
+			log.Printf("Permanent error unmarshaling inventory waste (nacking without requeue): %v", err)
+			d.Nack(false, false)
+			return
 		}
+		if err := c.service.ProcessInventoryWaste(ctx, msg); err != nil {
+			log.Printf("Error processing inventory waste: %v", err)
+			if isPermanentError(err) {
+				d.Nack(false, false)
+			} else {
+				d.Nack(false, true)
+			}
+			return
+		}
+		d.Ack(false)
+
 	default:
-		log.Println("Unknown routing key:", d.RoutingKey)
+		log.Printf("Unknown routing key: %s (nacking without requeue)", d.RoutingKey)
+		d.Nack(false, false)
 	}
 }
 

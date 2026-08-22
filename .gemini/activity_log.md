@@ -86,3 +86,19 @@
 - **Hypothesis:** Switching the base model to \gemini-3.7-flash\ and fallback to \gemini-3.6-flash\ will provide a faster and more reliable fallback than Gemma 4.
 - **Outcome:** File successfully updated, committed, and pushed.
 
+### 2026-08-22 10:33:00
+- **Attempted:** Address all PR #2 review comments (CodeRabbit, CI failures).
+- **Changes Applied:**
+  1. Fix `gofmt -s` formatting in `tests/service_test.go` (CI failure root cause).
+  2. Gate hardcoded credentials behind `GO_ENV` in `config.go` — local dev keeps fallbacks, production crashes loudly on missing secrets.
+  3. Fix README PORT from 8080 to 3000 + replace hardcoded credentials with `<username>:<password>` placeholders.
+  4. Add `sync.RWMutex` + buffered `Saved` channel to `MockRepository` for race-safe concurrent access.
+  5. Replace `time.Sleep(1s)` in integration test with channel-based signaling (zero CPU waste, race-free).
+  6. Replace hardcoded password in `generate-password.py` with `sys.argv` + `getpass` fallback.
+  7. Exclude `_id` from `$set` in `analytics_repo.go` Save method (3-line fix instead of full `$inc` rewrite).
+  8. Add `ErrInvalidPeriod` sentinel error — reject unknown period values with 400 instead of silent fallback.
+  9. Add date validation in `getOrCreateAnalytics` + fix consumer to Nack poison messages without requeue.
+  10. Recalculate `WasteRate` in `ProcessOrderSuccess` after `ScoopsSold` changes.
+  11. Add error logging in analytics handler before 500 responses.
+  12. Pin MongoDB image from `mongo:latest` to `mongo:7.0` in `compose.yml`.
+- **Outcome:** All tests pass. `gofmt -s -l .` returns clean. Build succeeds.

@@ -2,10 +2,17 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"analytics-service/internal/models"
 	"analytics-service/internal/repository"
+)
+
+// Sentinel errors for validation
+var (
+	ErrInvalidPeriod = fmt.Errorf("unsupported analytics period")
+	ErrInvalidDate   = fmt.Errorf("invalid or missing date")
 )
 
 type AnalyticsService interface {
@@ -23,6 +30,13 @@ func NewAnalyticsService(repo repository.AnalyticsRepository) AnalyticsService {
 }
 
 func (s *analyticsService) getOrCreateAnalytics(ctx context.Context, date string) (*models.Analytics, error) {
+	if date == "" {
+		return nil, ErrInvalidDate
+	}
+	if _, err := time.Parse("2006-01-02", date); err != nil {
+		return nil, fmt.Errorf("%w: %s", ErrInvalidDate, date)
+	}
+
 	record, err := s.repo.FindByDate(ctx, date)
 	if err != nil {
 		return nil, err
@@ -69,6 +83,11 @@ func (s *analyticsService) ProcessOrderSuccess(ctx context.Context, msg models.O
 				ScoopsSold: item.Qty,
 			})
 		}
+	}
+
+	// Recalculate WasteRate after ScoopsSold changes
+	if record.Operations.ScoopsSold > 0 {
+		record.Operations.WasteRate = float64(record.WasteStats.TotalWastePortions) / float64(record.Operations.ScoopsSold)
 	}
 
 	return s.repo.Save(ctx, record)
@@ -138,7 +157,7 @@ func (s *analyticsService) GetAnalytics(ctx context.Context, period string) ([]m
 	case "6m":
 		startDate = endDate.AddDate(0, -6, 0)
 	default:
-		startDate = endDate.AddDate(0, 0, -1) // default to 1d
+		return nil, fmt.Errorf("%w: %s", ErrInvalidPeriod, period)
 	}
 
 	startStr := startDate.Format("2006-01-02")

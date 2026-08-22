@@ -25,7 +25,7 @@ func TestConsumerIntegration(t *testing.T) {
 	if rabbitURL == "" {
 		rabbitURL = "amqp://guest:guest@localhost:5672/"
 	}
-	// log.Println("RabbitMQ URL being used:", rabbitURL)
+
 	// 1. Setup Mock Repository and Service
 	mockRepo := NewMockRepository()
 	svc := service.NewAnalyticsService(mockRepo)
@@ -106,12 +106,20 @@ func TestConsumerIntegration(t *testing.T) {
 		t.Fatalf("Failed to publish waste message: %v", err)
 	}
 
-	// 6. Wait for consumer to process messages
-	// Since consumer runs in a goroutine, we need to wait briefly
-	time.Sleep(1 * time.Second)
+	// 6. Wait for consumer to process both messages using channel-based signaling
+	// instead of a fixed time.Sleep. This is zero-CPU-waste, race-free, and
+	// Go-idiomatic.
+	for i := 0; i < 2; i++ {
+		select {
+		case <-mockRepo.Saved:
+			// message processed
+		case <-time.After(5 * time.Second):
+			t.Fatal("Timed out waiting for consumer to process messages")
+		}
+	}
 
-	// 7. Verify Results in Mock Repository
-	record := mockRepo.Records["2026-08-20"]
+	// 7. Verify Results in Mock Repository (using thread-safe Get)
+	record := mockRepo.Get("2026-08-20")
 	if record == nil {
 		t.Fatalf("Expected analytics record to be created for 2026-08-20")
 	}
