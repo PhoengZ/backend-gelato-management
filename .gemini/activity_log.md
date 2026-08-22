@@ -108,3 +108,11 @@
 - **Changes Applied:**
   1. Added `conn.Close()` in `NewConsumer` if `conn.Channel()` fails, preventing TCP connection and broker-side connection leaks.
 - **Outcome:** Fixed, committed, and pushed.
+
+### 2026-08-22 11:55:00
+- **Attempted:** Address remaining unresolved PR review comments and fix failing Trivy CI scan.
+- **Changes Applied:**
+  1. Updated Go toolchain from `1.24.2` to `1.25.0` in `go.mod`, `Dockerfile`, and GitHub Actions workflow.
+  2. Upgraded `golang.org/x/crypto` to the latest version to resolve `CVE-2026-56862`.
+  3. Implemented graceful AMQP connection shutdown observation in `consumer.go` using `conn.NotifyClose`.
+- **Outcome:** All PR comments resolved. CVSS vulnerability mitigated.

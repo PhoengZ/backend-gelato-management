@@ -102,9 +102,21 @@ func (c *Consumer) Start() error {
 		return err
 	}
 
+	notifyClose := c.conn.NotifyClose(make(chan *amqp.Error, 1))
+
 	go func() {
-		for d := range msgs {
-			c.processMessage(d)
+		for {
+			select {
+			case d, ok := <-msgs:
+				if !ok {
+					log.Printf("RabbitMQ message channel closed unexpectedly. Terminating process to trigger orchestrator restart.")
+					os.Exit(1)
+				}
+				c.processMessage(d)
+			case err := <-notifyClose:
+				log.Printf("RabbitMQ connection closed: %v. Terminating process to trigger orchestrator restart.", err)
+				os.Exit(1)
+			}
 		}
 	}()
 
