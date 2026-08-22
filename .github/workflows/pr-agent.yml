@@ -46,4 +46,9 @@ jobs:
           
           # Enable reviewing again when new commits are pushed (synchronize event)
           github_action_config.handle_push_trigger: "true"
-          github_action_config.push_commands: '["review"]'
+          github_action_config.push_commands: '["review -i"]'
+          
+          # Incremental review thresholds
+          pr_reviewer.require_all_thresholds_for_incremental_review: "false"
+          pr_reviewer.minimal_commits_for_incremental_review: "0"
+          pr_reviewer.minimal_minutes_for_incremental_review: "0"
