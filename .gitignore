@@ -6,3 +6,5 @@
 # Docker / Volumes
 data/
 docker-compose.override.yml
+*.exe
+analytics-service/main

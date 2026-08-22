@@ -1,3 +1,13 @@
+# Activity Log
+
+## 2026-08-21
+- **Task:** Separate Docker Compose files for dev and production.
+- **Attempt/Action:** 
+  - Analyzed `infra/docker/compose.yml` and `analytics-service/Dockerfile`.
+  - Created `compose.yml` for production with no host port mappings (services communicate via `gelato_network`).
+  - Created `compose.dev.yml` to override and expose ports for local dev/integration testing (`5672`, `15672`, `27017`, `8080`).
+  - User resolved the port mismatch issue by setting `PORT=8080` in their `.env` files.
+- **Outcome:** Successfully created isolated Compose environments for dev and production workflows.
 
 ## Attempt: Implement CI/CD Workflows for Monorepo
 - **Attempted**: Created new branch feature/cicd-workflows, added github action workflows (template and analytics-service).
@@ -75,3 +85,38 @@
 - **Attempted:** Update Gemini models per user request.
 - **Hypothesis:** Switching the base model to \gemini-3.7-flash\ and fallback to \gemini-3.6-flash\ will provide a faster and more reliable fallback than Gemma 4.
 - **Outcome:** File successfully updated, committed, and pushed.
+
+### 2026-08-22 10:33:00
+- **Attempted:** Address all PR #2 review comments (CodeRabbit, CI failures).
+- **Changes Applied:**
+  1. Fix `gofmt -s` formatting in `tests/service_test.go` (CI failure root cause).
+  2. Gate hardcoded credentials behind `GO_ENV` in `config.go` — local dev keeps fallbacks, production crashes loudly on missing secrets.
+  3. Fix README PORT from 8080 to 3000 + replace hardcoded credentials with `<username>:<password>` placeholders.
+  4. Add `sync.RWMutex` + buffered `Saved` channel to `MockRepository` for race-safe concurrent access.
+  5. Replace `time.Sleep(1s)` in integration test with channel-based signaling (zero CPU waste, race-free).
+  6. Replace hardcoded password in `generate-password.py` with `sys.argv` + `getpass` fallback.
+  7. Exclude `_id` from `$set` in `analytics_repo.go` Save method (3-line fix instead of full `$inc` rewrite).
+  8. Add `ErrInvalidPeriod` sentinel error — reject unknown period values with 400 instead of silent fallback.
+  9. Add date validation in `getOrCreateAnalytics` + fix consumer to Nack poison messages without requeue.
+  10. Recalculate `WasteRate` in `ProcessOrderSuccess` after `ScoopsSold` changes.
+  11. Add error logging in analytics handler before 500 responses.
+  12. Pin MongoDB image from `mongo:latest` to `mongo:7.0` in `compose.yml`.
+- **Outcome:** All tests pass. `gofmt -s -l .` returns clean. Build succeeds.
+
+### 2026-08-22 11:28:00
+- **Attempted:** Address missed PR review comment regarding connection leak in RabbitMQ consumer.
+- **Changes Applied:**
+  1. Added `conn.Close()` in `NewConsumer` if `conn.Channel()` fails, preventing TCP connection and broker-side connection leaks.
+- **Outcome:** Fixed, committed, and pushed.
+
+### 2026-08-22 11:55:00
+- **Attempted:** Address remaining unresolved PR review comments and fix failing Trivy CI scan.
+- **Changes Applied:**
+  1. Updated Go toolchain from `1.24.2` to `1.25.0` in `go.mod`, `Dockerfile`, and GitHub Actions workflow.
+  2. Upgraded `golang.org/x/crypto` to the latest version to resolve `CVE-2026-56862`.
+  3. Implemented graceful AMQP connection shutdown observation in `consumer.go` using `conn.NotifyClose`.
+### 2026-08-22 12:05:00
+- **Attempted:** Fix failing Trivy CI scan caused by `musl` vulnerability in Alpine base image.
+- **Changes Applied:**
+  1. Updated `Dockerfile` final stage from `alpine:3.19` to `alpine:3.20` to resolve `CVE-2026-40200` in the `musl` and `musl-utils` packages.
+- **Outcome:** Fixed, committed, and pushed.
