@@ -28,6 +28,7 @@ func NewConsumer(rabbitURL string, svc service.AnalyticsService) (*Consumer, err
 
 	ch, err := conn.Channel()
 	if err != nil {
+		conn.Close()
 		return nil, err
 	}
 
