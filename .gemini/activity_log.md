@@ -115,4 +115,8 @@
   1. Updated Go toolchain from `1.24.2` to `1.25.0` in `go.mod`, `Dockerfile`, and GitHub Actions workflow.
   2. Upgraded `golang.org/x/crypto` to the latest version to resolve `CVE-2026-56862`.
   3. Implemented graceful AMQP connection shutdown observation in `consumer.go` using `conn.NotifyClose`.
-- **Outcome:** All PR comments resolved. CVSS vulnerability mitigated.
+### 2026-08-22 12:05:00
+- **Attempted:** Fix failing Trivy CI scan caused by `musl` vulnerability in Alpine base image.
+- **Changes Applied:**
+  1. Updated `Dockerfile` final stage from `alpine:3.19` to `alpine:3.20` to resolve `CVE-2026-40200` in the `musl` and `musl-utils` packages.
+- **Outcome:** Fixed, committed, and pushed.
