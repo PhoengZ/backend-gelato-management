@@ -1,0 +1,49 @@
+name: PR-Agent
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+  issue_comment:
+    types: [created, edited]
+
+permissions:
+  issues: write
+  pull-requests: write
+  contents: write
+
+jobs:
+  pr_agent_job:
+    if: ${{ github.event.sender.type != 'Bot' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: PR Agent action step
+        id: pragent
+        uses: the-pr-agent/pr-agent@main
+        env:
+          # LiteLLM needs GEMINI_API_KEY for gemini/ prefixed models
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          # PR-Agent might still expect OPENAI_KEY to be set in its core logic
+          OPENAI_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
+          # LiteLLM routing for Google AI Studio
+          CONFIG.MODEL: "gemini/gemini-3.7-flash"
+          
+          # Fallback model
+          CONFIG.FALLBACK_MODELS: "gemini/gemini-3.6-flash"
+          
+          # Specify max tokens for custom models not built into PR-Agent
+          CONFIG.CUSTOM_MODEL_MAX_TOKENS: "65000"
+          CONFIG.CUSTOM_REASONING_MODEL: "false"
+          
+          # Increase AI timeout because Gemma 4 31B can take a long time to respond
+          CONFIG.AI_TIMEOUT: "300"
+          
+          # Enable automatic AI features when a PR is opened
+          github_action_config.auto_review: "true"
+          github_action_config.auto_describe: "true"
+          github_action_config.auto_improve: "true"
+          
+          # Enable reviewing again when new commits are pushed (synchronize event)
+          github_action_config.handle_push_trigger: "true"
+          github_action_config.push_commands: '["review"]'

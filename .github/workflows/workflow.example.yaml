@@ -1,0 +1,70 @@
+name: Example Microservice CI/CD
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - 'example-service/**'
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - 'example-service/**'
+
+jobs:
+  security-and-quality:
+    name: Security Scan, Code Quality, and Tests
+    runs-on: ubuntu-latest
+    
+    # Define working directory for steps that need it
+    defaults:
+      run:
+        working-directory: ./example-service
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Required for TruffleHog to scan full history
+
+      - name: Secret Scanning with TruffleHog
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.repository.default_branch }}
+          head: HEAD
+          extra_args: --debug --only-verified
+
+      - name: Setup Language/Environment
+        # Add your language setup here (e.g., actions/setup-node, actions/setup-go)
+        run: echo "Setting up environment..."
+
+      - name: Code Quality Checking
+        # Add your code quality/linting step here
+        run: echo "Running code quality checks..."
+
+      - name: Run Tests
+        # Add test execution commands here (e.g., in the tests folder)
+        run: echo "Running tests..."
+
+  build-and-scan-image:
+    name: Build Docker Image and Trivy Scan
+    runs-on: ubuntu-latest
+    needs: security-and-quality
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build an image from Dockerfile
+        run: |
+          docker build -t example-service:${{ github.sha }} ./example-service
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'example-service:${{ github.sha }}'
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'

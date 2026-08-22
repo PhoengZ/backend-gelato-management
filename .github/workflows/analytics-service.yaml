@@ -1,0 +1,76 @@
+name: Analytics Service CI/CD
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - 'analytics-service/**'
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - 'analytics-service/**'
+
+jobs:
+  code-quality-and-tests:
+    name: Code Quality and Tests
+    runs-on: ubuntu-latest
+    
+    defaults:
+      run:
+        working-directory: ./analytics-service
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Secret Scanning with TruffleHog
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.repository.default_branch }}
+          head: HEAD
+          extra_args: --debug --only-verified
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x' # Adjust version as needed for the project
+
+      - name: Verify Dependencies
+        run: go mod verify
+
+      - name: Code Formatting Check
+        run: |
+          if [ "$(gofmt -s -l . | wc -l)" -gt 0 ]; then
+            echo "The following files are not formatted correctly:"
+            gofmt -s -l .
+            exit 1
+          fi
+
+      - name: Run Tests
+        run: go test -v ./tests/...
+        
+  build-and-scan-image:
+    name: Build Docker Image and Trivy Scan
+    runs-on: ubuntu-latest
+    needs: code-quality-and-tests
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build an image from Dockerfile
+        run: |
+          docker build -t analytics-service:${{ github.sha }} ./analytics-service
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'analytics-service:${{ github.sha }}'
+          format: 'table'
+          exit-code: '1' # Fails the pipeline if CRITICAL/HIGH vulnerabilities are found
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
