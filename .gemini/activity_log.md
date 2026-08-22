@@ -102,3 +102,9 @@
   11. Add error logging in analytics handler before 500 responses.
   12. Pin MongoDB image from `mongo:latest` to `mongo:7.0` in `compose.yml`.
 - **Outcome:** All tests pass. `gofmt -s -l .` returns clean. Build succeeds.
+
+### 2026-08-22 11:28:00
+- **Attempted:** Address missed PR review comment regarding connection leak in RabbitMQ consumer.
+- **Changes Applied:**
+  1. Added `conn.Close()` in `NewConsumer` if `conn.Channel()` fails, preventing TCP connection and broker-side connection leaks.
+- **Outcome:** Fixed, committed, and pushed.
