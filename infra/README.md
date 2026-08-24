@@ -55,6 +55,15 @@ Add your new service's vhost to the `vhosts` array:
 
 **2. Create a User**
 Add a user for your service into the `users` array. Note that passwords must be hashed securely using `rabbit_password_hashing_sha256`. 
+
+> **How to generate the password hash:**
+> Start the infrastructure and use the RabbitMQ container to hash your plain-text password:
+> ```bash
+> docker compose up -d
+> docker exec -it rabbitmq hash_password <your_password>
+> ```
+> Use the generated output as your `password_hash`.
+
 ```json
 "users": [
   {
