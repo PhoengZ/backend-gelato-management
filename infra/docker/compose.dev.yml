@@ -7,7 +7,7 @@ services:
       - "5672:5672"     # AMQP
       - "15672:15672"   # Management UI
 
-  mongodb:
+  analytics-mongodb:
     ports:
       - "27017:27017"
 
