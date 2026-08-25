@@ -131,3 +131,8 @@
 - **Attempted:** Setup analytics-service .env and .env.example files for local docker-compose environment based on definitions.json and compose.yml.
 - **Hypothesis:** By creating standard .env files, developers can run the analytics service locally with proper DB and RabbitMQ connections. Added `password123` as requested.
 - **Outcome:** Branch feature/setup-analytics-env created. .env and .env.example generated and .env.example committed (as .env is gitignored).
+
+### 2026-08-25 17:10:00
+- **Attempted:** Restrict `analytics_service` RabbitMQ permissions in `definitions.json`.
+- **Hypothesis:** By applying the regex `^(order|inventory|analytics_queue)$` to `configure`, `write`, and `read`, we enforce the Principle of Least Privilege so the service can only access its own resources.
+- **Outcome:** Definitions updated, container restarted, and integration tests passed successfully.

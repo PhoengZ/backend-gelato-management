@@ -10,7 +10,7 @@
     },
     {
       "name": "analytics_service",
-      "password_hash": "DgJ0pWHy0mhg22+XSmEtVpLSyASxJsrfwHrzTt5LW3udo7wo",
+      "password_hash": "3CTkKSDoQc15wNTdaum2GM2GEU5oE2pXi1QQiX5FXSFhJr2I",
       "hashing_algorithm": "rabbit_password_hashing_sha256",
       "tags": []
     }
@@ -34,9 +34,9 @@
     {
       "user": "analytics_service",
       "vhost": "analytics_vhost",
-      "configure": ".*",
-      "write": ".*",
-      "read": ".*"
+      "configure": "^(order|inventory|analytics_queue)$",
+      "write": "^(order|inventory|analytics_queue)$",
+      "read": "^(order|inventory|analytics_queue)$"
     }
   ],
   "policies": [],
