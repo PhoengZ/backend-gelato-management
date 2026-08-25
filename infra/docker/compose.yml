@@ -20,15 +20,15 @@ services:
       timeout: 10s
       retries: 5
 
-  mongodb:
+  analytics-mongodb:
     image: mongo:7.0
-    container_name: mongodb
+    container_name: analytics-mongodb
     env_file:
       - ../.env
     networks:
       - gelato_network
     volumes:
-      - mongodb_data:/data/db
+      - analytics_mongodb_data:/data/db
     restart: unless-stopped
 
   analytics-service:
@@ -41,7 +41,7 @@ services:
     depends_on:
       rabbitmq:
         condition: service_healthy
-      mongodb:
+      analytics-mongodb:
         condition: service_started
     restart: unless-stopped
 
@@ -51,4 +51,4 @@ networks:
 
 volumes:
   rabbitmq_data:
-  mongodb_data:
+  analytics_mongodb_data:

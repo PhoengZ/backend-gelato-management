@@ -146,3 +146,8 @@
 - **Attempted:** Implement MongoDB Integration Test (`analytics_repo_integration_test.go`).
 - **Hypothesis:** By connecting directly to the MongoDB container on `localhost:27017`, we can verify that the Data Access Layer (Repository) correctly parses and saves BSON documents.
 - **Outcome:** Test created, `.env.test` Mongo URI fixed to use `localhost`, and tests passed successfully.
+
+### 2026-08-25 17:56:00
+- **Attempted:** Rename `mongodb` service and container to `analytics-mongodb`.
+- **Hypothesis:** Updating the container name prevents collisions. Required updating `compose.yml`, `compose.dev.yml`, and `MONGO_URI` in `.env` and `.env.example`.
+- **Outcome:** Renamed successfully and restarted containers. (Note: Integration tests may intermittently timeout if the running `analytics-service` Docker container "steals" the test messages from RabbitMQ before the local test runner can consume them).
