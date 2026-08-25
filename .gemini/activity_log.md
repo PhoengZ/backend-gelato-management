@@ -136,3 +136,8 @@
 - **Attempted:** Restrict `analytics_service` RabbitMQ permissions in `definitions.json`.
 - **Hypothesis:** By applying the regex `^(order|inventory|analytics_queue)$` to `configure`, `write`, and `read`, we enforce the Principle of Least Privilege so the service can only access its own resources.
 - **Outcome:** Definitions updated, container restarted, and integration tests passed successfully.
+
+### 2026-08-25 17:25:00
+- **Attempted:** Update `infra/README.md` and `analytics-service/README.md`.
+- **Hypothesis:** Documenting the dev compose startup command and testing commands will help standardizing local development. Documenting the Docker build/push workflow ensures production compose remains clean.
+- **Outcome:** Both READMEs appended with testing instructions and the new service SOP.
