@@ -94,3 +94,52 @@ Once the container restarts and definitions are applied, the resulting URI you w
 `amqp://your_service_user:actual_unhashed_password@rabbitmq:5672/your_new_vhost`
 
 > **Note:** The host `rabbitmq` is used because the service communicates internally via the Docker network `gelato_network`.
+
+---
+
+## 🚀 Running the Infrastructure (Development / Testing)
+
+When running integration tests or developing locally, you need the infrastructure (RabbitMQ and MongoDB) to expose their ports (`5672`, `15672`, `27017`) to your host machine (`localhost`).
+
+Use the `compose.dev.yml` override file to spin up the infrastructure:
+
+```bash
+docker compose -f docker/compose.yml -f docker/compose.dev.yml up -d rabbitmq mongodb
+```
+*(Note: Run this from the `infra` directory. If you are in the project root, adjust the paths to `infra/docker/...`)*
+
+---
+
+## ➕ Adding a New Service to Compose
+
+To maintain a clean and production-ready `compose.yml`, we strictly use pre-built images from an online registry (e.g., Docker Hub) rather than using local `build:` directives.
+
+Follow this workflow when adding a new microservice to the stack:
+
+**1. Build the Docker Image**
+Inside your new service's directory, build the image and tag it with your registry username:
+```bash
+docker build -t <your-registry-username>/<service-name>:1.0.0 .
+```
+
+**2. Push to the Online Registry**
+Push the compiled image to Docker Hub (or your preferred registry):
+```bash
+docker push <your-registry-username>/<service-name>:1.0.0
+```
+
+**3. Update `compose.yml`**
+Add the new service block to `infra/docker/compose.yml`, utilizing the `image:` directive:
+```yaml
+  new-service:
+    image: <your-registry-username>/<service-name>:1.0.0
+    container_name: new-service
+    env_file:
+      - ../../new-service/.env
+    networks:
+      - gelato_network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+```
