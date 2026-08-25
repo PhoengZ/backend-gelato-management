@@ -100,7 +100,7 @@ func TestAnalyticsRepositoryIntegration(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to find by date range: %v", err)
 		}
-		
+
 		if len(results) != 2 {
 			t.Errorf("Expected 2 records in range, got %d", len(results))
 		}

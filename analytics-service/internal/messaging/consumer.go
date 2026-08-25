@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sync/atomic"
 
 	"analytics-service/internal/models"
 	"analytics-service/internal/service"
@@ -18,7 +19,7 @@ type Consumer struct {
 	conn      *amqp.Connection
 	ch        *amqp.Channel
 	service   service.AnalyticsService
-	isClosing bool
+	isClosing atomic.Bool
 }
 
 func NewConsumer(rabbitURL string, svc service.AnalyticsService) (*Consumer, error) {
@@ -110,7 +111,7 @@ func (c *Consumer) Start() error {
 			select {
 			case d, ok := <-msgs:
 				if !ok {
-					if c.isClosing {
+					if c.isClosing.Load() {
 						return
 					}
 					log.Printf("RabbitMQ message channel closed unexpectedly. Terminating process to trigger orchestrator restart.")
@@ -118,7 +119,7 @@ func (c *Consumer) Start() error {
 				}
 				c.processMessage(d)
 			case err := <-notifyClose:
-				if c.isClosing {
+				if c.isClosing.Load() {
 					return
 				}
 				log.Printf("RabbitMQ connection closed: %v. Terminating process to trigger orchestrator restart.", err)
@@ -184,7 +185,7 @@ func (c *Consumer) processMessage(d amqp.Delivery) {
 }
 
 func (c *Consumer) Close() {
-	c.isClosing = true
+	c.isClosing.Store(true)
 	if c.ch != nil {
 		c.ch.Close()
 	}

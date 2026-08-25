@@ -104,7 +104,7 @@ When running integration tests or developing locally, you need the infrastructur
 Use the `compose.dev.yml` override file to spin up the infrastructure:
 
 ```bash
-docker compose -f docker/compose.yml -f docker/compose.dev.yml up -d rabbitmq mongodb
+docker compose -f docker/compose.yml -f docker/compose.dev.yml up -d rabbitmq analytics-mongodb
 ```
 *(Note: Run this from the `infra` directory. If you are in the project root, adjust the paths to `infra/docker/...`)*
 
