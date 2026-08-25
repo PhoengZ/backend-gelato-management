@@ -141,3 +141,8 @@
 - **Attempted:** Update `infra/README.md` and `analytics-service/README.md`.
 - **Hypothesis:** Documenting the dev compose startup command and testing commands will help standardizing local development. Documenting the Docker build/push workflow ensures production compose remains clean.
 - **Outcome:** Both READMEs appended with testing instructions and the new service SOP.
+
+### 2026-08-25 17:42:00
+- **Attempted:** Implement MongoDB Integration Test (`analytics_repo_integration_test.go`).
+- **Hypothesis:** By connecting directly to the MongoDB container on `localhost:27017`, we can verify that the Data Access Layer (Repository) correctly parses and saves BSON documents.
+- **Outcome:** Test created, `.env.test` Mongo URI fixed to use `localhost`, and tests passed successfully.
