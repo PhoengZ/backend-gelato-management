@@ -15,9 +15,10 @@ import (
 )
 
 type Consumer struct {
-	conn    *amqp.Connection
-	ch      *amqp.Channel
-	service service.AnalyticsService
+	conn      *amqp.Connection
+	ch        *amqp.Channel
+	service   service.AnalyticsService
+	isClosing bool
 }
 
 func NewConsumer(rabbitURL string, svc service.AnalyticsService) (*Consumer, error) {
@@ -109,11 +110,17 @@ func (c *Consumer) Start() error {
 			select {
 			case d, ok := <-msgs:
 				if !ok {
+					if c.isClosing {
+						return
+					}
 					log.Printf("RabbitMQ message channel closed unexpectedly. Terminating process to trigger orchestrator restart.")
 					os.Exit(1)
 				}
 				c.processMessage(d)
 			case err := <-notifyClose:
+				if c.isClosing {
+					return
+				}
 				log.Printf("RabbitMQ connection closed: %v. Terminating process to trigger orchestrator restart.", err)
 				os.Exit(1)
 			}
@@ -177,6 +184,7 @@ func (c *Consumer) processMessage(d amqp.Delivery) {
 }
 
 func (c *Consumer) Close() {
+	c.isClosing = true
 	if c.ch != nil {
 		c.ch.Close()
 	}
