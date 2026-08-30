@@ -212,3 +212,22 @@ RABBITMQ_URL=amqp://<username>:<password>@localhost:5672/
 # [Optional] Port for the Fiber HTTP Server (Default: 3000)
 PORT=3000
 ```
+
+---
+
+## 🧪 Running Tests
+
+To run the integration tests locally, you must first prepare the development infrastructure. The tests require a real RabbitMQ and MongoDB instance running on `localhost`.
+
+**1. Spin up the infrastructure:**
+Ensure RabbitMQ and MongoDB are running and accessible on `localhost`. Use the development override from the root of the project:
+```bash
+docker compose -f infra/docker/compose.yml -f infra/docker/compose.dev.yml up -d rabbitmq analytics-mongodb
+```
+*(See the [Infrastructure README](../infra/README.md) for more details).*
+
+**2. Run the Go test suite:**
+Execute the following command inside the `analytics-service` directory to run all tests recursively (including integration tests):
+```bash
+go test -v -count=1 ./tests/...
+```

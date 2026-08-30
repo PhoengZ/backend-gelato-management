@@ -126,3 +126,28 @@
 - **Changes Applied:**
   1. Removed hardcoded `base` and `head` configurations from the TruffleHog GitHub Action step in `analytics-service.yaml`.
 - **Outcome:** Fixed and committed on `main`.
+
+### 2026-08-25 16:40:00
+- **Attempted:** Setup analytics-service .env and .env.example files for local docker-compose environment based on definitions.json and compose.yml.
+- **Hypothesis:** By creating standard .env files, developers can run the analytics service locally with proper DB and RabbitMQ connections. Added `password123` as requested.
+- **Outcome:** Branch feature/setup-analytics-env created. .env and .env.example generated and .env.example committed (as .env is gitignored).
+
+### 2026-08-25 17:10:00
+- **Attempted:** Restrict `analytics_service` RabbitMQ permissions in `definitions.json`.
+- **Hypothesis:** By applying the regex `^(order|inventory|analytics_queue)$` to `configure`, `write`, and `read`, we enforce the Principle of Least Privilege so the service can only access its own resources.
+- **Outcome:** Definitions updated, container restarted, and integration tests passed successfully.
+
+### 2026-08-25 17:25:00
+- **Attempted:** Update `infra/README.md` and `analytics-service/README.md`.
+- **Hypothesis:** Documenting the dev compose startup command and testing commands will help standardizing local development. Documenting the Docker build/push workflow ensures production compose remains clean.
+- **Outcome:** Both READMEs appended with testing instructions and the new service SOP.
+
+### 2026-08-25 17:42:00
+- **Attempted:** Implement MongoDB Integration Test (`analytics_repo_integration_test.go`).
+- **Hypothesis:** By connecting directly to the MongoDB container on `localhost:27017`, we can verify that the Data Access Layer (Repository) correctly parses and saves BSON documents.
+- **Outcome:** Test created, `.env.test` Mongo URI fixed to use `localhost`, and tests passed successfully.
+
+### 2026-08-25 17:56:00
+- **Attempted:** Rename `mongodb` service and container to `analytics-mongodb`.
+- **Hypothesis:** Updating the container name prevents collisions. Required updating `compose.yml`, `compose.dev.yml`, and `MONGO_URI` in `.env` and `.env.example`.
+- **Outcome:** Renamed successfully and restarted containers. (Note: Integration tests may intermittently timeout if the running `analytics-service` Docker container "steals" the test messages from RabbitMQ before the local test runner can consume them).
