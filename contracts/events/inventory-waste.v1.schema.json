@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gelatoflow.example/contracts/events/inventory-waste.v1.schema.json",
+  "title": "Inventory Waste Event v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "event_id",
+    "event_version",
+    "occurred_at",
+    "producer",
+    "date",
+    "flavor_id",
+    "portions",
+    "batch_id",
+    "reason",
+    "cost_lost",
+    "currency"
+  ],
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "event_version": {
+      "const": 1
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "producer": {
+      "const": "batch-inventory-service"
+    },
+    "date": {
+      "type": "string",
+      "format": "date"
+    },
+    "flavor_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "portions": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "batch_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "reason": {
+      "type": "string",
+      "enum": ["EXPIRED", "DAMAGED", "QUALITY", "ADJUSTMENT"]
+    },
+    "cost_lost": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Compatibility field for Analytics Service; decimal amount in THB."
+    },
+    "currency": {
+      "const": "THB"
+    }
+  }
+}

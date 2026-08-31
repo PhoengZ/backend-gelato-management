@@ -1,0 +1,326 @@
+openapi: 3.1.0
+info:
+  title: GelatoFlow Catalog Service API
+  version: 1.0.0
+  description: Flavor metadata contract. Stock and availability are intentionally excluded.
+servers:
+  - url: /
+paths:
+  /api/v1/flavors:
+    get:
+      operationId: listFlavors
+      summary: List flavor metadata
+      tags: [Catalog]
+      parameters:
+        - name: active
+          in: query
+          required: false
+          description: Filter by active status. Public clients normally request active flavors.
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Flavor list
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Flavor'
+    post:
+      operationId: createFlavor
+      summary: Create a flavor
+      tags: [Catalog]
+      security:
+        - bearerAuth: []
+      x-required-roles: [MANAGER]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateFlavorRequest'
+      responses:
+        '201':
+          description: Flavor created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FlavorAdmin'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/flavors/{flavor_id}:
+    parameters:
+      - $ref: '#/components/parameters/FlavorId'
+    get:
+      operationId: getFlavor
+      summary: Get public flavor metadata
+      tags: [Catalog]
+      responses:
+        '200':
+          description: Flavor found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Flavor'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateFlavor
+      summary: Update flavor metadata
+      tags: [Catalog]
+      security:
+        - bearerAuth: []
+      x-required-roles: [MANAGER]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateFlavorRequest'
+      responses:
+        '200':
+          description: Flavor updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FlavorAdmin'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      operationId: archiveFlavor
+      summary: Archive a flavor without deleting inventory history
+      tags: [Catalog]
+      security:
+        - bearerAuth: []
+      x-required-roles: [MANAGER]
+      responses:
+        '204':
+          description: Flavor archived
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/flavors/{flavor_id}/recipe:
+    parameters:
+      - $ref: '#/components/parameters/FlavorId'
+    get:
+      operationId: getFlavorRecipe
+      summary: Get manager-only recipe details
+      tags: [Catalog]
+      security:
+        - bearerAuth: []
+      x-required-roles: [MANAGER]
+      responses:
+        '200':
+          description: Recipe details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FlavorRecipe'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    FlavorId:
+      name: flavor_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Unauthorized:
+      description: Authentication required
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Forbidden:
+      description: Insufficient role
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFound:
+      description: Flavor not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Conflict:
+      description: Flavor conflicts with an existing resource
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+  schemas:
+    Flavor:
+      type: object
+      additionalProperties: false
+      required:
+        [id, name, description, price, allergens, active, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        price:
+          $ref: '#/components/schemas/Money'
+        image_url:
+          type: string
+          format: uri
+        allergens:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/Allergen'
+        active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    FlavorAdmin:
+      allOf:
+        - $ref: '#/components/schemas/Flavor'
+        - type: object
+          required: [recipe]
+          properties:
+            recipe:
+              type: string
+    FlavorRecipe:
+      type: object
+      additionalProperties: false
+      required: [flavor_id, recipe, updated_at]
+      properties:
+        flavor_id:
+          type: string
+          format: uuid
+        recipe:
+          type: string
+        updated_at:
+          type: string
+          format: date-time
+    CreateFlavorRequest:
+      type: object
+      additionalProperties: false
+      required: [name, description, price, allergens, recipe]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        description:
+          type: string
+          maxLength: 1000
+        price:
+          $ref: '#/components/schemas/Money'
+        image_url:
+          type: string
+          format: uri
+        allergens:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/Allergen'
+        recipe:
+          type: string
+          minLength: 1
+        active:
+          type: boolean
+          default: true
+    UpdateFlavorRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        description:
+          type: string
+          maxLength: 1000
+        price:
+          $ref: '#/components/schemas/Money'
+        image_url:
+          type: string
+          format: uri
+        allergens:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/Allergen'
+        recipe:
+          type: string
+          minLength: 1
+        active:
+          type: boolean
+    Money:
+      type: object
+      additionalProperties: false
+      required: [amount_minor, currency]
+      properties:
+        amount_minor:
+          type: integer
+          format: int64
+          minimum: 0
+        currency:
+          type: string
+          const: THB
+    Allergen:
+      type: string
+      enum: [MILK, EGG, PEANUT, TREE_NUT, SOY, GLUTEN]
+    ErrorResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+          additionalProperties:
+            type: string

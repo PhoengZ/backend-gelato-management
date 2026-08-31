@@ -1,0 +1,86 @@
+syntax = "proto3";
+
+package inventory.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/gelatoflow/backend-gelato-management/contracts/gen/go/inventory/v1;inventoryv1";
+
+service InventoryService {
+  rpc CheckAvailability(CheckAvailabilityRequest) returns (CheckAvailabilityResponse);
+  rpc ReservePortions(ReservePortionsRequest) returns (ReservePortionsResponse);
+  rpc ConfirmReservation(ConfirmReservationRequest) returns (ReservationOperationResponse);
+  rpc ReleaseReservation(ReleaseReservationRequest) returns (ReservationOperationResponse);
+}
+
+message PortionRequest {
+  string flavor_id = 1;
+  int32 portions = 2;
+}
+
+message CheckAvailabilityRequest {
+  repeated PortionRequest items = 1;
+}
+
+message FlavorAvailability {
+  string flavor_id = 1;
+  int32 requested_portions = 2;
+  int32 available_portions = 3;
+  bool sufficient = 4;
+}
+
+message CheckAvailabilityResponse {
+  repeated FlavorAvailability items = 1;
+  bool all_available = 2;
+  google.protobuf.Timestamp as_of = 3;
+}
+
+message ReservePortionsRequest {
+  string order_id = 1;
+  string idempotency_key = 2;
+  repeated PortionRequest items = 3;
+}
+
+message BatchAllocation {
+  string flavor_id = 1;
+  string batch_id = 2;
+  int32 portions = 3;
+}
+
+enum ReservationStatus {
+  RESERVATION_STATUS_UNSPECIFIED = 0;
+  RESERVATION_STATUS_ACTIVE = 1;
+  RESERVATION_STATUS_CONFIRMED = 2;
+  RESERVATION_STATUS_RELEASED = 3;
+  RESERVATION_STATUS_EXPIRED = 4;
+}
+
+message Reservation {
+  string reservation_id = 1;
+  string order_id = 2;
+  ReservationStatus status = 3;
+  repeated BatchAllocation allocations = 4;
+  google.protobuf.Timestamp created_at = 5;
+  google.protobuf.Timestamp expires_at = 6;
+}
+
+message ReservePortionsResponse {
+  Reservation reservation = 1;
+}
+
+message ConfirmReservationRequest {
+  string reservation_id = 1;
+  string order_id = 2;
+  string idempotency_key = 3;
+}
+
+message ReleaseReservationRequest {
+  string reservation_id = 1;
+  string order_id = 2;
+  string idempotency_key = 3;
+  string reason = 4;
+}
+
+message ReservationOperationResponse {
+  Reservation reservation = 1;
+}

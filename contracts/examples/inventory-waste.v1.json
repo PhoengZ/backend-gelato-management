@@ -1,0 +1,13 @@
+{
+  "event_id": "b76c52fd-3373-49da-9283-85456ba3c53c",
+  "event_version": 1,
+  "occurred_at": "2026-08-31T10:15:00Z",
+  "producer": "batch-inventory-service",
+  "date": "2026-08-31",
+  "flavor_id": "0f3bca11-1eb2-4a86-908a-e60d7656c79b",
+  "portions": 3,
+  "batch_id": "36d9f415-d169-447b-9f81-37075fb19cdd",
+  "reason": "EXPIRED",
+  "cost_lost": 75.0,
+  "currency": "THB"
+}
