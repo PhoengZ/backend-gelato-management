@@ -4,8 +4,9 @@ services:
   rabbitmq:
     image: rabbitmq:4-management-alpine
     container_name: rabbitmq
-    env_file:
-      - ../.env
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:?RABBITMQ_DEFAULT_USER is required}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:?RABBITMQ_DEFAULT_PASS is required}
     networks:
       - gelato_network
     volumes:
@@ -23,26 +24,86 @@ services:
   analytics-mongodb:
     image: mongo:7.0
     container_name: analytics-mongodb
-    env_file:
-      - ../.env
     networks:
       - gelato_network
     volumes:
       - analytics_mongodb_data:/data/db
     restart: unless-stopped
+    healthcheck:
+      test: mongosh --quiet --eval "db.adminCommand('ping').ok" localhost:27017/test
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  auth-postgres:
+    image: postgres:16-alpine
+    container_name: auth-postgres
+    environment:
+      POSTGRES_DB: ${AUTH_POSTGRES_DB:?AUTH_POSTGRES_DB is required}
+      POSTGRES_USER: ${AUTH_POSTGRES_USER:?AUTH_POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${AUTH_POSTGRES_PASSWORD:?AUTH_POSTGRES_PASSWORD is required}
+    networks:
+      - gelato_network
+    volumes:
+      - auth_postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  inventory-postgres:
+    image: postgres:16-alpine
+    container_name: inventory-postgres
+    environment:
+      POSTGRES_DB: ${INVENTORY_POSTGRES_DB:?INVENTORY_POSTGRES_DB is required}
+      POSTGRES_USER: ${INVENTORY_POSTGRES_USER:?INVENTORY_POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${INVENTORY_POSTGRES_PASSWORD:?INVENTORY_POSTGRES_PASSWORD is required}
+    networks:
+      - gelato_network
+    volumes:
+      - inventory_postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  catalog-redis:
+    image: redis:7-alpine
+    container_name: catalog-redis
+    environment:
+      REDIS_PASSWORD: ${CATALOG_REDIS_PASSWORD:?CATALOG_REDIS_PASSWORD is required}
+    command:
+      - sh
+      - -c
+      - exec redis-server --appendonly yes --requirepass "$${REDIS_PASSWORD}"
+    networks:
+      - gelato_network
+    volumes:
+      - catalog_redis_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$${REDIS_PASSWORD}\" ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
   analytics-service:
     image: phoeng/analytics-service:1.0.0
     container_name: analytics-service
     env_file:
-      - ../../analytics-service/.env
+      - path: ../../analytics-service/.env
+        required: false
     networks:
       - gelato_network
     depends_on:
       rabbitmq:
         condition: service_healthy
       analytics-mongodb:
-        condition: service_started
+        condition: service_healthy
     restart: unless-stopped
 
 networks:
@@ -52,3 +113,6 @@ networks:
 volumes:
   rabbitmq_data:
   analytics_mongodb_data:
+  auth_postgres_data:
+  inventory_postgres_data:
+  catalog_redis_data:

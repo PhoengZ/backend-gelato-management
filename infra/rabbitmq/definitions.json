@@ -13,6 +13,12 @@
       "password_hash": "3CTkKSDoQc15wNTdaum2GM2GEU5oE2pXi1QQiX5FXSFhJr2I",
       "hashing_algorithm": "rabbit_password_hashing_sha256",
       "tags": []
+    },
+    {
+      "name": "inventory_service",
+      "password_hash": "Rh4i9PkLLV0GIP4lsA4bwNRkBVl5b9bjFJuUNlBJ2+5/nHNE",
+      "hashing_algorithm": "rabbit_password_hashing_sha256",
+      "tags": []
     }
   ],
   "vhosts": [
@@ -20,7 +26,7 @@
       "name": "/"
     },
     {
-      "name": "analytics_vhost"
+      "name": "gelato_vhost"
     }
   ],
   "permissions": [
@@ -32,11 +38,25 @@
       "read": ".*"
     },
     {
+      "user": "admin",
+      "vhost": "gelato_vhost",
+      "configure": ".*",
+      "write": ".*",
+      "read": ".*"
+    },
+    {
       "user": "analytics_service",
-      "vhost": "analytics_vhost",
+      "vhost": "gelato_vhost",
       "configure": "^(order|inventory|analytics_queue)$",
       "write": "^(order|inventory|analytics_queue)$",
       "read": "^(order|inventory|analytics_queue)$"
+    },
+    {
+      "user": "inventory_service",
+      "vhost": "gelato_vhost",
+      "configure": "^inventory$",
+      "write": "^inventory$",
+      "read": "^$"
     }
   ],
   "policies": [],

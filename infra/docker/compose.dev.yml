@@ -11,6 +11,18 @@ services:
     ports:
       - "27017:27017"
 
+  auth-postgres:
+    ports:
+      - "5433:5432"
+
+  inventory-postgres:
+    ports:
+      - "5434:5432"
+
+  catalog-redis:
+    ports:
+      - "6380:6379"
+
   analytics-service:
     ports:
       - "8080:8080"
