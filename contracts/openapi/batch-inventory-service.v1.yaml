@@ -11,6 +11,7 @@ paths:
       operationId: listFlavorAvailability
       summary: List aggregate sellable portions by flavor
       tags: [Availability]
+      security: []
       parameters:
         - name: flavor_id
           in: query

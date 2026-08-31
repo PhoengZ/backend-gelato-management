@@ -11,6 +11,7 @@ paths:
       operationId: listFlavors
       summary: List flavor metadata
       tags: [Catalog]
+      security: []
       parameters:
         - name: active
           in: query
@@ -32,6 +33,8 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/Flavor'
+        '400':
+          $ref: '#/components/responses/BadRequest'
     post:
       operationId: createFlavor
       summary: Create a flavor
@@ -67,6 +70,7 @@ paths:
       operationId: getFlavor
       summary: Get public flavor metadata
       tags: [Catalog]
+      security: []
       responses:
         '200':
           description: Flavor found

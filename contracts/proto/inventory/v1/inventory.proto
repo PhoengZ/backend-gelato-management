@@ -9,8 +9,8 @@ option go_package = "github.com/gelatoflow/backend-gelato-management/contracts/g
 service InventoryService {
   rpc CheckAvailability(CheckAvailabilityRequest) returns (CheckAvailabilityResponse);
   rpc ReservePortions(ReservePortionsRequest) returns (ReservePortionsResponse);
-  rpc ConfirmReservation(ConfirmReservationRequest) returns (ReservationOperationResponse);
-  rpc ReleaseReservation(ReleaseReservationRequest) returns (ReservationOperationResponse);
+  rpc ConfirmReservation(ConfirmReservationRequest) returns (ConfirmReservationResponse);
+  rpc ReleaseReservation(ReleaseReservationRequest) returns (ReleaseReservationResponse);
 }
 
 message PortionRequest {
@@ -81,6 +81,10 @@ message ReleaseReservationRequest {
   string reason = 4;
 }
 
-message ReservationOperationResponse {
+message ConfirmReservationResponse {
+  Reservation reservation = 1;
+}
+
+message ReleaseReservationResponse {
   Reservation reservation = 1;
 }

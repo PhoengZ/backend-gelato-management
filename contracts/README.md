@@ -47,6 +47,23 @@ Consumers must ignore unknown fields so compatible metadata can be added without
 breaking existing readers. A breaking field or semantic change requires a new
 schema version and routing-key migration plan.
 
+## Validation
+
+From the repository root:
+
+```bash
+npx --yes @redocly/cli@2.49.0 lint
+
+buf lint contracts
+buf build contracts
+
+python3 -m pip install jsonschema==4.26.0
+python3 contracts/scripts/validate_event_examples.py
+```
+
+CI runs the same lint, build, event fixture, and Docker Compose configuration
+checks for changes to contracts or infrastructure.
+
 ## Frontend integration
 
 The frontend demo is not required to adopt these contracts in the first pull

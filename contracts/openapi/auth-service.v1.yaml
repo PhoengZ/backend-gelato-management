@@ -11,6 +11,7 @@ paths:
       operationId: signUp
       summary: Register a customer account
       tags: [Auth]
+      security: []
       requestBody:
         required: true
         content:
@@ -33,6 +34,7 @@ paths:
       operationId: logIn
       summary: Authenticate and issue an access token
       tags: [Auth]
+      security: []
       requestBody:
         required: true
         content:
