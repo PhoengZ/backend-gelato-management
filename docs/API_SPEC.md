@@ -733,7 +733,7 @@ Get sales and production analytics (Manager only).
 
 ## Payment (Stripe)
 
-### POST /api/v1/stripe/create-payment-intent
+### POST /api/v1/payments/create-payment-intent
 
 Create a Stripe payment intent for checkout (Customer only).
 
@@ -760,7 +760,7 @@ Create a Stripe payment intent for checkout (Customer only).
 
 **Frontend Usage**: 
 ```typescript
-const res = await fetch("/api/v1/stripe/create-payment-intent", {
+const res = await fetch("/api/v1/payments/create-payment-intent", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify({ amount: total })
@@ -770,7 +770,7 @@ const data = await res.json();
 
 ---
 
-### POST /api/v1/stripe/webhook
+### POST /api/v1/payments/webhook
 
 Stripe webhook endpoint for payment events (Server-to-server).
 

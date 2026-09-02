@@ -53,10 +53,10 @@ Used for decoupling services and handling asynchronous workflows. (RabbitMQ pref
 2. **Create Order:** Customer selects flavors and picks a desired time slot, then submits `POST /api/v1/orders`.
 3. **Reserve Stock:** **Order Service** calls **Batch Inventory Service** via `gRPC (ReservePortions)` to atomically reserve portions.
 4. **Pending Payment:** Order is saved with status `PENDING_PAYMENT` bound to the selected time slot.
-5. **Initiate Payment:** Frontend requests payment intent via `POST /api/v1/stripe/create-payment-intent`.
+5. **Initiate Payment:** Frontend requests payment intent via `POST /api/v1/payments/create-payment-intent`.
 6. **Payment Service:** Calls Stripe to create PaymentIntent and returns `clientSecret`.
 7. **Direct Payment:** Customer completes card payment securely with Stripe.
-8. **Payment Webhook:** Stripe sends `payment_intent.succeeded` webhook to **Payment Service**, which instructs **Order Service** to update status to `PAID`.
+8. **Payment Webhook:** Stripe sends `payment_intent.succeeded` webhook to API Gateway (`POST /api/v1/payments/webhook`), which forwards to **Payment Service**, and **Payment Service** instructs **Order Service** to update status to `PAID`.
 9. **Publish Event:** **Order Service** publishes `OrderPlaced` event (containing order details & timeslot) to **RabbitMQ**.
 10. **Time-Slot Queue Allocation:** 
     * **Fulfillment Service** consumes `OrderPlaced`, allocates a sequential **Queue Number scoped to that specific Time Slot** (e.g., Slot `14:00 - 14:15` -> Queue `#01`), and places it into the kitchen prep queue.
