@@ -78,6 +78,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Flavor'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
     patch:
@@ -118,6 +120,8 @@ paths:
       responses:
         '204':
           description: Flavor archived
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -141,6 +145,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FlavorRecipe'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
