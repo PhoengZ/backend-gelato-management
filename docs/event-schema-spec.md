@@ -103,8 +103,8 @@ Every event published to the broker MUST contain the following mandatory fields:
 
 ### 3.4 OrderPickedUp (Thin Event)
 * **Publisher:** `Fulfillment Service`
-* **Consumers:** `Analytics Service`
-* **Strategy (Thin Event):** Simple state transition marker for data warehousing.
+* **Consumers:** *None currently* (Published for future extensions)
+* **Strategy (Thin Event):** Emitted to signal fulfillment completion. While not currently consumed, it is available for future features (e.g., triggering loyalty point accruals or sending "Thank You" notifications).
 
 ```json
 {
