@@ -293,4 +293,3 @@ func (s *analyticsService) GetAnalyticsSummary(ctx context.Context, period strin
 
 	return factory.BuildAnalyticsSummaryResponse(records), nil
 }
-

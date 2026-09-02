@@ -57,10 +57,10 @@ func TestConsumerIntegration(t *testing.T) {
 
 	// 4. Publish OrderPlaced event (CloudEvents-style envelope)
 	orderEvent := models.OrderPlacedEvent{
-		ID:   "evt_integ_001",
-		Type: "OrderPlaced",
-		Time: "2026-08-20T10:30:00.000Z",
-		Source:    "order-service",
+		ID:     "evt_integ_001",
+		Type:   "OrderPlaced",
+		Time:   "2026-08-20T10:30:00.000Z",
+		Source: "order-service",
 		Data: models.OrderPlacedData{
 			OrderID:     "ord_integ_001",
 			TotalAmount: 25000.50,
@@ -74,10 +74,10 @@ func TestConsumerIntegration(t *testing.T) {
 
 	err = pubCh.PublishWithContext(
 		context.Background(),
-		"order",         // exchange
+		"order",       // exchange
 		"OrderPlaced", // routing key
-		false,           // mandatory
-		false,           // immediate
+		false,         // mandatory
+		false,         // immediate
 		amqp.Publishing{
 			ContentType: "application/json",
 			Body:        orderBody,
@@ -89,10 +89,10 @@ func TestConsumerIntegration(t *testing.T) {
 
 	// 5. Publish WasteRecorded event (CloudEvents-style envelope)
 	wasteEvent := models.WasteRecordedEvent{
-		ID:   "evt_integ_002",
-		Type: "WasteRecorded",
-		Time: "2026-08-20T14:00:00.000Z",
-		Source:    "batch-inventory-service",
+		ID:     "evt_integ_002",
+		Type:   "WasteRecorded",
+		Time:   "2026-08-20T14:00:00.000Z",
+		Source: "batch-inventory-service",
 		Data: models.WasteRecordedData{
 			WasteID:    "wst_integ_001",
 			BatchID:    "B999",
@@ -106,10 +106,10 @@ func TestConsumerIntegration(t *testing.T) {
 
 	err = pubCh.PublishWithContext(
 		context.Background(),
-		"inventory",       // exchange
+		"inventory",     // exchange
 		"WasteRecorded", // routing key
-		false,             // mandatory
-		false,             // immediate
+		false,           // mandatory
+		false,           // immediate
 		amqp.Publishing{
 			ContentType: "application/json",
 			Body:        wasteBody,
