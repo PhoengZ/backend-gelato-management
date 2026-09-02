@@ -66,25 +66,26 @@ func (c *Consumer) Start() error {
 	}
 
 	// Bind queue to routing keys
-	// NOTE: Using "order.success" for backward compatibility with current
-	// Order Service. If the Order Service migrates to "order.placed",
-	// update this binding accordingly.
 	err = c.ch.QueueBind(
-		q.Name, "order.success", "order", false, nil,
+		q.Name, "OrderPlaced", "order", false, nil,
 	)
 	if err != nil {
 		return err
 	}
 
 	err = c.ch.QueueBind(
-		q.Name, "inventory.waste", "inventory", false, nil,
+		q.Name, "WasteRecorded", "inventory", false, nil,
 	)
 	if err != nil {
 		return err
 	}
 
-	// TODO: Bind "order.cancelled" when Order Service supports cancellations.
-	// This will allow deducting revenue/scoops for refunded orders.
+	err = c.ch.QueueBind(
+		q.Name, "OrderCancelled", "order", false, nil,
+	)
+	if err != nil {
+		return err
+	}
 
 	// Set QoS to prevent one worker from receiving more workload than others.
 	// A prefetch count of 10 provides a balance between workload fairness and throughput.
@@ -148,7 +149,7 @@ func isPermanentError(err error) bool {
 func (c *Consumer) processMessage(d amqp.Delivery) {
 	ctx := context.Background()
 	switch d.RoutingKey {
-	case "order.success":
+	case "OrderPlaced":
 		var event models.OrderPlacedEvent
 		if err := json.Unmarshal(d.Body, &event); err != nil {
 			log.Printf("Permanent error unmarshaling order placed event (nacking without requeue): %v", err)
@@ -166,7 +167,25 @@ func (c *Consumer) processMessage(d amqp.Delivery) {
 		}
 		d.Ack(false)
 
-	case "inventory.waste":
+	case "OrderCancelled":
+		var event models.OrderCancelledEvent
+		if err := json.Unmarshal(d.Body, &event); err != nil {
+			log.Printf("Permanent error unmarshaling order cancelled event (nacking without requeue): %v", err)
+			d.Nack(false, false)
+			return
+		}
+		if err := c.service.ProcessOrderCancelled(ctx, event); err != nil {
+			log.Printf("Error processing order cancelled event: %v", err)
+			if isPermanentError(err) {
+				d.Nack(false, false)
+			} else {
+				d.Nack(false, true)
+			}
+			return
+		}
+		d.Ack(false)
+
+	case "WasteRecorded":
 		var event models.WasteRecordedEvent
 		if err := json.Unmarshal(d.Body, &event); err != nil {
 			log.Printf("Permanent error unmarshaling waste recorded event (nacking without requeue): %v", err)

@@ -28,7 +28,8 @@ func TestConsumerIntegration(t *testing.T) {
 
 	// 1. Setup Mock Repository and Service
 	mockRepo := NewMockRepository()
-	svc := service.NewAnalyticsService(mockRepo)
+	mockOrderRepo := NewMockOrderRepository()
+	svc := service.NewAnalyticsService(mockRepo, mockOrderRepo)
 
 	// 2. Setup and Start Consumer
 	consumer, err := messaging.NewConsumer(rabbitURL, svc)
@@ -56,9 +57,9 @@ func TestConsumerIntegration(t *testing.T) {
 
 	// 4. Publish OrderPlaced event (CloudEvents-style envelope)
 	orderEvent := models.OrderPlacedEvent{
-		EventID:   "evt_integ_001",
-		EventType: "OrderPlaced",
-		Timestamp: "2026-08-20T10:30:00.000Z",
+		ID:   "evt_integ_001",
+		Type: "OrderPlaced",
+		Time: "2026-08-20T10:30:00.000Z",
 		Source:    "order-service",
 		Data: models.OrderPlacedData{
 			OrderID:     "ord_integ_001",
@@ -74,7 +75,7 @@ func TestConsumerIntegration(t *testing.T) {
 	err = pubCh.PublishWithContext(
 		context.Background(),
 		"order",         // exchange
-		"order.success", // routing key
+		"OrderPlaced", // routing key
 		false,           // mandatory
 		false,           // immediate
 		amqp.Publishing{
@@ -88,9 +89,9 @@ func TestConsumerIntegration(t *testing.T) {
 
 	// 5. Publish WasteRecorded event (CloudEvents-style envelope)
 	wasteEvent := models.WasteRecordedEvent{
-		EventID:   "evt_integ_002",
-		EventType: "WasteRecorded",
-		Timestamp: "2026-08-20T14:00:00.000Z",
+		ID:   "evt_integ_002",
+		Type: "WasteRecorded",
+		Time: "2026-08-20T14:00:00.000Z",
 		Source:    "batch-inventory-service",
 		Data: models.WasteRecordedData{
 			WasteID:    "wst_integ_001",
@@ -106,7 +107,7 @@ func TestConsumerIntegration(t *testing.T) {
 	err = pubCh.PublishWithContext(
 		context.Background(),
 		"inventory",       // exchange
-		"inventory.waste", // routing key
+		"WasteRecorded", // routing key
 		false,             // mandatory
 		false,             // immediate
 		amqp.Publishing{

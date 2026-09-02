@@ -82,17 +82,18 @@ type SalesTrendData struct {
 // successful payment. It contains all item details needed for analytics
 // so the Analytics Service never needs to call back to Order/Catalog services.
 type OrderPlacedEvent struct {
-	EventID   string          `json:"eventId"`
-	EventType string          `json:"eventType"`
-	Timestamp string          `json:"timestamp"`
-	Source    string          `json:"source"`
-	Data      OrderPlacedData `json:"data"`
+	ID          string          `json:"id"`
+	Type        string          `json:"type"`
+	Time        string          `json:"time"`
+	Source      string          `json:"source"`
+	Traceparent string          `json:"traceparent"`
+	Data        OrderPlacedData `json:"data"`
 }
 
 type OrderPlacedData struct {
-	OrderID     string             `json:"orderId"`
-	TotalAmount float64            `json:"totalAmount"`
-	Items       []OrderPlacedItem  `json:"items"`
+	OrderID     string            `json:"orderId"`
+	TotalAmount float64           `json:"totalAmount"`
+	Items       []OrderPlacedItem `json:"items"`
 }
 
 type OrderPlacedItem struct {
@@ -103,14 +104,30 @@ type OrderPlacedItem struct {
 	Subtotal   float64 `json:"subtotal"`
 }
 
+// OrderCancelledEvent is published by Order Service when an order is cancelled.
+type OrderCancelledEvent struct {
+	ID          string             `json:"id"`
+	Type        string             `json:"type"`
+	Time        string             `json:"time"`
+	Source      string             `json:"source"`
+	Traceparent string             `json:"traceparent"`
+	Data        OrderCancelledData `json:"data"`
+}
+
+type OrderCancelledData struct {
+	OrderID string `json:"orderId"`
+	Reason  string `json:"reason"`
+}
+
 // WasteRecordedEvent is the event published by Batch Inventory Service
 // when waste is recorded (e.g., expired batch, spoilage).
 type WasteRecordedEvent struct {
-	EventID   string            `json:"eventId"`
-	EventType string            `json:"eventType"`
-	Timestamp string            `json:"timestamp"`
-	Source    string            `json:"source"`
-	Data      WasteRecordedData `json:"data"`
+	ID          string            `json:"id"`
+	Type        string            `json:"type"`
+	Time        string            `json:"time"`
+	Source      string            `json:"source"`
+	Traceparent string            `json:"traceparent"`
+	Data        WasteRecordedData `json:"data"`
 }
 
 type WasteRecordedData struct {
@@ -120,4 +137,13 @@ type WasteRecordedData struct {
 	FlavorName string `json:"flavorName"`
 	Portions   int    `json:"portions"`
 	Reason     string `json:"reason"`
+}
+
+// Order represents an order stored in the analytics database for reversal on cancellation.
+type Order struct {
+	ID          string            `bson:"_id" json:"id"`
+	Status      string            `bson:"status" json:"status"`
+	CreatedAt   string            `bson:"created_at" json:"created_at"`
+	TotalAmount float64           `bson:"total_amount" json:"total_amount"`
+	Items       []OrderPlacedItem `bson:"items" json:"items"`
 }

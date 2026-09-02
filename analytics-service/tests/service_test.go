@@ -72,14 +72,43 @@ func (m *MockRepository) Get(date string) *models.Analytics {
 	return nil
 }
 
+type MockOrderRepository struct {
+	mu      sync.RWMutex
+	Records map[string]*models.Order
+}
+
+func NewMockOrderRepository() *MockOrderRepository {
+	return &MockOrderRepository{
+		Records: make(map[string]*models.Order),
+	}
+}
+
+func (m *MockOrderRepository) Save(ctx context.Context, order *models.Order) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.Records[order.ID] = order
+	return nil
+}
+
+func (m *MockOrderRepository) FindByID(ctx context.Context, id string) (*models.Order, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if record, exists := m.Records[id]; exists {
+		cp := *record
+		return &cp, nil
+	}
+	return nil, nil
+}
+
 func TestProcessOrderPlaced(t *testing.T) {
 	mockRepo := NewMockRepository()
-	svc := service.NewAnalyticsService(mockRepo)
+	mockOrderRepo := NewMockOrderRepository()
+	svc := service.NewAnalyticsService(mockRepo, mockOrderRepo)
 
 	event := models.OrderPlacedEvent{
-		EventID:   "evt_test_001",
-		EventType: "OrderPlaced",
-		Timestamp: "2026-08-20T10:30:00.000Z",
+		ID:   "evt_test_001",
+		Type: "OrderPlaced",
+		Time: "2026-08-20T10:30:00.000Z",
 		Source:    "order-service",
 		Data: models.OrderPlacedData{
 			OrderID:     "ord_12345",
@@ -144,7 +173,8 @@ func TestProcessOrderPlaced(t *testing.T) {
 
 func TestProcessWasteRecorded(t *testing.T) {
 	mockRepo := NewMockRepository()
-	svc := service.NewAnalyticsService(mockRepo)
+	mockOrderRepo := NewMockOrderRepository()
+	svc := service.NewAnalyticsService(mockRepo, mockOrderRepo)
 
 	// Pre-populate an order so waste_rate can be calculated
 	mockRepo.Records["2026-08-20"] = &models.Analytics{
@@ -158,9 +188,9 @@ func TestProcessWasteRecorded(t *testing.T) {
 	}
 
 	event := models.WasteRecordedEvent{
-		EventID:   "evt_test_002",
-		EventType: "WasteRecorded",
-		Timestamp: "2026-08-20T14:00:00.000Z",
+		ID:   "evt_test_002",
+		Type: "WasteRecorded",
+		Time: "2026-08-20T14:00:00.000Z",
 		Source:    "batch-inventory-service",
 		Data: models.WasteRecordedData{
 			WasteID:    "wst_001",
@@ -207,7 +237,8 @@ func TestProcessWasteRecorded(t *testing.T) {
 
 func TestGetAnalyticsSummary(t *testing.T) {
 	mockRepo := NewMockRepository()
-	svc := service.NewAnalyticsService(mockRepo)
+	mockOrderRepo := NewMockOrderRepository()
+	svc := service.NewAnalyticsService(mockRepo, mockOrderRepo)
 
 	today := time.Now().Format("2006-01-02")
 	mockRepo.Records[today] = &models.Analytics{
@@ -273,7 +304,8 @@ func TestGetAnalyticsSummary(t *testing.T) {
 
 func TestGetAnalyticsSummary_InvalidPeriod(t *testing.T) {
 	mockRepo := NewMockRepository()
-	svc := service.NewAnalyticsService(mockRepo)
+	mockOrderRepo := NewMockOrderRepository()
+	svc := service.NewAnalyticsService(mockRepo, mockOrderRepo)
 
 	_, err := svc.GetAnalyticsSummary(context.Background(), "invalid")
 	if err == nil {
