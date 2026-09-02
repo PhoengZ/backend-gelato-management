@@ -36,15 +36,16 @@ sequenceDiagram
     rect rgb(30, 30, 30)
     note right of C: 3. Payment Processing (Immediate)
     end
-    C->>AG: POST /api/v1/stripe/create-payment-intent
-    AG->>PS: CreatePaymentIntent(orderId, amount)
-    PS->>STR: Create payment intent
+    C->>AG: POST /api/v1/payments/create-payment-intent
+    AG->>PS: POST /payments/create-payment-intent
+    PS->>STR: Create payment intent (Stripe API)
     STR-->>PS: Return clientSecret
     PS-->>AG: Return clientSecret
     AG-->>C: Return clientSecret
     
     C->>STR: Complete payment using clientSecret
-    STR->>PS: Webhook (payment_intent.succeeded)
+    STR->>AG: POST /api/v1/payments/webhook (payment_intent.succeeded)
+    AG->>PS: Route webhook
     PS->>OS: Update order (status: PAID)
 
     rect rgb(30, 30, 30)
