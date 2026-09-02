@@ -68,7 +68,9 @@ Every event published to the broker MUST contain the following mandatory fields:
 ### 3.2 OrderCancelled (Thin Event)
 * **Publisher:** `Order Service`
 * **Consumers:** `Fulfillment Service`, `Notification Service`, `Analytics Service`
-* **Strategy (Thin Event):** A minimal payload is sufficient. The primary action is just to halt processing, clear queues, and notify the user.
+* **Strategy (Thin Event / Local State Materialization):** A minimal payload is deliberately used to reduce network overhead. 
+  * **How it prevents gRPC Callbacks:** To prevent the Analytics Service from needing to make synchronous gRPC calls back to the Order Service to fetch the `totalAmount` or `items` (which would tightly couple the services and cause load), we utilize the **Event Sourcing / Local State Materialization** pattern. 
+  * **Implementation Feasibility:** The Analytics Service must consume the fat `OrderPlaced` event first and store those granular order details in its own local MongoDB. When this thin `OrderCancelled` event arrives, the Analytics Service simply queries its *own* local database using the `orderId` to retrieve the associated revenue and items, and then applies the negative offset to the analytics metrics.
 
 ```json
 {
