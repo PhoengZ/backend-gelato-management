@@ -175,11 +175,12 @@ Every event published to the broker MUST contain the following mandatory fields:
   "time": "2026-09-02T23:45:00Z",
   "traceparent": "00-6gl3217572ij09jj4004kh877i46975i-hdg32hd725869997-01",
   "data": {
+    "wasteId": "WST-12345",
     "batchId": "BAT-STRAW-0901",
     "flavorId": "FLV-STRAWBERRY",
-    "portionsWasted": 12,
-    "reason": "EXPIRED",
-    "recordedBy": "STAFF-002"
+    "flavorName": "Fresh Strawberry",
+    "portions": 12,
+    "reason": "EXPIRED"
   }
 }
 ```
