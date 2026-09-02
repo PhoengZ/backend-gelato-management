@@ -184,3 +184,17 @@ Every event published to the broker MUST contain the following mandatory fields:
   }
 }
 ```
+
+## 4. Implementation Guidelines & Best Practices
+
+### Handling Missing Data in Thin Events (Data Materialization)
+When consuming a **Thin Event** (like `OrderCancelled` or `OrderReady`), you may find that the event's `data` payload does not contain enough information (e.g., `totalAmount`, `customerEmail`, `items`) to proceed with your service's business logic.
+
+**Anti-Pattern (Thundering Herd):** Do **not** make synchronous gRPC or REST calls back to the originating service (e.g., `Order Service`) to fetch the missing data. This creates tight coupling, introduces latency, and risks cascading failures if the originating service is under heavy load.
+
+**Best Practice (Event Sourcing / Local State Materialization):**
+1. Ensure your service subscribes to the preceding **Fat Event** in the entity's lifecycle (e.g., `OrderPlaced`).
+2. When the Fat Event is received, **store a read-optimized copy** of the necessary data (e.g., revenue, items, customer details) inside your own service's local database (e.g., MongoDB for Analytics).
+3. When the subsequent Thin Event (e.g., `OrderCancelled`) arrives containing only an ID reference, **retrieve the missing data from your own local database** using that ID to complete your business workflow.
+
+This approach guarantees strict microservice autonomy and aligns perfectly with the CQRS (Command Query Responsibility Segregation) architectural pattern.
