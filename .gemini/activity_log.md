@@ -164,15 +164,180 @@
   - Commit 3: Handler + Router + Consumer — wire everything together
 - **Outcome:**
   - Commit 1 (`f64fc6c`): Models updated — new event structs, response DTOs, FlavorStat with Revenue, removed CostLost
+# Activity Log
+
+## 2026-08-21
+- **Task:** Separate Docker Compose files for dev and production.
+- **Attempt/Action:** 
+  - Analyzed `infra/docker/compose.yml` and `analytics-service/Dockerfile`.
+  - Created `compose.yml` for production with no host port mappings (services communicate via `gelato_network`).
+  - Created `compose.dev.yml` to override and expose ports for local dev/integration testing (`5672`, `15672`, `27017`, `8080`).
+  - User resolved the port mismatch issue by setting `PORT=8080` in their `.env` files.
+- **Outcome:** Successfully created isolated Compose environments for dev and production workflows.
+
+## Attempt: Implement CI/CD Workflows for Monorepo
+- **Attempted**: Created new branch feature/cicd-workflows, added github action workflows (template and analytics-service).
+- **Hypothesis**: By creating paths-filtered workflows for each service folder, we can isolate builds and testing while enforcing common security rules.
+- **Outcome**: Created .github/workflows/workflow.example.yaml and .github/workflows/analytics-service.yaml successfully.
+
+## Attempt: Create Mock Files for Analytics Service
+- **Attempted**: Created mock files (main.go, dummy_test.go, Dockerfile) and initialized Go module in the analytics-service directory.
+- **Hypothesis**: These minimal files will satisfy the CI/CD workflow steps (go test, docker build) without needing full implementation logic yet.
+- **Outcome**: Successfully generated files and generated go.mod/go.sum.
+
+## Debug Session: Analytics Service Docker Build Failure
+- **What was checked**: Docker build logs for analytics-service.
+- **How it was checked**: Analyzed the build failure at go mod download.
+- **Observed outcome**: Identified go.mod requires go >= 1.24.2 (running go 1.21.13).
+- **Root Cause**: The local go mod init used Go 1.24.2, but the Dockerfile and CI were hardcoded to Go 1.21.
+- **Resolution**: Upgraded Dockerfile and CI workflow to use Go 1.24 to match the module requirements.
+
+### 2026-08-21 16:58:31
+- **Attempted:** Create Qodo PR Agent CI/CD for GitHub Actions using Qwen model via Groq API.
+- **Hypothesis:** By creating .github/workflows/pr-agent.yml using LiteLLM configuration for Groq, it should automatically route the PR-Agent reviews to the chosen Qwen model.
+- **Outcome:** File successfully created, committed, and pushed to eature/cicd-workflows.
+
+### 2026-08-21 17:00:25
+- **Attempted:** Update PR Agent fallback model to openai/gpt-oss-120b.
+- **Hypothesis:** Updating the YAML config CONFIG.FALLBACK_MODELS ensures it falls back to this model when Groq hits rate limits.
+- **Outcome:** File successfully updated, committed, and pushed.
+
+### 2026-08-21 17:13:02
+- **Attempted:** Fix PR-Agent not providing suggestions and skipping synchronize event.
+- **Hypothesis:** By default, PR-Agent requires explicit flags to auto-review and handle new commits. Adding github_action_config.auto_review and handle_push_trigger to the env block resolves this.
+- **Outcome:** File successfully updated, committed, and pushed.
+
+### 2026-08-21 17:17:35
+- **Attempted:** Fix PR-Agent crash when using unknown model names.
+- **Hypothesis:** PR-Agent doesn't know the context window size of \groq/qwen/qwen3.6-27b\. Setting \CONFIG.CUSTOM_MODEL_MAX_TOKENS: "32000" will bypass this check and allow the agent to run.
+- **Outcome:** File successfully updated, committed, and pushed.
+
+### 2026-08-21 17:28:00
+- **Attempted:** Fix Invalid API Key error for Groq.
+- **Hypothesis:** LiteLLM expects the environment variable \GROQ_API_KEY\ for models prefixed with \groq/\, but the workflow only exported \OPENAI_KEY\. Exporting \GROQ_API_KEY\ will allow LiteLLM to authenticate with Groq correctly.
+- **Outcome:** File successfully updated, committed, and pushed.
+
+### 2026-08-21 17:30:43
+- **Attempted:** Fix PR-Agent parsing failure due to \<think>\ tags.
+- **Hypothesis:** The model outputs a reasoning block (\<think>...\) before the YAML payload, which causes the YAML parser to return a string instead of a dictionary. Setting \CONFIG.CUSTOM_REASONING_MODEL: "true" should instruct PR-Agent to handle these reasoning models properly.
+- **Outcome:** File successfully updated, committed, and pushed.
+
+### 2026-08-21 17:36:25
+- **Attempted:** Switch PR-Agent to non-reasoning Groq models.
+- **Hypothesis:** By switching the base model to \groq/llama-3.3-70b-versatile\ and fallback to \groq/qwen-2.5-32b\, we prevent the Token Limit issue caused by the reasoning model's \<think>\ block.
+- **Outcome:** File successfully updated, committed, and pushed.
+
+### 2026-08-21 17:39:47
+- **Attempted:** Fix Model Not Found / Decommissioned errors on Groq.
+- **Hypothesis:** Groq has decommissioned \qwen-2.5-32b\ and \llama-3.3-70b-versatile\ may not be accessible to this API tier or is named differently. Switching to the standard, stable \llama-3.1-70b-versatile\ and \llama-3.1-8b-instant\ should resolve the API resolution errors.
+- **Outcome:** File successfully updated, committed, and pushed.
+
+### 2026-08-21 17:45:25
+- **Attempted:** Fix decommissioned Llama 3.1 models on Groq.
+- **Hypothesis:** Groq has deprecated Llama 3.1 and 3.3 models for this tier in favor of the active openai/gpt-oss series. By switching to \openai/gpt-oss-120b\ and \openai/gpt-oss-20b\ and re-enabling \CONFIG.CUSTOM_REASONING_MODEL\, it should bypass the model_not_found errors and correctly parse reasoning tokens.
+- **Outcome:** File successfully updated, committed, and pushed.
+
+### 2026-08-21 17:49:57
+- **Attempted:** Switch PR-Agent from Groq to Gemini API.
+- **Hypothesis:** By setting \GEMINI_API_KEY\ and updating \CONFIG.MODEL\ to \gemini/gemini-2.5-flash\ and fallback to \gemini/gemma-4-31b-it\, LiteLLM will route the requests to Google AI Studio instead of Groq. Also disabled reasoning model support since these are standard models.
+- **Outcome:** File successfully updated, committed, and pushed.
+
+### 2026-08-21 17:56:23
+- **Attempted:** Fix Gemini 2.5 Flash unavailability and Gemma timeout.
+- **Hypothesis:** Google AI Studio has disabled \gemini-2.5-flash\ for new users, demanding an upgrade to \gemini-3.6-flash\. Also, the \gemma-4-31b-it\ fallback timed out because PR-Agent's default timeout is 120s. Bumping it to 300s resolves this.
+- **Outcome:** File successfully updated, committed, and pushed.
+
+### 2026-08-21 17:58:21
+- **Attempted:** Update Gemini models per user request.
+- **Hypothesis:** Switching the base model to \gemini-3.7-flash\ and fallback to \gemini-3.6-flash\ will provide a faster and more reliable fallback than Gemma 4.
+- **Outcome:** File successfully updated, committed, and pushed.
+
+### 2026-08-22 10:33:00
+- **Attempted:** Address all PR #2 review comments (CodeRabbit, CI failures).
+- **Changes Applied:**
+  1. Fix `gofmt -s` formatting in `tests/service_test.go` (CI failure root cause).
+  2. Gate hardcoded credentials behind `GO_ENV` in `config.go` — local dev keeps fallbacks, production crashes loudly on missing secrets.
+  3. Fix README PORT from 8080 to 3000 + replace hardcoded credentials with `<username>:<password>` placeholders.
+  4. Add `sync.RWMutex` + buffered `Saved` channel to `MockRepository` for race-safe concurrent access.
+  5. Replace `time.Sleep(1s)` in integration test with channel-based signaling (zero CPU waste, race-free).
+  6. Replace hardcoded password in `generate-password.py` with `sys.argv` + `getpass` fallback.
+  7. Exclude `_id` from `$set` in `analytics_repo.go` Save method (3-line fix instead of full `$inc` rewrite).
+  8. Add `ErrInvalidPeriod` sentinel error — reject unknown period values with 400 instead of silent fallback.
+  9. Add date validation in `getOrCreateAnalytics` + fix consumer to Nack poison messages without requeue.
+  10. Recalculate `WasteRate` in `ProcessOrderSuccess` after `ScoopsSold` changes.
+  11. Add error logging in analytics handler before 500 responses.
+  12. Pin MongoDB image from `mongo:latest` to `mongo:7.0` in `compose.yml`.
+- **Outcome:** All tests pass. `gofmt -s -l .` returns clean. Build succeeds.
+
+### 2026-08-22 11:28:00
+- **Attempted:** Address missed PR review comment regarding connection leak in RabbitMQ consumer.
+- **Changes Applied:**
+  1. Added `conn.Close()` in `NewConsumer` if `conn.Channel()` fails, preventing TCP connection and broker-side connection leaks.
+- **Outcome:** Fixed, committed, and pushed.
+
+### 2026-08-22 11:55:00
+- **Attempted:** Address remaining unresolved PR review comments and fix failing Trivy CI scan.
+- **Changes Applied:**
+  1. Updated Go toolchain from `1.24.2` to `1.25.0` in `go.mod`, `Dockerfile`, and GitHub Actions workflow.
+  2. Upgraded `golang.org/x/crypto` to the latest version to resolve `CVE-2026-56862`.
+  3. Implemented graceful AMQP connection shutdown observation in `consumer.go` using `conn.NotifyClose`.
+### 2026-08-22 12:05:00
+- **Attempted:** Fix failing Trivy CI scan caused by `musl` vulnerability in Alpine base image.
+- **Changes Applied:**
+  1. Updated `Dockerfile` final stage from `alpine:3.19` to `alpine:3.20` to resolve `CVE-2026-40200` in the `musl` and `musl-utils` packages.
+- **Outcome:** Fixed, committed, and pushed.
+
+### 2026-08-22 12:20:00
+- **Attempted:** Fix TruffleHog CI failure on `main` branch after PR merge.
+- **Changes Applied:**
+  1. Removed hardcoded `base` and `head` configurations from the TruffleHog GitHub Action step in `analytics-service.yaml`.
+- **Outcome:** Fixed and committed on `main`.
+
+### 2026-08-25 16:40:00
+- **Attempted:** Setup analytics-service .env and .env.example files for local docker-compose environment based on definitions.json and compose.yml.
+- **Hypothesis:** By creating standard .env files, developers can run the analytics service locally with proper DB and RabbitMQ connections. Added `password123` as requested.
+- **Outcome:** Branch feature/setup-analytics-env created. .env and .env.example generated and .env.example committed (as .env is gitignored).
+
+### 2026-08-25 17:10:00
+- **Attempted:** Restrict `analytics_service` RabbitMQ permissions in `definitions.json`.
+- **Hypothesis:** By applying the regex `^(order|inventory|analytics_queue)$` to `configure`, `write`, and `read`, we enforce the Principle of Least Privilege so the service can only access its own resources.
+- **Outcome:** Definitions updated, container restarted, and integration tests passed successfully.
+
+### 2026-08-25 17:25:00
+- **Attempted:** Update `infra/README.md` and `analytics-service/README.md`.
+- **Hypothesis:** Documenting the dev compose startup command and testing commands will help standardizing local development. Documenting the Docker build/push workflow ensures production compose remains clean.
+- **Outcome:** Both READMEs appended with testing instructions and the new service SOP.
+
+### 2026-08-25 17:42:00
+- **Attempted:** Implement MongoDB Integration Test (`analytics_repo_integration_test.go`).
+- **Hypothesis:** By connecting directly to the MongoDB container on `localhost:27017`, we can verify that the Data Access Layer (Repository) correctly parses and saves BSON documents.
+- **Outcome:** Test created, `.env.test` Mongo URI fixed to use `localhost`, and tests passed successfully.
+
+### 2026-08-25 17:56:00
+- **Attempted:** Rename `mongodb` service and container to `analytics-mongodb`.
+- **Hypothesis:** Updating the container name prevents collisions. Required updating `compose.yml`, `compose.dev.yml`, and `MONGO_URI` in `.env` and `.env.example`.
+- **Outcome:** Renamed successfully and restarted containers. (Note: Integration tests may intermittently timeout if the running `analytics-service` Docker container "steals" the test messages from RabbitMQ before the local test runner can consume them).
+
+### 2026-09-02 19:44:00 — Feature: Analytics Summary Refactor
+- **Branch:** `feature/analytics-summary`
+- **Task:** Refactor Analytics Service to use `OrderPlaced` event for revenue recognition, change endpoint to `/analytics/summary`, and match API_SPEC.md response schema.
+- **Pre-Conditions Assumed:**
+  1. Order Service will publish enriched `OrderPlaced` with flavorName, unitPrice, subtotal per item.
+  2. Routing key stays as `order.success` for backward compatibility.
+- **Plan:**
+  - Commit 1: Models — new event structs, response DTOs, updated FlavorStat
+  - Commit 2: Service — refactor process methods, aggregation logic for summary
+  - Commit 3: Handler + Router + Consumer — wire everything together
+- **Outcome:**
+  - Commit 1 (`f64fc6c`): Models updated — new event structs, response DTOs, FlavorStat with Revenue, removed CostLost
   - Commit 2 (`7f585fb`): Service refactored — ProcessOrderPlaced, ProcessWasteRecorded, GetAnalyticsSummary with aggregation
   - Commit 3 (`f1e1f8e`): Handler/Router/Consumer/Tests wired — endpoint changed, all 4 unit tests pass
   - Commit 4 (`04166c3`): Extracted `aggregateSummary` to `factory.BuildAnalyticsSummaryResponse` (DTO Assembler Pattern) to adhere to Clean Architecture standards.
   - Build: ✅ `go build ./...` clean
   - Tests: ✅ 4/4 pass (ProcessOrderPlaced, ProcessWasteRecorded, GetAnalyticsSummary, GetAnalyticsSummary_InvalidPeriod)
 
-# #   A c t i v i t y   L o g  
- -   C h e c k e d   a n a l y t i c s   s e r v i c e   r e p o s i t o r y .   F o r m u l a t e d   i m p l e m e n t a t i o n   p l a n   f o r   c o n s u m i n g   n e w   O r d e r P l a c e d ,   W a s t e R e c o r d e d ,   a n d   O r d e r C a n c e l l e d   t o p i c s ,   a n d   c r e a t i n g   a n   o r d e r   c o l l e c t i o n   i n   M o n g o D B .  
- -   I m p l e m e n t e d   C o d e   G e n e r a t i o n   P h a s e .   A d d e d   O r d e r   m o d e l   a n d   O r d e r R e p o s i t o r y ,   u p d a t e d   A n a l y t i c s S e r v i c e   w i t h   P r o c e s s O r d e r C a n c e l l e d ,   a n d   m o d i f i e d   R a b b i t M Q   c o n s u m e r .  
- C o m p l e t e d   c o d e   g e n e r a t i o n   a n d   v e r i f i c a t i o n .  
- -   F i x e d   c o d e   f o r m a t t i n g   f o r   t e s t s   a n d   s e r v i c e   l a y e r s   t o   p a s s   C I   c h e c k  
- 
+### 2026-09-02
+- Checked analytics service repository. Formulated implementation plan for consuming new OrderPlaced, WasteRecorded, and OrderCancelled topics, and creating an order collection in MongoDB.
+- Implemented Code Generation Phase. Added Order model and OrderRepository, updated AnalyticsService with ProcessOrderCancelled, and modified RabbitMQ consumer.
+- Completed code generation and verification.
+- Fixed code formatting for tests and service layers to pass CI check.
