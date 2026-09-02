@@ -170,3 +170,9 @@
   - Build: ✅ `go build ./...` clean
   - Tests: ✅ 4/4 pass (ProcessOrderPlaced, ProcessWasteRecorded, GetAnalyticsSummary, GetAnalyticsSummary_InvalidPeriod)
 
+# #   A c t i v i t y   L o g  
+ -   C h e c k e d   a n a l y t i c s   s e r v i c e   r e p o s i t o r y .   F o r m u l a t e d   i m p l e m e n t a t i o n   p l a n   f o r   c o n s u m i n g   n e w   O r d e r P l a c e d ,   W a s t e R e c o r d e d ,   a n d   O r d e r C a n c e l l e d   t o p i c s ,   a n d   c r e a t i n g   a n   o r d e r   c o l l e c t i o n   i n   M o n g o D B .  
+ -   I m p l e m e n t e d   C o d e   G e n e r a t i o n   P h a s e .   A d d e d   O r d e r   m o d e l   a n d   O r d e r R e p o s i t o r y ,   u p d a t e d   A n a l y t i c s S e r v i c e   w i t h   P r o c e s s O r d e r C a n c e l l e d ,   a n d   m o d i f i e d   R a b b i t M Q   c o n s u m e r .  
+ C o m p l e t e d   c o d e   g e n e r a t i o n   a n d   v e r i f i c a t i o n .  
+ -   F i x e d   c o d e   f o r m a t t i n g   f o r   t e s t s   a n d   s e r v i c e   l a y e r s   t o   p a s s   C I   c h e c k  
+ 

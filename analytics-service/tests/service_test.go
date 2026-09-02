@@ -106,10 +106,10 @@ func TestProcessOrderPlaced(t *testing.T) {
 	svc := service.NewAnalyticsService(mockRepo, mockOrderRepo)
 
 	event := models.OrderPlacedEvent{
-		ID:   "evt_test_001",
-		Type: "OrderPlaced",
-		Time: "2026-08-20T10:30:00.000Z",
-		Source:    "order-service",
+		ID:     "evt_test_001",
+		Type:   "OrderPlaced",
+		Time:   "2026-08-20T10:30:00.000Z",
+		Source: "order-service",
 		Data: models.OrderPlacedData{
 			OrderID:     "ord_12345",
 			TotalAmount: 15500.00,
@@ -188,10 +188,10 @@ func TestProcessWasteRecorded(t *testing.T) {
 	}
 
 	event := models.WasteRecordedEvent{
-		ID:   "evt_test_002",
-		Type: "WasteRecorded",
-		Time: "2026-08-20T14:00:00.000Z",
-		Source:    "batch-inventory-service",
+		ID:     "evt_test_002",
+		Type:   "WasteRecorded",
+		Time:   "2026-08-20T14:00:00.000Z",
+		Source: "batch-inventory-service",
 		Data: models.WasteRecordedData{
 			WasteID:    "wst_001",
 			BatchID:    "B123",
