@@ -1,3 +1,4 @@
+```mermaid
 flowchart LR
     %% Clients
     CW[Customer Web]
@@ -64,3 +65,4 @@ flowchart LR
     RMQ -- Consume --> FS
     RMQ -- Consume --> NS
     RMQ -- Consume --> ANS
+```

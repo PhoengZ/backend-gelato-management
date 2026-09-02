@@ -151,3 +151,22 @@
 - **Attempted:** Rename `mongodb` service and container to `analytics-mongodb`.
 - **Hypothesis:** Updating the container name prevents collisions. Required updating `compose.yml`, `compose.dev.yml`, and `MONGO_URI` in `.env` and `.env.example`.
 - **Outcome:** Renamed successfully and restarted containers. (Note: Integration tests may intermittently timeout if the running `analytics-service` Docker container "steals" the test messages from RabbitMQ before the local test runner can consume them).
+
+### 2026-09-02 19:44:00 — Feature: Analytics Summary Refactor
+- **Branch:** `feature/analytics-summary`
+- **Task:** Refactor Analytics Service to use `OrderPlaced` event for revenue recognition, change endpoint to `/analytics/summary`, and match API_SPEC.md response schema.
+- **Pre-Conditions Assumed:**
+  1. Order Service will publish enriched `OrderPlaced` with flavorName, unitPrice, subtotal per item.
+  2. Routing key stays as `order.success` for backward compatibility.
+- **Plan:**
+  - Commit 1: Models — new event structs, response DTOs, updated FlavorStat
+  - Commit 2: Service — refactor process methods, aggregation logic for summary
+  - Commit 3: Handler + Router + Consumer — wire everything together
+- **Outcome:**
+  - Commit 1 (`f64fc6c`): Models updated — new event structs, response DTOs, FlavorStat with Revenue, removed CostLost
+  - Commit 2 (`7f585fb`): Service refactored — ProcessOrderPlaced, ProcessWasteRecorded, GetAnalyticsSummary with aggregation
+  - Commit 3 (`f1e1f8e`): Handler/Router/Consumer/Tests wired — endpoint changed, all 4 unit tests pass
+  - Commit 4 (`04166c3`): Extracted `aggregateSummary` to `factory.BuildAnalyticsSummaryResponse` (DTO Assembler Pattern) to adhere to Clean Architecture standards.
+  - Build: ✅ `go build ./...` clean
+  - Tests: ✅ 4/4 pass (ProcessOrderPlaced, ProcessWasteRecorded, GetAnalyticsSummary, GetAnalyticsSummary_InvalidPeriod)
+
