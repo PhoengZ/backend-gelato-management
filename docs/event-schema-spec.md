@@ -46,21 +46,16 @@ Every event published to the broker MUST contain the following mandatory fields:
   "traceparent": "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
   "data": {
     "orderId": "ORD-12345",
-    "customerId": "CUST-987",
-    "customerEmail": "customer@example.com",
-    "timeSlot": {
-      "id": "TS-004",
-      "startTime": "14:00",
-      "endTime": "14:15",
-      "date": "2026-09-02"
-    },
+    "totalAmount": 12.50,
     "items": [
       {
         "flavorId": "FLV-PISTACHIO",
-        "quantity": 2
+        "flavorName": "Sicilian Pistachio",
+        "portions": 2,
+        "unitPrice": 6.25,
+        "subtotal": 12.50
       }
-    ],
-    "totalAmount": 12.50
+    ]
   }
 }
 ```
