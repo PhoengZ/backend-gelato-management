@@ -72,20 +72,26 @@ func (m *MockRepository) Get(date string) *models.Analytics {
 	return nil
 }
 
-func TestProcessOrderSuccess(t *testing.T) {
+func TestProcessOrderPlaced(t *testing.T) {
 	mockRepo := NewMockRepository()
 	svc := service.NewAnalyticsService(mockRepo)
 
-	msg := models.OrderSuccessMessage{
-		Date:        "2026-08-20",
-		TotalAmount: 15500.00,
-		OrderItems: []models.OrderItem{
-			{FlavorID: "F01", Qty: 150},
-			{FlavorID: "F02", Qty: 200},
+	event := models.OrderPlacedEvent{
+		EventID:   "evt_test_001",
+		EventType: "OrderPlaced",
+		Timestamp: "2026-08-20T10:30:00.000Z",
+		Source:    "order-service",
+		Data: models.OrderPlacedData{
+			OrderID:     "ord_12345",
+			TotalAmount: 15500.00,
+			Items: []models.OrderPlacedItem{
+				{FlavorID: "F01", FlavorName: "Vanilla", Portions: 150, UnitPrice: 50, Subtotal: 7500},
+				{FlavorID: "F02", FlavorName: "Chocolate", Portions: 200, UnitPrice: 40, Subtotal: 8000},
+			},
 		},
 	}
 
-	err := svc.ProcessOrderSuccess(context.Background(), msg)
+	err := svc.ProcessOrderPlaced(context.Background(), event)
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
@@ -114,9 +120,29 @@ func TestProcessOrderSuccess(t *testing.T) {
 	if len(record.FlavorStats) != 2 {
 		t.Fatalf("Expected 2 flavor stats, got %d", len(record.FlavorStats))
 	}
+
+	// Verify per-flavor revenue tracking
+	for _, fs := range record.FlavorStats {
+		switch fs.FlavorID {
+		case "F01":
+			if fs.Revenue != 7500 {
+				t.Errorf("Expected F01 Revenue 7500, got %f", fs.Revenue)
+			}
+			if fs.Name != "Vanilla" {
+				t.Errorf("Expected F01 Name 'Vanilla', got '%s'", fs.Name)
+			}
+		case "F02":
+			if fs.Revenue != 8000 {
+				t.Errorf("Expected F02 Revenue 8000, got %f", fs.Revenue)
+			}
+			if fs.Name != "Chocolate" {
+				t.Errorf("Expected F02 Name 'Chocolate', got '%s'", fs.Name)
+			}
+		}
+	}
 }
 
-func TestProcessInventoryWaste(t *testing.T) {
+func TestProcessWasteRecorded(t *testing.T) {
 	mockRepo := NewMockRepository()
 	svc := service.NewAnalyticsService(mockRepo)
 
@@ -131,16 +157,22 @@ func TestProcessInventoryWaste(t *testing.T) {
 		},
 	}
 
-	msg := models.InventoryWasteMessage{
-		Date:     "2026-08-20",
-		FlavorID: "F01",
-		Portions: 10,
-		BatchID:  "B123",
-		Reason:   "expired",
-		CostLost: 250.00,
+	event := models.WasteRecordedEvent{
+		EventID:   "evt_test_002",
+		EventType: "WasteRecorded",
+		Timestamp: "2026-08-20T14:00:00.000Z",
+		Source:    "batch-inventory-service",
+		Data: models.WasteRecordedData{
+			WasteID:    "wst_001",
+			BatchID:    "B123",
+			FlavorID:   "F01",
+			FlavorName: "Vanilla",
+			Portions:   10,
+			Reason:     "expired",
+		},
 	}
 
-	err := svc.ProcessInventoryWaste(context.Background(), msg)
+	err := svc.ProcessWasteRecorded(context.Background(), event)
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
@@ -160,12 +192,20 @@ func TestProcessInventoryWaste(t *testing.T) {
 		t.Fatalf("Expected 1 waste reason, got %d", len(record.WasteStats.WasteByReason))
 	}
 
-	if record.WasteStats.WasteByReason[0].CostLost != 250.00 {
-		t.Errorf("Expected CostLost 250.00, got %f", record.WasteStats.WasteByReason[0].CostLost)
+	if record.WasteStats.WasteByReason[0].Portions != 10 {
+		t.Errorf("Expected WasteByReason Portions 10, got %d", record.WasteStats.WasteByReason[0].Portions)
+	}
+
+	// Verify flavor name is stored
+	if len(record.FlavorStats) != 1 {
+		t.Fatalf("Expected 1 flavor stat, got %d", len(record.FlavorStats))
+	}
+	if record.FlavorStats[0].Name != "Vanilla" {
+		t.Errorf("Expected FlavorStat Name 'Vanilla', got '%s'", record.FlavorStats[0].Name)
 	}
 }
 
-func TestGetAnalytics(t *testing.T) {
+func TestGetAnalyticsSummary(t *testing.T) {
 	mockRepo := NewMockRepository()
 	svc := service.NewAnalyticsService(mockRepo)
 
@@ -173,20 +213,70 @@ func TestGetAnalytics(t *testing.T) {
 	mockRepo.Records[today] = &models.Analytics{
 		Date: today,
 		Financials: models.Financials{
-			GrossSales: 1000,
+			GrossSales:  1000,
+			TotalOrders: 10,
+		},
+		Operations: models.Operations{
+			ScoopsSold: 50,
+		},
+		WasteStats: models.WasteStats{
+			TotalWastePortions: 5,
+			WasteByReason:      []models.WasteByReason{},
+		},
+		FlavorStats: []models.FlavorStat{
+			{FlavorID: "F01", Name: "Vanilla", ScoopsSold: 30, Revenue: 600, WastePortions: 3},
+			{FlavorID: "F02", Name: "Chocolate", ScoopsSold: 20, Revenue: 400, WastePortions: 2},
 		},
 	}
 
-	res, err := svc.GetAnalytics(context.Background(), "1d")
+	summary, err := svc.GetAnalyticsSummary(context.Background(), "1d")
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
 
-	if len(res) == 0 {
-		t.Fatalf("Expected at least 1 record")
+	if summary.TotalRevenue != 1000 {
+		t.Errorf("Expected TotalRevenue 1000, got %f", summary.TotalRevenue)
 	}
 
-	if res[0].Financials.GrossSales != 1000 {
-		t.Errorf("Expected GrossSales 1000, got %f", res[0].Financials.GrossSales)
+	if summary.TotalOrders != 10 {
+		t.Errorf("Expected TotalOrders 10, got %d", summary.TotalOrders)
+	}
+
+	if summary.TotalScoops != 50 {
+		t.Errorf("Expected TotalScoops 50, got %d", summary.TotalScoops)
+	}
+
+	if summary.TotalWaste != 5 {
+		t.Errorf("Expected TotalWaste 5, got %d", summary.TotalWaste)
+	}
+
+	if len(summary.SalesByFlavor) != 2 {
+		t.Errorf("Expected 2 salesByFlavor entries, got %d", len(summary.SalesByFlavor))
+	}
+
+	if len(summary.WasteByFlavor) != 2 {
+		t.Errorf("Expected 2 wasteByFlavor entries, got %d", len(summary.WasteByFlavor))
+	}
+
+	if len(summary.SalesTrend) != 1 {
+		t.Fatalf("Expected 1 salesTrend entry, got %d", len(summary.SalesTrend))
+	}
+
+	if summary.SalesTrend[0].Date != today {
+		t.Errorf("Expected salesTrend date %s, got %s", today, summary.SalesTrend[0].Date)
+	}
+
+	if summary.SalesTrend[0].Revenue != 1000 {
+		t.Errorf("Expected salesTrend revenue 1000, got %f", summary.SalesTrend[0].Revenue)
+	}
+}
+
+func TestGetAnalyticsSummary_InvalidPeriod(t *testing.T) {
+	mockRepo := NewMockRepository()
+	svc := service.NewAnalyticsService(mockRepo)
+
+	_, err := svc.GetAnalyticsSummary(context.Background(), "invalid")
+	if err == nil {
+		t.Fatal("Expected error for invalid period, got nil")
 	}
 }

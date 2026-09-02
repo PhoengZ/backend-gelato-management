@@ -18,24 +18,21 @@ func NewAnalyticsHandler(service service.AnalyticsService) *AnalyticsHandler {
 	return &AnalyticsHandler{service: service}
 }
 
-func (h *AnalyticsHandler) GetAnalytics(c *fiber.Ctx) error {
+func (h *AnalyticsHandler) GetAnalyticsSummary(c *fiber.Ctx) error {
 	period := c.Query("period", "1w")
 
-	analytics, err := h.service.GetAnalytics(c.Context(), period)
+	summary, err := h.service.GetAnalyticsSummary(c.Context(), period)
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidPeriod) {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 				"error": fmt.Sprintf("Unsupported period: %s. Valid values: 1d, 1w, 1m, 6m", period),
 			})
 		}
-		log.Printf("error fetching analytics: %v", err)
+		log.Printf("error fetching analytics summary: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Failed to fetch analytics",
 		})
 	}
 
-	return c.JSON(fiber.Map{
-		"period": period,
-		"data":   analytics,
-	})
+	return c.JSON(summary)
 }
