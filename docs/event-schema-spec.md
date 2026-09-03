@@ -1,200 +1,184 @@
 # GelatoFlow Event Schema Specification
 
-This document defines the standardized event schema for all asynchronous messages published to RabbitMQ across the GelatoFlow microservices architecture.
+This document defines the canonical envelope, payload conventions, and ownership
+rules for asynchronous messages published through RabbitMQ. JSON Schemas under
+`contracts/events/` are the machine-readable source of truth.
 
-## 1. Global Standards & Field Justifications
+## 1. CloudEvents envelope
 
-To ensure high interoperability, scalability, and observability, GelatoFlow adopts a standardized event envelope inspired by the **CloudEvents (CNCF)** specification and the **W3C Trace Context** standard.
+GelatoFlow uses CloudEvents 1.0 structured JSON. Every event must contain:
 
-Every event published to the broker MUST contain the following mandatory fields:
+| Field | Requirement |
+| --- | --- |
+| `specversion` | Always `1.0` |
+| `id` | UUID identifying this event; consumers use it for deduplication |
+| `source` | URI-reference for the producing service |
+| `type` | Versioned event type such as `com.gelatoflow.order.placed.v1` |
+| `time` | RFC 3339 UTC timestamp for the domain event |
+| `datacontenttype` | Always `application/json` in version 1 |
+| `data` | Domain payload owned by the producer |
+| `traceparent` | Optional W3C trace context when an inbound trace exists |
 
-| Field | Description | Global Standard Justification |
-| :--- | :--- | :--- |
-| `id` | A unique identifier for the event (e.g., UUIDv4). | **CloudEvents (`id`):** Ensures idempotency. Consumers use this to detect and discard duplicate messages, preventing unintended side effects (e.g., processing an order twice). |
-| `source` | A URI-reference identifying the context/service where the event originated (e.g., `gelatoflow/order-service`). | **CloudEvents (`source`):** Allows consumers to confidently identify the producer. Essential for routing, filtering, and debugging system-wide event flows. |
-| `type` | The exact event name/type (e.g., `OrderPlaced.v1`). | **CloudEvents (`type`):** Enables schema evolution and evaluation. Consumers use this to determine how to deserialize the payload (`data`) and route the event to the correct internal handler. |
-| `time` | A Timestamp in RFC 3339 / ISO 8601 format indicating when the event occurred (e.g., `2026-09-02T14:30:00Z`). | **CloudEvents (`time`):** Critical for establishing strict chronological order, debugging race conditions, and determining metrics like event propagation latency. |
-| `traceparent` | The W3C Trace Context identifier tied to the initial API Gateway request (e.g., `00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01`). | **W3C Trace Context:** Essential for **Distributed Tracing**. By passing this ID across API boundaries, gRPC calls, and async events, we can visualize the entire lifecycle of a request in tools like Jaeger, Datadog, or OpenTelemetry. |
-| `data` | The domain-specific payload of the event. Can be a "Fat" or "Thin" payload. | **CloudEvents (`data`):** Encapsulates the actual business information. Separating the envelope from the `data` allows infrastructure to process the message without understanding the business logic. |
-
-## 2. Base Schema Envelope
+`traceparent` is optional because events can originate from scheduled expiry or
+maintenance jobs without an inbound HTTP request. A producer must propagate a
+valid trace context when one exists and must not invent an invalid placeholder.
 
 ```json
 {
-  "id": "uuid-v4",
-  "source": "gelatoflow/<service-name>",
-  "type": "<EventName>.v<Version>",
-  "time": "YYYY-MM-DDThh:mm:ss.sssZ",
-  "traceparent": "00-<trace-id>-<parent-id>-<trace-flags>",
+  "specversion": "1.0",
+  "id": "c3f8510a-6c17-48b2-b1ef-24901b0f5556",
+  "source": "/gelatoflow/order-service",
+  "type": "com.gelatoflow.order.placed.v1",
+  "time": "2026-09-02T14:30:00Z",
+  "datacontenttype": "application/json",
+  "traceparent": "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
   "data": {}
 }
 ```
 
-## 3. Event Catalog
+## 2. Payload conventions
 
-### 3.1 OrderPlaced (Fat Event)
-* **Publisher:** `Order Service`
-* **Consumers:** `Fulfillment Service`, `Notification Service`, `Analytics Service`
-* **Strategy (Fat Event):** We use a fat payload here so the Notification Service and Fulfillment Service have all necessary customer and order details without needing to query the Order Service, preventing a "thundering herd" of synchronous callbacks.
+- JSON field names use `snake_case`.
+- Resource IDs use UUID strings; prefixed IDs such as `ORD-12345` are not part of
+  the backend contract.
+- Timestamps use RFC 3339 UTC and calendar dates use `YYYY-MM-DD`.
+- Monetary values are integers in minor units with an ISO 4217 currency. For
+  example, THB 12.50 is `1250` satang, represented as
+  `total_amount_minor: 1250` and `currency: "THB"`.
+- A money-bearing payload must not use JSON decimal fields such as `total_amount`,
+  `unit_price`, `subtotal`, or `cost_lost`.
+- Producers publish through a transactional outbox after the domain transaction
+  commits. Delivery is at least once, so each consumer records `id` and processes
+  a duplicate event as a no-op.
+- Consumers ignore unknown envelope and payload fields within a compatible event
+  version. A removed field or changed meaning requires a new event version.
+
+## 3. Event catalog
+
+| Event type | Routing key | Publisher | Consumers | Payload strategy |
+| --- | --- | --- | --- | --- |
+| `com.gelatoflow.order.placed.v1` | `order.placed` | Order | Fulfillment, Notification, Analytics | Fat sale snapshot |
+| `com.gelatoflow.order.cancelled.v1` | `order.cancelled` | Order | Fulfillment, Notification, Analytics | Thin follow-up |
+| `com.gelatoflow.fulfillment.order-ready.v1` | `fulfillment.order_ready` | Fulfillment | Notification | Thin follow-up |
+| `com.gelatoflow.fulfillment.order-picked-up.v1` | `fulfillment.order_picked_up` | Fulfillment | None in MVP | Thin follow-up |
+| `com.gelatoflow.inventory.batch-low-stock.v1` | `inventory.low_stock` | Batch Inventory | Notification | Inventory snapshot |
+| `com.gelatoflow.inventory.batch-expiring.v1` | `inventory.expiring` | Batch Inventory | Notification | Inventory snapshot |
+| `com.gelatoflow.inventory.waste-recorded.v1` | `inventory.waste` | Batch Inventory | Analytics | Fat waste snapshot |
+
+Only the owning service publishes its domain events. RabbitMQ credentials should
+limit Order, Fulfillment, and Batch Inventory to their own exchanges. A consumer
+must not publish a replacement event using another service's event type.
+
+### 3.1 OrderPlaced
+
+`OrderPlaced` is emitted only after payment succeeds and the Inventory
+reservation is confirmed. Analytics can therefore count this event as a paid
+sale. Its item names and prices are immutable order-line snapshots, not live
+Catalog fields.
 
 ```json
 {
+  "specversion": "1.0",
   "id": "c3f8510a-6c17-48b2-b1ef-24901b0f5556",
-  "source": "gelatoflow/order-service",
-  "type": "OrderPlaced.v1",
+  "source": "/gelatoflow/order-service",
+  "type": "com.gelatoflow.order.placed.v1",
   "time": "2026-09-02T14:30:00Z",
-  "traceparent": "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
+  "datacontenttype": "application/json",
   "data": {
-    "orderId": "ORD-12345",
-    "totalAmount": 12.50,
+    "order_id": "8d29d6cf-bd4d-48ca-9e4f-dcd8ec54e594",
+    "customer_id": "8dc81c31-a354-4774-b835-36ea0411bc54",
+    "status": "PAID",
+    "pickup_at": "2026-09-02T15:00:00Z",
+    "total_amount_minor": 1250,
+    "currency": "THB",
     "items": [
       {
-        "flavorId": "FLV-PISTACHIO",
-        "flavorName": "Sicilian Pistachio",
+        "flavor_id": "0f3bca11-1eb2-4a86-908a-e60d7656c79b",
+        "flavor_name": "Sicilian Pistachio",
         "portions": 2,
-        "unitPrice": 6.25,
-        "subtotal": 12.50
+        "unit_price_minor": 625,
+        "subtotal_minor": 1250
       }
     ]
   }
 }
 ```
 
-### 3.2 OrderCancelled (Thin Event)
-* **Publisher:** `Order Service`
-* **Consumers:** `Fulfillment Service`, `Notification Service`, `Analytics Service`
-* **Strategy (Thin Event / Local State Materialization):** A minimal payload is deliberately used to reduce network overhead. 
-  * **How it prevents gRPC Callbacks:** To prevent the Analytics Service from needing to make synchronous gRPC calls back to the Order Service to fetch the `totalAmount` or `items` (which would tightly couple the services and cause load), we utilize the **Event Sourcing / Local State Materialization** pattern. 
-  * **Implementation Feasibility:** The Analytics Service must consume the fat `OrderPlaced` event first and store those granular order details in its own local MongoDB. When this thin `OrderCancelled` event arrives, the Analytics Service simply queries its *own* local database using the `orderId` to retrieve the associated revenue and items, and then applies the negative offset to the analytics metrics.
+The sum of item `subtotal_minor` values must equal `total_amount_minor`. All
+items in version 1 use the same event-level currency.
+
+### 3.2 OrderCancelled
+
+The payload contains `order_id` and a stable `reason` code. Services that need
+the paid amount or line items keep an event-fed local projection created from
+`OrderPlaced` and look up the order there. They do not call Order synchronously
+while handling the event.
+
+This is local state materialization, not full event sourcing: the Order database
+remains the operational source of truth.
+
+### 3.3 Fulfillment events
+
+- `OrderReady` contains `order_id`, `queue_number`, and `pickup_slot_id`.
+- `OrderPickedUp` contains `order_id` and `picked_up_at`.
+
+Both use UUIDs for resource references. Queue numbers remain display strings.
+
+### 3.4 Inventory notification events
+
+- `BatchLowStock` contains `batch_id`, `flavor_id`, `remaining_portions`, and
+  `threshold_portions`.
+- `BatchExpiring` contains `batch_id`, `flavor_id`, and `expires_at`.
+
+Batch Inventory publishes only identifiers and inventory facts it owns. It does
+not copy a live `flavor_name`, price, recipe, or allergen list from Catalog.
+
+### 3.5 WasteRecorded
+
+`WasteRecorded` contains the immutable cost impact calculated from the batch's
+unit cost. The value is stored and aggregated as `cost_lost_minor`, never as a
+floating-point amount.
 
 ```json
 {
-  "id": "d4a7812b-7d28-49c3-c2fa-35812c1g6667",
-  "source": "gelatoflow/order-service",
-  "type": "OrderCancelled.v1",
-  "time": "2026-09-02T14:35:00Z",
-  "traceparent": "00-1bg8762027de54ee9559fc322d91420d-c8be7c8270314442-01",
+  "specversion": "1.0",
+  "id": "b76c52fd-3373-49da-9283-85456ba3c53c",
+  "source": "/gelatoflow/batch-inventory-service",
+  "type": "com.gelatoflow.inventory.waste-recorded.v1",
+  "time": "2026-08-31T10:15:00Z",
+  "datacontenttype": "application/json",
   "data": {
-    "orderId": "ORD-12345",
-    "reason": "PAYMENT_TIMEOUT"
+    "waste_id": "03db6f89-369a-4cd1-a04f-830330f99f97",
+    "batch_id": "36d9f415-d169-447b-9f81-37075fb19cdd",
+    "flavor_id": "0f3bca11-1eb2-4a86-908a-e60d7656c79b",
+    "date": "2026-08-31",
+    "portions": 3,
+    "reason": "EXPIRED",
+    "cost_lost_minor": 7500,
+    "currency": "THB"
   }
 }
 ```
 
-### 3.3 OrderReady (Thin Event)
-* **Publisher:** `Fulfillment Service`
-* **Consumers:** `Notification Service`
-* **Strategy (Thin Event):** Only the specific identifiers are needed to trigger the notification template.
+## 4. Analytics projection rules
 
-```json
-{
-  "id": "e5b8923c-8e39-50d4-d3gb-46923d2h7778",
-  "source": "gelatoflow/fulfillment-service",
-  "type": "OrderReady.v1",
-  "time": "2026-09-02T14:05:00Z",
-  "traceparent": "00-2ch9873138ef65ff0660gd433e02531e-d9cf8d9381425553-01",
-  "data": {
-    "orderId": "ORD-12345",
-    "queueNumber": "01",
-    "timeSlotId": "TS-004"
-  }
-}
-```
+Analytics stores sales and lost-cost aggregates as integer minor units, for
+example `gross_sales_minor`, `average_order_value_minor`, and
+`cost_lost_minor`. Decimal display values are derived only at the API or UI
+boundary.
 
-### 3.4 OrderPickedUp (Thin Event)
-* **Publisher:** `Fulfillment Service`
-* **Consumers:** *None currently* (Published for future extensions)
-* **Strategy (Thin Event):** Emitted to signal fulfillment completion. While not currently consumed, it is available for future features (e.g., triggering loyalty point accruals or sending "Thank You" notifications).
+The current Analytics prototype still consumes legacy flat `order.success` and
+`inventory.waste` payloads containing floating-point fields. It must add the
+CloudEvents envelope, event-ID deduplication, integer storage, and the
+`order.placed` binding before the canonical contracts are enabled in production.
+That consumer migration is intentionally outside the Contracts and
+Infrastructure pull request.
 
-```json
-{
-  "id": "f6c9034d-9f40-61e5-e4hc-57034e3i8889",
-  "source": "gelatoflow/fulfillment-service",
-  "type": "OrderPickedUp.v1",
-  "time": "2026-09-02T14:10:00Z",
-  "traceparent": "00-3di0984249fg76gg1771he544f13642f-ead09ea492536664-01",
-  "data": {
-    "orderId": "ORD-12345"
-  }
-}
-```
+## 5. Ordering and failure handling
 
-### 3.5 BatchLowStock (Fat Event)
-* **Publisher:** `Batch Inventory Service`
-* **Consumers:** `Notification Service`
-* **Strategy (Fat Event):** Requires context about the flavor, current portions, and threshold so the notification has all the necessary information without querying the catalog/inventory again.
-
-```json
-{
-  "id": "a1b2c3d4-e5f6-7890-abcd-1234567890ab",
-  "source": "gelatoflow/batch-inventory-service",
-  "type": "BatchLowStock.v1",
-  "time": "2026-09-02T10:00:00Z",
-  "traceparent": "00-4ej1095350gh87hh2882if655g24753g-fbe10fb503647775-01",
-  "data": {
-    "batchId": "BAT-PIST-0902",
-    "flavorId": "FLV-PISTACHIO",
-    "flavorName": "Sicilian Pistachio",
-    "remainingPortions": 5,
-    "threshold": 10
-  }
-}
-```
-
-### 3.6 BatchExpiring (Fat Event)
-* **Publisher:** `Batch Inventory Service`
-* **Consumers:** `Notification Service`
-* **Strategy (Fat Event):** Needs specific details about the batch and its expiration time.
-
-```json
-{
-  "id": "b2c3d4e5-f6a7-8901-bcde-2345678901bc",
-  "source": "gelatoflow/batch-inventory-service",
-  "type": "BatchExpiring.v1",
-  "time": "2026-09-02T22:00:00Z",
-  "traceparent": "00-5fk2106461hi98ii3993jg766h35864h-gcf21gc614758886-01",
-  "data": {
-    "batchId": "BAT-STRAW-0901",
-    "flavorId": "FLV-STRAWBERRY",
-    "flavorName": "Fresh Strawberry",
-    "expiryDate": "2026-09-02T23:59:59Z"
-  }
-}
-```
-
-### 3.7 WasteRecorded (Fat Event)
-* **Publisher:** `Batch Inventory Service`
-* **Consumers:** `Analytics Service`
-* **Strategy (Fat Event):** Carries the cost implication and reason for waste to allow the Analytics Service to build detailed reports directly from the event data.
-
-```json
-{
-  "id": "c3d4e5f6-a7b8-9012-cdef-3456789012cd",
-  "source": "gelatoflow/batch-inventory-service",
-  "type": "WasteRecorded.v1",
-  "time": "2026-09-02T23:45:00Z",
-  "traceparent": "00-6gl3217572ij09jj4004kh877i46975i-hdg32hd725869997-01",
-  "data": {
-    "wasteId": "WST-12345",
-    "batchId": "BAT-STRAW-0901",
-    "flavorId": "FLV-STRAWBERRY",
-    "flavorName": "Fresh Strawberry",
-    "portions": 12,
-    "reason": "EXPIRED"
-  }
-}
-```
-
-## 4. Implementation Guidelines & Best Practices
-
-### Handling Missing Data in Thin Events (Data Materialization)
-When consuming a **Thin Event** (like `OrderCancelled` or `OrderReady`), you may find that the event's `data` payload does not contain enough information (e.g., `totalAmount`, `customerEmail`, `items`) to proceed with your service's business logic.
-
-**Anti-Pattern (Thundering Herd):** Do **not** make synchronous gRPC or REST calls back to the originating service (e.g., `Order Service`) to fetch the missing data. This creates tight coupling, introduces latency, and risks cascading failures if the originating service is under heavy load.
-
-**Best Practice (Event Sourcing / Local State Materialization):**
-1. Ensure your service subscribes to the preceding **Fat Event** in the entity's lifecycle (e.g., `OrderPlaced`).
-2. When the Fat Event is received, **store a read-optimized copy** of the necessary data (e.g., revenue, items, customer details) inside your own service's local database (e.g., MongoDB for Analytics).
-3. When the subsequent Thin Event (e.g., `OrderCancelled`) arrives containing only an ID reference, **retrieve the missing data from your own local database** using that ID to complete your business workflow.
-
-This approach guarantees strict microservice autonomy and aligns perfectly with the CQRS (Command Query Responsibility Segregation) architectural pattern.
+- Consumers cannot assume cross-exchange global ordering.
+- A consumer that receives a thin follow-up before its corresponding fat event
+  should retry with bounded backoff or park the message in a dead-letter queue.
+- Poison messages are rejected without infinite requeue loops.
+- Processed event IDs are retained long enough to cover the broker's redelivery
+  and retry window.

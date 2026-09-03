@@ -56,7 +56,7 @@ buf lint contracts
 buf build contracts
 ```
 
-Inventory waste event example:
+Event contract examples:
 
 ```bash
 python3 -m pip install jsonschema==4.26.0

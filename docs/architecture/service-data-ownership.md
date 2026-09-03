@@ -15,7 +15,7 @@ ownership of the underlying data.
 | Auth Service | Users, password hashes, roles, account status | PostgreSQL | Orders, flavor metadata, stock |
 | Catalog Service | Flavor names, descriptions, prices, images, recipes, allergens, active status | Redis | Available portions, batches, reservations |
 | Batch Inventory Service | Batches, portion balances, reservations, waste, inventory movements | PostgreSQL | Flavor descriptions and prices, orders, payments |
-| Analytics Service | Derived daily sales and waste aggregates | MongoDB | Operational source records |
+| Analytics Service | Derived daily sales and waste aggregates in integer minor units | MongoDB | Operational source records |
 
 ## Boundary rules
 
@@ -40,6 +40,8 @@ ownership of the underlying data.
 - Calendar dates use `YYYY-MM-DD`.
 - Monetary values in operational APIs use integer minor units with an explicit
   ISO 4217 currency code.
+- Monetary values in events and Analytics persistence also use integer minor
+  units. Decimal display values are derived only at an API or UI boundary.
 - Error responses use a stable machine-readable code, a human-readable message,
   and an optional field-level details map.
 

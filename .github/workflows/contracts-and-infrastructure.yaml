@@ -6,6 +6,7 @@ on:
     paths:
       - "contracts/**"
       - "docs/architecture/**"
+      - "docs/event-schema-spec.md"
       - "infra/**"
       - "analytics-service/.env.example"
       - "redocly.yaml"
@@ -15,6 +16,7 @@ on:
     paths:
       - "contracts/**"
       - "docs/architecture/**"
+      - "docs/event-schema-spec.md"
       - "infra/**"
       - "analytics-service/.env.example"
       - "redocly.yaml"

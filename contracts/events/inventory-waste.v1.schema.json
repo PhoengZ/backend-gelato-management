@@ -1,64 +1,92 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://gelatoflow.example/contracts/events/inventory-waste.v1.schema.json",
-  "title": "Inventory Waste Event v1",
+  "title": "GelatoFlow WasteRecorded v1 CloudEvent",
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "event_id",
-    "event_version",
-    "occurred_at",
-    "producer",
-    "date",
-    "flavor_id",
-    "portions",
-    "batch_id",
-    "reason",
-    "cost_lost",
-    "currency"
+    "specversion",
+    "id",
+    "source",
+    "type",
+    "time",
+    "datacontenttype",
+    "data"
   ],
   "properties": {
-    "event_id": {
+    "specversion": {
+      "const": "1.0"
+    },
+    "id": {
       "type": "string",
       "format": "uuid"
     },
-    "event_version": {
-      "const": 1
+    "source": {
+      "const": "/gelatoflow/batch-inventory-service"
     },
-    "occurred_at": {
+    "type": {
+      "const": "com.gelatoflow.inventory.waste-recorded.v1"
+    },
+    "time": {
       "type": "string",
       "format": "date-time"
     },
-    "producer": {
-      "const": "batch-inventory-service"
+    "datacontenttype": {
+      "const": "application/json"
     },
-    "date": {
+    "traceparent": {
       "type": "string",
-      "format": "date"
+      "pattern": "^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$",
+      "description": "Optional W3C trace context. Scheduled expiry jobs may have no inbound trace."
     },
-    "flavor_id": {
-      "type": "string",
-      "format": "uuid"
-    },
-    "portions": {
-      "type": "integer",
-      "minimum": 1
-    },
-    "batch_id": {
-      "type": "string",
-      "format": "uuid"
-    },
-    "reason": {
-      "type": "string",
-      "enum": ["EXPIRED", "DAMAGED", "QUALITY", "ADJUSTMENT"]
-    },
-    "cost_lost": {
-      "type": "number",
-      "minimum": 0,
-      "description": "Compatibility field for Analytics Service; decimal amount in THB."
-    },
-    "currency": {
-      "const": "THB"
+    "data": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "waste_id",
+        "batch_id",
+        "flavor_id",
+        "date",
+        "portions",
+        "reason",
+        "cost_lost_minor",
+        "currency"
+      ],
+      "properties": {
+        "waste_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "batch_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "flavor_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "date": {
+          "type": "string",
+          "format": "date"
+        },
+        "portions": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "reason": {
+          "type": "string",
+          "enum": ["EXPIRED", "DAMAGED", "QUALITY", "ADJUSTMENT"]
+        },
+        "cost_lost_minor": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 0,
+          "description": "Cost lost in the currency's minor unit; satang when currency is THB."
+        },
+        "currency": {
+          "const": "THB"
+        }
+      }
     }
   }
 }
