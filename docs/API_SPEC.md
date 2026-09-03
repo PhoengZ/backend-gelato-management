@@ -1,8 +1,28 @@
-# Gelato Management System - API Specification
+# Gelato Management System - Frontend Demo API Reference
 
 ## Overview
 
-This is the API specification for the Gelato Management System frontend. The API handles authentication, order management, inventory tracking, sales analytics, and payment processing for a gelato shop management platform.
+This document records the current frontend demo interface. It is retained as a
+migration reference and is not the canonical backend contract.
+
+The versioned OpenAPI documents under `contracts/openapi/`, the Inventory gRPC
+definition under `contracts/proto/`, and the JSON Schemas under
+`contracts/events/` are the backend sources of truth. When this demo reference
+differs from those contracts, service and Gateway implementations follow the
+versioned contracts and the frontend is migrated separately.
+
+Key migration differences include:
+
+| Frontend demo | Canonical backend contract |
+| --- | --- |
+| `/api/v1/catalog/flavors` | `/api/v1/flavors` |
+| Catalog flavor contains stock | Catalog contains metadata only; Inventory owns availability |
+| Prefixed IDs and camelCase | UUID IDs and `snake_case` JSON |
+| Decimal or ambiguous money | Integer `*_minor` plus `currency` |
+| Cookie session inside the demo | Gateway validates Auth Service bearer JWT; an edge layer may store it in an `httpOnly` cookie |
+
+The API handles authentication, order management, inventory tracking, sales
+analytics, and payment processing for the demo UI.
 
 **API Base URL**: `${NEXT_PUBLIC_API_BASE_URL}`
 
@@ -28,7 +48,10 @@ This is the API specification for the Gelato Management System frontend. The API
 
 ## Authentication
 
-All protected endpoints require authentication via cookie-based sessions. The authentication token is stored in an `httpOnly` cookie and cannot be accessed via JavaScript.
+The current demo stores its session in an `httpOnly` cookie. The canonical
+backend interface uses `Authorization: Bearer <JWT>` at API Gateway. A future
+frontend edge adapter may keep the JWT in an `httpOnly` cookie and translate it
+to the bearer header without changing the service contract.
 
 ### POST /api/v1/auth/login
 
