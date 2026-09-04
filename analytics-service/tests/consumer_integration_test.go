@@ -28,7 +28,8 @@ func TestConsumerIntegration(t *testing.T) {
 
 	// 1. Setup Mock Repository and Service
 	mockRepo := NewMockRepository()
-	svc := service.NewAnalyticsService(mockRepo)
+	mockOrderRepo := NewMockOrderRepository()
+	svc := service.NewAnalyticsService(mockRepo, mockOrderRepo)
 
 	// 2. Setup and Start Consumer
 	consumer, err := messaging.NewConsumer(rabbitURL, svc)
@@ -54,23 +55,29 @@ func TestConsumerIntegration(t *testing.T) {
 	}
 	defer pubCh.Close()
 
-	// 4. Publish Order Success Message
-	orderMsg := models.OrderSuccessMessage{
-		Date:        "2026-08-20",
-		TotalAmount: 25000.50,
-		OrderItems: []models.OrderItem{
-			{FlavorID: "F01", Qty: 200},
-			{FlavorID: "F03", Qty: 100},
+	// 4. Publish OrderPlaced event (CloudEvents-style envelope)
+	orderEvent := models.OrderPlacedEvent{
+		ID:     "evt_integ_001",
+		Type:   "OrderPlaced",
+		Time:   "2026-08-20T10:30:00.000Z",
+		Source: "order-service",
+		Data: models.OrderPlacedData{
+			OrderID:     "ord_integ_001",
+			TotalAmount: 25000.50,
+			Items: []models.OrderPlacedItem{
+				{FlavorID: "F01", FlavorName: "Vanilla", Portions: 200, UnitPrice: 83.335, Subtotal: 16667},
+				{FlavorID: "F03", FlavorName: "Strawberry", Portions: 100, UnitPrice: 83.335, Subtotal: 8333.50},
+			},
 		},
 	}
-	orderBody, _ := json.Marshal(orderMsg)
+	orderBody, _ := json.Marshal(orderEvent)
 
 	err = pubCh.PublishWithContext(
 		context.Background(),
-		"order",         // exchange
-		"order.success", // routing key
-		false,           // mandatory
-		false,           // immediate
+		"order",       // exchange
+		"OrderPlaced", // routing key
+		false,         // mandatory
+		false,         // immediate
 		amqp.Publishing{
 			ContentType: "application/json",
 			Body:        orderBody,
@@ -80,23 +87,29 @@ func TestConsumerIntegration(t *testing.T) {
 		t.Fatalf("Failed to publish order message: %v", err)
 	}
 
-	// 5. Publish Inventory Waste Message
-	wasteMsg := models.InventoryWasteMessage{
-		Date:     "2026-08-20",
-		FlavorID: "F01",
-		Portions: 15,
-		BatchID:  "B999",
-		Reason:   "melted",
-		CostLost: 300.00,
+	// 5. Publish WasteRecorded event (CloudEvents-style envelope)
+	wasteEvent := models.WasteRecordedEvent{
+		ID:     "evt_integ_002",
+		Type:   "WasteRecorded",
+		Time:   "2026-08-20T14:00:00.000Z",
+		Source: "batch-inventory-service",
+		Data: models.WasteRecordedData{
+			WasteID:    "wst_integ_001",
+			BatchID:    "B999",
+			FlavorID:   "F01",
+			FlavorName: "Vanilla",
+			Portions:   15,
+			Reason:     "melted",
+		},
 	}
-	wasteBody, _ := json.Marshal(wasteMsg)
+	wasteBody, _ := json.Marshal(wasteEvent)
 
 	err = pubCh.PublishWithContext(
 		context.Background(),
-		"inventory",       // exchange
-		"inventory.waste", // routing key
-		false,             // mandatory
-		false,             // immediate
+		"inventory",     // exchange
+		"WasteRecorded", // routing key
+		false,           // mandatory
+		false,           // immediate
 		amqp.Publishing{
 			ContentType: "application/json",
 			Body:        wasteBody,
@@ -139,8 +152,8 @@ func TestConsumerIntegration(t *testing.T) {
 	if len(record.WasteStats.WasteByReason) != 1 {
 		t.Fatalf("Expected 1 waste reason, got %d", len(record.WasteStats.WasteByReason))
 	}
-	if record.WasteStats.WasteByReason[0].CostLost != 300.00 {
-		t.Errorf("Expected CostLost 300.00, got %f", record.WasteStats.WasteByReason[0].CostLost)
+	if record.WasteStats.WasteByReason[0].Portions != 15 {
+		t.Errorf("Expected WasteByReason Portions 15, got %d", record.WasteStats.WasteByReason[0].Portions)
 	}
 
 	t.Log("Integration test passed successfully!")

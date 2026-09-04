@@ -2,6 +2,9 @@ package models
 
 import "go.mongodb.org/mongo-driver/bson/primitive"
 
+// --- MongoDB Storage Models ---
+
+// Analytics represents a single daily analytics document stored in MongoDB.
 type Analytics struct {
 	ID          primitive.ObjectID `bson:"_id,omitempty" json:"id"`
 	Date        string             `bson:"date" json:"date"`
@@ -28,35 +31,119 @@ type WasteStats struct {
 }
 
 type WasteByReason struct {
-	Reason   string  `bson:"reason" json:"reason"`
-	Portions int     `bson:"portions" json:"portions"`
-	CostLost float64 `bson:"cost_lost" json:"cost_lost"`
+	Reason   string `bson:"reason" json:"reason"`
+	Portions int    `bson:"portions" json:"portions"`
 }
 
 type FlavorStat struct {
-	FlavorID      string `bson:"flavor_id" json:"flavor_id"`
-	Name          string `bson:"name,omitempty" json:"name,omitempty"` // Note: name might not be available in message, maybe we just store ID for now, or fetch from somewhere else if needed.
-	ScoopsSold    int    `bson:"scoops_sold" json:"scoops_sold"`
-	WastePortions int    `bson:"waste_portions" json:"waste_portions"`
+	FlavorID      string  `bson:"flavor_id" json:"flavor_id"`
+	Name          string  `bson:"name" json:"name"`
+	ScoopsSold    int     `bson:"scoops_sold" json:"scoops_sold"`
+	Revenue       float64 `bson:"revenue" json:"revenue"`
+	WastePortions int     `bson:"waste_portions" json:"waste_portions"`
 }
 
-// Message Payloads
-type OrderSuccessMessage struct {
-	Date        string      `json:"date"`
-	TotalAmount float64     `json:"total_amount"`
-	OrderItems  []OrderItem `json:"order_items"`
+// --- API Response DTOs (matching API_SPEC.md GET /api/v1/analytics/summary) ---
+
+type AnalyticsSummaryResponse struct {
+	TotalRevenue  float64          `json:"totalRevenue"`
+	TotalOrders   int              `json:"totalOrders"`
+	TotalScoops   int              `json:"totalScoops"`
+	TotalWaste    int              `json:"totalWaste"`
+	SalesByFlavor []FlavorSales    `json:"salesByFlavor"`
+	WasteByFlavor []FlavorWaste    `json:"wasteByFlavor"`
+	SalesTrend    []SalesTrendData `json:"salesTrend"`
 }
 
-type OrderItem struct {
-	FlavorID string `json:"flavor_id"`
-	Qty      int    `json:"qty"`
+type FlavorSales struct {
+	FlavorID   string  `json:"flavorId"`
+	FlavorName string  `json:"flavorName"`
+	Portions   int     `json:"portions"`
+	Revenue    float64 `json:"revenue"`
 }
 
-type InventoryWasteMessage struct {
-	Date     string  `json:"date"` // Assume it might be provided or use current date if absent
-	FlavorID string  `json:"flavor_id"`
-	Portions int     `json:"portions"`
-	BatchID  string  `json:"batch_id"`
-	Reason   string  `json:"reason"`
-	CostLost float64 `json:"cost_lost"`
+type FlavorWaste struct {
+	FlavorID   string `json:"flavorId"`
+	FlavorName string `json:"flavorName"`
+	Portions   int    `json:"portions"`
+}
+
+type SalesTrendData struct {
+	Date    string  `json:"date"`
+	Label   string  `json:"label"`
+	Revenue float64 `json:"revenue"`
+	Orders  int     `json:"orders"`
+	Scoops  int     `json:"scoops"`
+}
+
+// --- RabbitMQ Event Envelopes (CloudEvents-style) ---
+
+// OrderPlacedEvent is the enriched event published by Order Service after
+// successful payment. It contains all item details needed for analytics
+// so the Analytics Service never needs to call back to Order/Catalog services.
+type OrderPlacedEvent struct {
+	ID          string          `json:"id"`
+	Type        string          `json:"type"`
+	Time        string          `json:"time"`
+	Source      string          `json:"source"`
+	Traceparent string          `json:"traceparent"`
+	Data        OrderPlacedData `json:"data"`
+}
+
+type OrderPlacedData struct {
+	OrderID     string            `json:"orderId"`
+	TotalAmount float64           `json:"totalAmount"`
+	Items       []OrderPlacedItem `json:"items"`
+}
+
+type OrderPlacedItem struct {
+	FlavorID   string  `json:"flavorId"`
+	FlavorName string  `json:"flavorName"`
+	Portions   int     `json:"portions"`
+	UnitPrice  float64 `json:"unitPrice"`
+	Subtotal   float64 `json:"subtotal"`
+}
+
+// OrderCancelledEvent is published by Order Service when an order is cancelled.
+type OrderCancelledEvent struct {
+	ID          string             `json:"id"`
+	Type        string             `json:"type"`
+	Time        string             `json:"time"`
+	Source      string             `json:"source"`
+	Traceparent string             `json:"traceparent"`
+	Data        OrderCancelledData `json:"data"`
+}
+
+type OrderCancelledData struct {
+	OrderID string `json:"orderId"`
+	Reason  string `json:"reason"`
+}
+
+// WasteRecordedEvent is the event published by Batch Inventory Service
+// when waste is recorded (e.g., expired batch, spoilage).
+type WasteRecordedEvent struct {
+	ID          string            `json:"id"`
+	Type        string            `json:"type"`
+	Time        string            `json:"time"`
+	Source      string            `json:"source"`
+	Traceparent string            `json:"traceparent"`
+	Data        WasteRecordedData `json:"data"`
+}
+
+type WasteRecordedData struct {
+	WasteID    string `json:"wasteId"`
+	BatchID    string `json:"batchId"`
+	FlavorID   string `json:"flavorId"`
+	FlavorName string `json:"flavorName"`
+	Portions   int    `json:"portions"`
+	Reason     string `json:"reason"`
+}
+
+// Order represents an order stored in the analytics database for reversal on cancellation.
+type Order struct {
+	ID          string            `bson:"_id" json:"id"`
+	Status      string            `bson:"status" json:"status"`
+	CreatedAt   string            `bson:"created_at" json:"created_at"`
+	TotalAmount float64           `bson:"total_amount" json:"total_amount"`
+	Items       []OrderPlacedItem `bson:"items" json:"items"`
 }

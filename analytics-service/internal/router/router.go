@@ -16,5 +16,5 @@ func SetupRoutes(app *fiber.App, analyticsService service.AnalyticsService) {
 
 	// Version 1 routes
 	apiV1 := api.Group("/v1")
-	apiV1.Get("/analytics", analyticsHandlerV1.GetAnalytics)
+	apiV1.Get("/analytics/summary", analyticsHandlerV1.GetAnalyticsSummary)
 }

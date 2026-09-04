@@ -35,7 +35,8 @@ func main() {
 
 	// Init layers
 	repo := repository.NewAnalyticsRepository(db)
-	svc := service.NewAnalyticsService(repo)
+	orderRepo := repository.NewOrderRepository(db)
+	svc := service.NewAnalyticsService(repo, orderRepo)
 
 	// Init RabbitMQ Consumer
 	consumer, err := messaging.NewConsumer(cfg.RabbitMQURL, svc)

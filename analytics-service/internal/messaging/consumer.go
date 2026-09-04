@@ -65,16 +65,23 @@ func (c *Consumer) Start() error {
 		return err
 	}
 
-	// Bind queue
+	// Bind queue to routing keys
 	err = c.ch.QueueBind(
-		q.Name, "order.success", "order", false, nil,
+		q.Name, "OrderPlaced", "order", false, nil,
 	)
 	if err != nil {
 		return err
 	}
 
 	err = c.ch.QueueBind(
-		q.Name, "inventory.waste", "inventory", false, nil,
+		q.Name, "WasteRecorded", "inventory", false, nil,
+	)
+	if err != nil {
+		return err
+	}
+
+	err = c.ch.QueueBind(
+		q.Name, "OrderCancelled", "order", false, nil,
 	)
 	if err != nil {
 		return err
@@ -142,15 +149,15 @@ func isPermanentError(err error) bool {
 func (c *Consumer) processMessage(d amqp.Delivery) {
 	ctx := context.Background()
 	switch d.RoutingKey {
-	case "order.success":
-		var msg models.OrderSuccessMessage
-		if err := json.Unmarshal(d.Body, &msg); err != nil {
-			log.Printf("Permanent error unmarshaling order success (nacking without requeue): %v", err)
+	case "OrderPlaced":
+		var event models.OrderPlacedEvent
+		if err := json.Unmarshal(d.Body, &event); err != nil {
+			log.Printf("Permanent error unmarshaling order placed event (nacking without requeue): %v", err)
 			d.Nack(false, false)
 			return
 		}
-		if err := c.service.ProcessOrderSuccess(ctx, msg); err != nil {
-			log.Printf("Error processing order success: %v", err)
+		if err := c.service.ProcessOrderPlaced(ctx, event); err != nil {
+			log.Printf("Error processing order placed event: %v", err)
 			if isPermanentError(err) {
 				d.Nack(false, false) // don't requeue permanent errors
 			} else {
@@ -160,15 +167,33 @@ func (c *Consumer) processMessage(d amqp.Delivery) {
 		}
 		d.Ack(false)
 
-	case "inventory.waste":
-		var msg models.InventoryWasteMessage
-		if err := json.Unmarshal(d.Body, &msg); err != nil {
-			log.Printf("Permanent error unmarshaling inventory waste (nacking without requeue): %v", err)
+	case "OrderCancelled":
+		var event models.OrderCancelledEvent
+		if err := json.Unmarshal(d.Body, &event); err != nil {
+			log.Printf("Permanent error unmarshaling order cancelled event (nacking without requeue): %v", err)
 			d.Nack(false, false)
 			return
 		}
-		if err := c.service.ProcessInventoryWaste(ctx, msg); err != nil {
-			log.Printf("Error processing inventory waste: %v", err)
+		if err := c.service.ProcessOrderCancelled(ctx, event); err != nil {
+			log.Printf("Error processing order cancelled event: %v", err)
+			if isPermanentError(err) {
+				d.Nack(false, false)
+			} else {
+				d.Nack(false, true)
+			}
+			return
+		}
+		d.Ack(false)
+
+	case "WasteRecorded":
+		var event models.WasteRecordedEvent
+		if err := json.Unmarshal(d.Body, &event); err != nil {
+			log.Printf("Permanent error unmarshaling waste recorded event (nacking without requeue): %v", err)
+			d.Nack(false, false)
+			return
+		}
+		if err := c.service.ProcessWasteRecorded(ctx, event); err != nil {
+			log.Printf("Error processing waste recorded event: %v", err)
 			if isPermanentError(err) {
 				d.Nack(false, false)
 			} else {
