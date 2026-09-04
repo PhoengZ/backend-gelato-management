@@ -51,7 +51,7 @@ flowchart LR
     ANS --> AnaDB
 
     %% Inter-service & External Connections
-    OS -- gRPC: Reserve/Release Portions --> BIS
+    OS -- gRPC: Check/Reserve/Confirm/Release Portions --> BIS
     PS -- Update Order Status --> OS 
     PS -- External API --> Stripe
     Stripe -- Webhook --> PS

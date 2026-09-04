@@ -1,0 +1,376 @@
+openapi: 3.1.0
+info:
+  title: GelatoFlow Batch Inventory Service API
+  version: 1.0.0
+  description: External management and availability contract for batch-owned stock.
+servers:
+  - url: /
+paths:
+  /api/v1/inventory/availability:
+    get:
+      operationId: listFlavorAvailability
+      summary: List aggregate sellable portions by flavor
+      tags: [Availability]
+      security: []
+      parameters:
+        - name: flavor_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Current sellable availability, excluding expired batches
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items, as_of]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/FlavorAvailability'
+                  as_of:
+                    type: string
+                    format: date-time
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /api/v1/inventory/batches:
+    get:
+      operationId: listBatches
+      summary: List batches
+      tags: [Batches]
+      security:
+        - bearerAuth: []
+      x-required-roles: [STAFF, MANAGER]
+      parameters:
+        - name: flavor_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/BatchStatus'
+      responses:
+        '200':
+          description: Batch list
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Batch'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      operationId: createBatch
+      summary: Create a produced gelato batch
+      tags: [Batches]
+      security:
+        - bearerAuth: []
+      x-required-roles: [MANAGER]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateBatchRequest'
+      responses:
+        '201':
+          description: Batch created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Batch'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /api/v1/inventory/batches/{batch_id}:
+    parameters:
+      - $ref: '#/components/parameters/BatchId'
+    get:
+      operationId: getBatch
+      summary: Get a batch and its current balances
+      tags: [Batches]
+      security:
+        - bearerAuth: []
+      x-required-roles: [STAFF, MANAGER]
+      responses:
+        '200':
+          description: Batch found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Batch'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/inventory/batches/{batch_id}/waste:
+    parameters:
+      - $ref: '#/components/parameters/BatchId'
+    post:
+      operationId: recordBatchWaste
+      summary: Move available portions to waste
+      tags: [Waste]
+      security:
+        - bearerAuth: []
+      x-required-roles: [STAFF, MANAGER]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecordWasteRequest'
+      responses:
+        '201':
+          description: Waste recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WasteRecord'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    BatchId:
+      name: batch_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Unauthorized:
+      description: Authentication required
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Forbidden:
+      description: Insufficient role
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFound:
+      description: Batch not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Conflict:
+      description: Idempotency conflict or insufficient available portions
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+  schemas:
+    FlavorAvailability:
+      type: object
+      additionalProperties: false
+      required: [flavor_id, available_portions]
+      properties:
+        flavor_id:
+          type: string
+          format: uuid
+        available_portions:
+          type: integer
+          minimum: 0
+        earliest_expiry:
+          type: string
+          format: date-time
+    Batch:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - flavor_id
+        - production_date
+        - expires_at
+        - initial_portions
+        - available_portions
+        - reserved_portions
+        - sold_portions
+        - wasted_portions
+        - unit_cost_minor
+        - currency
+        - status
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        flavor_id:
+          type: string
+          format: uuid
+        production_date:
+          type: string
+          format: date
+        expires_at:
+          type: string
+          format: date-time
+        initial_portions:
+          type: integer
+          minimum: 1
+        available_portions:
+          type: integer
+          minimum: 0
+        reserved_portions:
+          type: integer
+          minimum: 0
+        sold_portions:
+          type: integer
+          minimum: 0
+        wasted_portions:
+          type: integer
+          minimum: 0
+        unit_cost_minor:
+          type: integer
+          format: int64
+          minimum: 0
+        currency:
+          type: string
+          const: THB
+        status:
+          $ref: '#/components/schemas/BatchStatus'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    CreateBatchRequest:
+      type: object
+      additionalProperties: false
+      required:
+        [flavor_id, production_date, expires_at, initial_portions, unit_cost_minor, currency]
+      properties:
+        flavor_id:
+          type: string
+          format: uuid
+        production_date:
+          type: string
+          format: date
+        expires_at:
+          type: string
+          format: date-time
+        initial_portions:
+          type: integer
+          minimum: 1
+        unit_cost_minor:
+          type: integer
+          format: int64
+          minimum: 0
+        currency:
+          type: string
+          const: THB
+    RecordWasteRequest:
+      type: object
+      additionalProperties: false
+      required: [portions, reason, idempotency_key]
+      properties:
+        portions:
+          type: integer
+          minimum: 1
+        reason:
+          $ref: '#/components/schemas/WasteReason'
+        note:
+          type: string
+          maxLength: 500
+        idempotency_key:
+          type: string
+          format: uuid
+    WasteRecord:
+      type: object
+      additionalProperties: false
+      required:
+        [id, batch_id, flavor_id, portions, reason, cost_lost_minor, currency, recorded_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        batch_id:
+          type: string
+          format: uuid
+        flavor_id:
+          type: string
+          format: uuid
+        portions:
+          type: integer
+          minimum: 1
+        reason:
+          $ref: '#/components/schemas/WasteReason'
+        note:
+          type: string
+        cost_lost_minor:
+          type: integer
+          format: int64
+          minimum: 0
+        currency:
+          type: string
+          const: THB
+        recorded_at:
+          type: string
+          format: date-time
+    BatchStatus:
+      type: string
+      enum: [ACTIVE, EXHAUSTED, EXPIRED, ARCHIVED]
+    WasteReason:
+      type: string
+      enum: [EXPIRED, DAMAGED, QUALITY, ADJUSTMENT]
+    ErrorResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          examples: [INSUFFICIENT_STOCK]
+        message:
+          type: string
+        details:
+          type: object
+          additionalProperties:
+            type: string

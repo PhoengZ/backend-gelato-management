@@ -1,0 +1,19 @@
+{
+  "specversion": "1.0",
+  "id": "b76c52fd-3373-49da-9283-85456ba3c53c",
+  "source": "/gelatoflow/batch-inventory-service",
+  "type": "com.gelatoflow.inventory.waste-recorded.v1",
+  "time": "2026-08-31T10:15:00Z",
+  "datacontenttype": "application/json",
+  "traceparent": "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
+  "data": {
+    "waste_id": "03db6f89-369a-4cd1-a04f-830330f99f97",
+    "batch_id": "36d9f415-d169-447b-9f81-37075fb19cdd",
+    "flavor_id": "0f3bca11-1eb2-4a86-908a-e60d7656c79b",
+    "date": "2026-08-31",
+    "portions": 3,
+    "reason": "EXPIRED",
+    "cost_lost_minor": 7500,
+    "currency": "THB"
+  }
+}

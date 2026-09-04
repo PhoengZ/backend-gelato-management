@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gelatoflow.example/contracts/events/inventory-waste.v1.schema.json",
+  "title": "GelatoFlow WasteRecorded v1 CloudEvent",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "specversion",
+    "id",
+    "source",
+    "type",
+    "time",
+    "datacontenttype",
+    "data"
+  ],
+  "properties": {
+    "specversion": {
+      "const": "1.0"
+    },
+    "id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "source": {
+      "const": "/gelatoflow/batch-inventory-service"
+    },
+    "type": {
+      "const": "com.gelatoflow.inventory.waste-recorded.v1"
+    },
+    "time": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "datacontenttype": {
+      "const": "application/json"
+    },
+    "traceparent": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$",
+      "description": "Optional W3C trace context. Scheduled expiry jobs may have no inbound trace."
+    },
+    "data": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "waste_id",
+        "batch_id",
+        "flavor_id",
+        "date",
+        "portions",
+        "reason",
+        "cost_lost_minor",
+        "currency"
+      ],
+      "properties": {
+        "waste_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "batch_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "flavor_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "date": {
+          "type": "string",
+          "format": "date"
+        },
+        "portions": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "reason": {
+          "type": "string",
+          "enum": ["EXPIRED", "DAMAGED", "QUALITY", "ADJUSTMENT"]
+        },
+        "cost_lost_minor": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 0,
+          "description": "Cost lost in the currency's minor unit; satang when currency is THB."
+        },
+        "currency": {
+          "const": "THB"
+        }
+      }
+    }
+  }
+}

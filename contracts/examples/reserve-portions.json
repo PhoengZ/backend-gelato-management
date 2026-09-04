@@ -1,0 +1,10 @@
+{
+  "order_id": "a7323254-c667-44e0-ab6c-e3efc69d7a81",
+  "idempotency_key": "da8a9b73-ea63-4939-8863-31c824fc71cb",
+  "items": [
+    {
+      "flavor_id": "0f3bca11-1eb2-4a86-908a-e60d7656c79b",
+      "portions": 2
+    }
+  ]
+}

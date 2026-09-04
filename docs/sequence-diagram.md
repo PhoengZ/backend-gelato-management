@@ -14,10 +14,13 @@ sequenceDiagram
     rect rgb(30, 30, 30)
     note right of C: 1. Check Real-time Availability
     end
-    C->>AG: GET /api/v1/catalog/flavors & timeslots
-    AG->>CS: GET /flavors & /timeslots
-    CS-->>AG: Return available slots & stock
-    AG-->>C: Return data
+    C->>AG: GET /api/v1/flavors
+    AG->>CS: GET /api/v1/flavors
+    CS-->>AG: Return flavor metadata
+    C->>AG: GET /api/v1/inventory/availability
+    AG->>BIS: GET /api/v1/inventory/availability
+    BIS-->>AG: Return sellable portions
+    AG-->>C: Return catalog and availability views
 
     rect rgb(30, 30, 30)
     note right of C: 2. Order Creation & Stock Reservation (Synchronous)
@@ -25,9 +28,9 @@ sequenceDiagram
     C->>AG: POST /api/v1/orders (items, timeslot)
     AG->>OS: POST /orders
     activate OS
-    OS->>BIS: gRPC: ReservePortions(flavorId, portions)
+    OS->>BIS: gRPC: ReservePortions(flavor_id, portions, idempotency_key)
     activate BIS
-    BIS-->>OS: Confirmed reservation
+    BIS-->>OS: ACTIVE reservation with expires_at
     deactivate BIS
     OS-->>AG: Order created (status: PENDING_PAYMENT)
     deactivate OS
@@ -46,12 +49,15 @@ sequenceDiagram
     C->>STR: Complete payment using clientSecret
     STR->>AG: POST /api/v1/payments/webhook (payment_intent.succeeded)
     AG->>PS: Route webhook
-    PS->>OS: Update order (status: PAID)
+    PS->>OS: Report verified payment success
+    OS->>BIS: gRPC: ConfirmReservation(reservation_id, idempotency_key)
+    BIS-->>OS: CONFIRMED reservation
+    OS->>OS: Update order status to PAID and write outbox
 
     rect rgb(30, 30, 30)
     note right of C: 4. Asynchronous Workflows (Queue Allocation, Notification)
     end
-    OS->>RMQ: Publish OrderPlaced(orderDetails, status: PAID)
+    OS->>RMQ: Publish OrderPlaced v1 (minor-unit totals, status: PAID)
     
     par Fulfillment
         RMQ->>FS: Consume OrderPlaced event

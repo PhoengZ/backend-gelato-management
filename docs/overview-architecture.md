@@ -15,7 +15,7 @@ GelatoFlow utilizes an **Event-Driven Microservices Architecture**.
 | **API Gateway** | Routing, Authentication, Rate limiting. | *None* |
 | **Auth Service** | User management, Roles, JWT issuance. | PostgreSQL |
 | **Catalog Service** | Flavors, Prices, Recipes, Allergens. | Redis *(Note: Updated from MongoDB)* |
-| **Order Service** | Orders, Customizations, Time-slot reservation, Payment status. | PostgreSQL |
+| **Order Service** | Orders, Customizations, selected pickup-slot reference, Payment status. | PostgreSQL |
 | **Batch Inventory Service** | Batches, Remaining portions, Reservations, Waste, Expiry dates. | PostgreSQL |
 | **Fulfillment Service** | Preparation queues, Pickup time-slot management, QR Pickup. | PostgreSQL |
 | **Notification Service** | Notifications for ready orders & expiring batches. | MongoDB (or Stateless) |
@@ -49,18 +49,23 @@ Used for decoupling services and handling asynchronous workflows. (RabbitMQ pref
 ## 4. Core Workflows
 
 ### Ordering & Time-Slot Queue Flow (Happy Path)
-1. **Check Availability & Time Slots:** Customer views real-time flavor stock and available pickup time slots (`GET /api/v1/catalog/flavors` & `GET /api/v1/catalog/timeslots`) via **API Gateway**.
+1. **Check Catalog, Availability & Time Slots:** Customer reads flavor metadata
+   from `GET /api/v1/flavors`, stock from
+   `GET /api/v1/inventory/availability`, and pickup slots from **Fulfillment
+   Service** through **API Gateway**. Gateway may compose these responses but
+   Catalog never owns stock or time slots.
 2. **Create Order:** Customer selects flavors and picks a desired time slot, then submits `POST /api/v1/orders`.
 3. **Reserve Stock:** **Order Service** calls **Batch Inventory Service** via `gRPC (ReservePortions)` to atomically reserve portions.
 4. **Pending Payment:** Order is saved with status `PENDING_PAYMENT` bound to the selected time slot.
 5. **Initiate Payment:** Frontend requests payment intent via `POST /api/v1/payments/create-payment-intent`.
 6. **Payment Service:** Calls Stripe to create PaymentIntent and returns `clientSecret`.
 7. **Direct Payment:** Customer completes card payment securely with Stripe.
-8. **Payment Webhook:** Stripe sends `payment_intent.succeeded` webhook to API Gateway (`POST /api/v1/payments/webhook`), which forwards to **Payment Service**, and **Payment Service** instructs **Order Service** to update status to `PAID`.
-9. **Publish Event:** **Order Service** publishes `OrderPlaced` event (containing order details & timeslot) to **RabbitMQ**.
-10. **Time-Slot Queue Allocation:** 
+8. **Payment Webhook:** Stripe sends `payment_intent.succeeded` webhook to API Gateway (`POST /api/v1/payments/webhook`), which forwards to **Payment Service**. Payment Service reports the verified result to **Order Service**.
+9. **Confirm Reservation:** **Order Service** calls `ConfirmReservation`; Batch Inventory atomically moves reserved portions to sold, then Order changes to `PAID`.
+10. **Publish Event:** **Order Service** writes a transactional outbox record and publishes the versioned `OrderPlaced` CloudEvent containing integer minor-unit totals.
+11. **Time-Slot Queue Allocation:**
     * **Fulfillment Service** consumes `OrderPlaced`, allocates a sequential **Queue Number scoped to that specific Time Slot** (e.g., Slot `14:00 - 14:15` -> Queue `#01`), and places it into the kitchen prep queue.
-11. **Notify Customer:** **Notification Service** consumes `OrderPlaced` and sends an order confirmation with the **Slot Details & Slot Queue Number** to the Customer.
+12. **Notify Customer:** **Notification Service** consumes `OrderPlaced` and sends an order confirmation with the **Slot Details & Slot Queue Number** to the Customer.
 
 *(If stock is insufficient at step 3, Batch Inventory returns an Out of Stock error, and Order Service aborts the order).*
 

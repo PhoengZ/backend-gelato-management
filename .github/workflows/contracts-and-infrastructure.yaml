@@ -1,0 +1,105 @@
+name: Contracts and Infrastructure CI
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "contracts/**"
+      - "docs/architecture/**"
+      - "docs/event-schema-spec.md"
+      - "infra/**"
+      - "analytics-service/.env.example"
+      - "api-gateway/**"
+      - "redocly.yaml"
+      - ".github/workflows/contracts-and-infrastructure.yaml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "contracts/**"
+      - "docs/architecture/**"
+      - "docs/event-schema-spec.md"
+      - "infra/**"
+      - "analytics-service/.env.example"
+      - "api-gateway/**"
+      - "redocly.yaml"
+      - ".github/workflows/contracts-and-infrastructure.yaml"
+
+permissions:
+  contents: read
+
+jobs:
+  api-gateway:
+    name: Test API Gateway
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: api-gateway
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: api-gateway/go.mod
+          cache-dependency-path: api-gateway/go.sum
+
+      - name: Vet API Gateway
+        run: go vet ./...
+
+      - name: Test API Gateway
+        run: go test -race -count=1 ./...
+
+  contracts:
+    name: Validate shared contracts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          package-manager-cache: false
+
+      - name: Lint OpenAPI contracts
+        run: npx --yes @redocly/cli@2.49.0 lint --format=github-actions
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install event-schema validator
+        run: python -m pip install jsonschema==4.26.0
+
+      - name: Validate event examples
+        run: python contracts/scripts/validate_event_examples.py
+
+      - name: Set up Buf
+        uses: bufbuild/buf-action@v1
+        with:
+          version: "1.72.0"
+          setup_only: true
+
+      - name: Lint protobuf contracts
+        run: buf lint contracts
+
+      - name: Build protobuf contracts
+        run: buf build contracts
+
+  infrastructure:
+    name: Validate Docker Compose
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Resolve development stack
+        run: >-
+          docker compose
+          --env-file infra/.env.example
+          -f infra/docker/compose.yml
+          -f infra/docker/compose.dev.yml
+          config --quiet

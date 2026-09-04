@@ -1,0 +1,16 @@
+apis:
+  auth@v1:
+    root: contracts/openapi/auth-service.v1.yaml
+  catalog@v1:
+    root: contracts/openapi/catalog-service.v1.yaml
+  batch-inventory@v1:
+    root: contracts/openapi/batch-inventory-service.v1.yaml
+
+extends:
+  - recommended
+
+rules:
+  operation-operationId: error
+  operation-summary: error
+  no-ambiguous-paths: error
+  info-license: off

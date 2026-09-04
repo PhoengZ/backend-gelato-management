@@ -1,0 +1,26 @@
+{
+  "specversion": "1.0",
+  "id": "c3f8510a-6c17-48b2-b1ef-24901b0f5556",
+  "source": "/gelatoflow/order-service",
+  "type": "com.gelatoflow.order.placed.v1",
+  "time": "2026-09-02T14:30:00Z",
+  "datacontenttype": "application/json",
+  "traceparent": "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
+  "data": {
+    "order_id": "8d29d6cf-bd4d-48ca-9e4f-dcd8ec54e594",
+    "customer_id": "8dc81c31-a354-4774-b835-36ea0411bc54",
+    "status": "PAID",
+    "pickup_at": "2026-09-02T15:00:00Z",
+    "total_amount_minor": 1250,
+    "currency": "THB",
+    "items": [
+      {
+        "flavor_id": "0f3bca11-1eb2-4a86-908a-e60d7656c79b",
+        "flavor_name": "Sicilian Pistachio",
+        "portions": 2,
+        "unit_price_minor": 625,
+        "subtotal_minor": 1250
+      }
+    ]
+  }
+}

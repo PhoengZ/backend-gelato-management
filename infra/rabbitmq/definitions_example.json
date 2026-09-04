@@ -3,27 +3,37 @@
   "rabbitmq_version": "3.13",
   "users": [
     {
-      "name": "notification_service",
-      "password_hash": "b2RldmZhc3RfcGFzc3dvcmRfaGFzaA==",
+      "name": "publisher_service",
+      "password_hash": "replace_with_generated_hash",
+      "hashing_algorithm": "rabbit_password_hashing_sha256",
+      "tags": []
+    },
+    {
+      "name": "consumer_service",
+      "password_hash": "replace_with_generated_hash",
       "hashing_algorithm": "rabbit_password_hashing_sha256",
       "tags": []
     }
   ],
   "vhosts": [
     {
-      "name": "/"
-    },
-    {
-      "name": "notification_vhost"
+      "name": "gelato_vhost"
     }
   ],
   "permissions": [
     {
-      "user": "notification_service",
-      "vhost": "notification_vhost",
-      "configure": "^notification_queue$",
-      "write": "^notification_queue$",
-      "read": "^notification_queue$"
+      "user": "publisher_service",
+      "vhost": "gelato_vhost",
+      "configure": "^domain_exchange$",
+      "write": "^domain_exchange$",
+      "read": "^$"
+    },
+    {
+      "user": "consumer_service",
+      "vhost": "gelato_vhost",
+      "configure": "^(domain_exchange|consumer_queue)$",
+      "write": "^(domain_exchange|consumer_queue)$",
+      "read": "^(domain_exchange|consumer_queue)$"
     }
   ],
   "policies": [],

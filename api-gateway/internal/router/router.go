@@ -24,10 +24,12 @@ func SetupRoutes(app *fiber.App, cfg config.Config) {
 		return proxy.Do(c, url)
 	})
 
-	api.All("/catalog/*", func(c *fiber.Ctx) error {
+	catalogProxy := func(c *fiber.Ctx) error {
 		url := cfg.CatalogServiceURL + c.OriginalURL()
 		return proxy.Do(c, url)
-	})
+	}
+	api.All("/flavors", catalogProxy)
+	api.All("/flavors/*", catalogProxy)
 
 	api.All("/orders/*", func(c *fiber.Ctx) error {
 		url := cfg.OrderServiceURL + c.OriginalURL()
