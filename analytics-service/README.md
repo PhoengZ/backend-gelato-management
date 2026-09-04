@@ -220,9 +220,13 @@ PORT=3000
 To run the integration tests locally, you must first prepare the development infrastructure. The tests require a real RabbitMQ and MongoDB instance running on `localhost`.
 
 **1. Spin up the infrastructure:**
-Ensure RabbitMQ and MongoDB are running and accessible on `localhost`. Use the development override from the root of the project:
+Ensure RabbitMQ and MongoDB are running and accessible on `localhost`. Run from `infra/`:
 ```bash
-docker compose -f infra/docker/compose.yml -f infra/docker/compose.dev.yml up -d rabbitmq analytics-mongodb
+docker compose \
+  --env-file .env \
+  -f docker/compose.yml \
+  -f docker/compose.dev.yml \
+  up -d rabbitmq analytics-mongodb
 ```
 *(See the [Infrastructure README](../infra/README.md) for more details).*
 
