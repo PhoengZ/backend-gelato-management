@@ -50,6 +50,32 @@ docker compose \
 `.env` is ignored by Git. Values in `.env.example` are development-only and must
 be replaced outside local development.
 
+## Production deployment
+
+In production, deploy using only the base `docker/compose.yml` to ensure data store ports remain isolated within `gelato_network` and are not exposed to the public internet:
+
+1. Create a production `.env` from `.env.example` on the host server and restrict file permissions:
+   ```bash
+   cp .env.example .env
+   chmod 600 .env
+   ```
+2. Start infrastructure services without development port mappings:
+   ```bash
+   docker compose \
+     --env-file .env \
+     -f docker/compose.yml \
+     up -d rabbitmq analytics-mongodb auth-postgres inventory-postgres catalog-redis
+   ```
+   Or specify an external secret store path:
+   ```bash
+   docker compose \
+     --env-file /etc/secrets/gelatoflow.env \
+     -f docker/compose.yml \
+     up -d
+   ```
+
+Environment variables are interpolated by Docker Compose from `--env-file` at runtime. Container definitions do not hardcode secrets or bind unisolated environment files, ensuring services receive only their designated credentials.
+
 ## Service connection targets
 
 Containers on `gelato_network` connect with the container names and internal
@@ -60,6 +86,7 @@ Auth PostgreSQL:      auth-postgres:5432
 Inventory PostgreSQL: inventory-postgres:5432
 Catalog Redis:        catalog-redis:6379
 RabbitMQ:             rabbitmq:5672/gelato_vhost
+Analytics MongoDB:    analytics-mongodb:27017
 ```
 
 Host-based service processes use the development ports from
