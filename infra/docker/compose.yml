@@ -4,9 +4,8 @@ services:
   rabbitmq:
     image: rabbitmq:4-management-alpine
     container_name: rabbitmq
-    environment:
-      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:?RABBITMQ_DEFAULT_USER is required}
-      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:?RABBITMQ_DEFAULT_PASS is required}
+    env_file:
+      - ../.env
     networks:
       - gelato_network
     volumes:
@@ -26,6 +25,8 @@ services:
     container_name: analytics-mongodb
     networks:
       - gelato_network
+    env_file:
+      - ../../analytics-service/.env
     volumes:
       - analytics_mongodb_data:/data/db
     restart: unless-stopped
@@ -96,7 +97,6 @@ services:
     container_name: analytics-service
     env_file:
       - path: ../../analytics-service/.env
-        required: false
     networks:
       - gelato_network
     depends_on:
