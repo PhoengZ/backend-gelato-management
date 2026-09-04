@@ -9,6 +9,7 @@ on:
       - "docs/event-schema-spec.md"
       - "infra/**"
       - "analytics-service/.env.example"
+      - "api-gateway/**"
       - "redocly.yaml"
       - ".github/workflows/contracts-and-infrastructure.yaml"
   pull_request:
@@ -19,6 +20,7 @@ on:
       - "docs/event-schema-spec.md"
       - "infra/**"
       - "analytics-service/.env.example"
+      - "api-gateway/**"
       - "redocly.yaml"
       - ".github/workflows/contracts-and-infrastructure.yaml"
 
@@ -26,6 +28,28 @@ permissions:
   contents: read
 
 jobs:
+  api-gateway:
+    name: Test API Gateway
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: api-gateway
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: api-gateway/go.mod
+          cache-dependency-path: api-gateway/go.sum
+
+      - name: Vet API Gateway
+        run: go vet ./...
+
+      - name: Test API Gateway
+        run: go test -race -count=1 ./...
+
   contracts:
     name: Validate shared contracts
     runs-on: ubuntu-latest
