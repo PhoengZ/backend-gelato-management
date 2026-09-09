@@ -20,6 +20,6 @@ COPY --from=builder /out/catalog-service /app/catalog-service
 
 USER appuser
 
-EXPOSE 8082
+EXPOSE 3002
 
 CMD ["/app/catalog-service"]

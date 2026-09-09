@@ -26,7 +26,7 @@ func Load() (Config, error) {
 	_ = godotenv.Load()
 
 	cfg := Config{
-		Port:           envOrDefault("PORT", "8082"),
+		Port:           envOrDefault("PORT", "3002"),
 		RedisURL:       os.Getenv("REDIS_URL"),
 		RedisKeyPrefix: envOrDefault("REDIS_KEY_PREFIX", "catalog:v1"),
 		JWTSecret:      os.Getenv("JWT_SECRET"),

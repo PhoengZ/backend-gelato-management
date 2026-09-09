@@ -3,6 +3,7 @@ package config
 import "testing"
 
 func TestLoadAcceptsValidConfiguration(t *testing.T) {
+	t.Setenv("PORT", "")
 	t.Setenv("REDIS_URL", "redis://:password@localhost:6379/0")
 	t.Setenv("JWT_SECRET", "test_secret_that_is_longer_than_32_bytes")
 	t.Setenv("REDIS_KEY_PREFIX", "catalog:test")
@@ -12,7 +13,7 @@ func TestLoadAcceptsValidConfiguration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
-	if cfg.Port != "8082" || cfg.RedisKeyPrefix != "catalog:test" || cfg.RequestTimeout.String() != "2s" {
+	if cfg.Port != "3002" || cfg.RedisKeyPrefix != "catalog:test" || cfg.RequestTimeout.String() != "2s" {
 		t.Fatalf("unexpected config: %+v", cfg)
 	}
 }

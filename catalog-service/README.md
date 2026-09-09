@@ -64,10 +64,16 @@ Copy `.env.example` to `.env` for host-based development.
 | `JWT_ISSUER` | Expected `iss` claim |
 | `JWT_AUDIENCE` | Expected `aud` claim |
 | `REQUEST_TIMEOUT` | Maximum Redis-backed request duration, default `3s` |
-| `PORT` | HTTP port, default `8082` |
+| `PORT` | HTTP port, default `3002`, matching the current Gateway target |
 
 The example values are local-development values only. Never commit a real `.env`
 or reuse the development signing secret in another environment.
+
+The current Gateway defaults to `http://localhost:3002` for Catalog. Catalog's
+default port and example environment match that existing setting. A local `.env`
+from the earlier Catalog branch may still set `PORT=8082`; change that local value
+to `3002`, or intentionally configure the caller for another port. No Gateway,
+Auth, shared Compose, or broker changes are required by this Catalog work.
 
 ## Run and test
 
@@ -92,7 +98,7 @@ Build and run the local image on the shared infrastructure network:
 docker build -t gelatoflow/catalog-service:local ./catalog-service
 docker run --rm \
   --network gelato-management_gelato_network \
-  -p 8082:8082 \
+  -p 127.0.0.1:3002:3002 \
   -e REDIS_URL='redis://:catalog_dev_password@catalog-redis:6379/0' \
   -e JWT_SECRET='development_only_change_this_secret_32_bytes' \
   gelatoflow/catalog-service:local
@@ -101,3 +107,4 @@ docker run --rm \
 The frontend demo may keep using mock flavor routes temporarily. API Gateway or a
 frontend adapter should later compose Catalog metadata with availability returned
 by Batch Inventory Service.
+
