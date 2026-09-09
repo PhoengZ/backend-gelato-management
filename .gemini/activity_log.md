@@ -11,3 +11,21 @@
   - Explicit environment variable interpolation (`${VAR:?required}`) ensures least-privilege secret isolation, avoids path coupling, and allows CI to validate compose config using `--env-file infra/.env.example` without requiring untracked `.env` files.
 - **The observed result/outcome:**
   - Successfully verified with `docker compose --env-file infra/.env.example -f infra/docker/compose.yml -f infra/docker/compose.dev.yml config --quiet` (exit code 0) and production compose validation (exit code 0). `git diff --check` passed cleanly with normalized line endings.
+
+## [2026-09-09] Analytics Service Error Handling and Comprehensive Standards Alignment
+
+- **What was attempted:**
+  - Switched to feature branch `fix/analytics-comprehensive-standards-alignment`.
+  - Implemented `ApiErrorResponse` model in `analytics-service/internal/models/error.go` matching `docs/API_SPEC.md` Section 8 (`{"message": "...", "code": "..."}`).
+  - Implemented centralized Fiber `CustomErrorHandler` in `analytics-service/internal/handler/error.go` and mounted in `cmd/api/main.go`.
+  - Updated `analytics-service/internal/handler/v1/analytics.go` to return structured errors with `HTTP_400` and `UNKNOWN_ERROR`.
+  - Enabled dual-binding in `analytics-service/internal/messaging/consumer.go` supporting both canonical (`order.placed`, `order.cancelled`, `inventory.waste`) and legacy (`OrderPlaced`, `OrderCancelled`, `WasteRecorded`) routing keys.
+  - Implemented flexible unmarshaling in `analytics-service/internal/models/analytics.go` supporting both `snake_case` (canonical) and `camelCase` (legacy) as well as integer minor units (`*_minor`).
+  - Added event deduplication check in `analytics-service/internal/service/analytics_service.go` to ensure idempotency.
+  - Synchronized `analytics-service/README.md` with `docs/API_SPEC.md` for endpoint path, response schema, and error format.
+  - Created HTTP handler test suite in `analytics-service/tests/handler_test.go` and expanded `analytics-service/tests/service_test.go`.
+- **The hypothesis being tested:**
+  - Standardizing error formats and routing keys makes `analytics-service` resilient, backwards-compatible, and fully conforming to `docs/API_SPEC.md` and repository standards.
+- **The observed result/outcome:**
+  - All 9 unit and handler tests passed cleanly (`go test -v ./tests/...`).
+  - `git diff --check` and `docker compose ... config --quiet` passed with exit code 0.

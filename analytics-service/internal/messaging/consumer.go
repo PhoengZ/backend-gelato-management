@@ -65,26 +65,22 @@ func (c *Consumer) Start() error {
 		return err
 	}
 
-	// Bind queue to routing keys
-	err = c.ch.QueueBind(
-		q.Name, "OrderPlaced", "order", false, nil,
-	)
-	if err != nil {
-		return err
+	// Bind queue to routing keys (supporting both canonical and legacy routing keys)
+	routingBindings := []struct {
+		exchange string
+		key      string
+	}{
+		{"order", "order.placed"},
+		{"order", "OrderPlaced"},
+		{"order", "order.cancelled"},
+		{"order", "OrderCancelled"},
+		{"inventory", "inventory.waste"},
+		{"inventory", "WasteRecorded"},
 	}
-
-	err = c.ch.QueueBind(
-		q.Name, "WasteRecorded", "inventory", false, nil,
-	)
-	if err != nil {
-		return err
-	}
-
-	err = c.ch.QueueBind(
-		q.Name, "OrderCancelled", "order", false, nil,
-	)
-	if err != nil {
-		return err
+	for _, b := range routingBindings {
+		if err := c.ch.QueueBind(q.Name, b.key, b.exchange, false, nil); err != nil {
+			return err
+		}
 	}
 
 	// Set QoS to prevent one worker from receiving more workload than others.
@@ -149,7 +145,7 @@ func isPermanentError(err error) bool {
 func (c *Consumer) processMessage(d amqp.Delivery) {
 	ctx := context.Background()
 	switch d.RoutingKey {
-	case "OrderPlaced":
+	case "order.placed", "OrderPlaced":
 		var event models.OrderPlacedEvent
 		if err := json.Unmarshal(d.Body, &event); err != nil {
 			log.Printf("Permanent error unmarshaling order placed event (nacking without requeue): %v", err)
@@ -167,7 +163,7 @@ func (c *Consumer) processMessage(d amqp.Delivery) {
 		}
 		d.Ack(false)
 
-	case "OrderCancelled":
+	case "order.cancelled", "OrderCancelled":
 		var event models.OrderCancelledEvent
 		if err := json.Unmarshal(d.Body, &event); err != nil {
 			log.Printf("Permanent error unmarshaling order cancelled event (nacking without requeue): %v", err)
@@ -185,7 +181,7 @@ func (c *Consumer) processMessage(d amqp.Delivery) {
 		}
 		d.Ack(false)
 
-	case "WasteRecorded":
+	case "inventory.waste", "WasteRecorded":
 		var event models.WasteRecordedEvent
 		if err := json.Unmarshal(d.Body, &event); err != nil {
 			log.Printf("Permanent error unmarshaling waste recorded event (nacking without requeue): %v", err)

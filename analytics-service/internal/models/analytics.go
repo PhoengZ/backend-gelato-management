@@ -1,6 +1,10 @@
 package models
 
-import "go.mongodb.org/mongo-driver/bson/primitive"
+import (
+	"encoding/json"
+
+	"go.mongodb.org/mongo-driver/bson/primitive"
+)
 
 // --- MongoDB Storage Models ---
 
@@ -96,12 +100,77 @@ type OrderPlacedData struct {
 	Items       []OrderPlacedItem `json:"items"`
 }
 
+func (d *OrderPlacedData) UnmarshalJSON(b []byte) error {
+	type Alias OrderPlacedData
+	aux := struct {
+		*Alias
+		OrderIDSnake     string  `json:"order_id"`
+		TotalAmountSnake float64 `json:"total_amount"`
+		TotalAmountMinor int64   `json:"total_amount_minor"`
+	}{
+		Alias: (*Alias)(d),
+	}
+	if err := json.Unmarshal(b, &aux); err != nil {
+		return err
+	}
+	if d.OrderID == "" && aux.OrderIDSnake != "" {
+		d.OrderID = aux.OrderIDSnake
+	}
+	if d.TotalAmount == 0 {
+		if aux.TotalAmountMinor > 0 {
+			d.TotalAmount = float64(aux.TotalAmountMinor) / 100.0
+		} else if aux.TotalAmountSnake > 0 {
+			d.TotalAmount = aux.TotalAmountSnake
+		}
+	}
+	return nil
+}
+
 type OrderPlacedItem struct {
 	FlavorID   string  `json:"flavorId"`
 	FlavorName string  `json:"flavorName"`
 	Portions   int     `json:"portions"`
 	UnitPrice  float64 `json:"unitPrice"`
 	Subtotal   float64 `json:"subtotal"`
+}
+
+func (item *OrderPlacedItem) UnmarshalJSON(b []byte) error {
+	type Alias OrderPlacedItem
+	aux := struct {
+		*Alias
+		FlavorIDSnake   string  `json:"flavor_id"`
+		FlavorNameSnake string  `json:"flavor_name"`
+		UnitPriceSnake  float64 `json:"unit_price"`
+		UnitPriceMinor  int64   `json:"unit_price_minor"`
+		SubtotalSnake   float64 `json:"subtotal"`
+		SubtotalMinor   int64   `json:"subtotal_minor"`
+	}{
+		Alias: (*Alias)(item),
+	}
+	if err := json.Unmarshal(b, &aux); err != nil {
+		return err
+	}
+	if item.FlavorID == "" && aux.FlavorIDSnake != "" {
+		item.FlavorID = aux.FlavorIDSnake
+	}
+	if item.FlavorName == "" && aux.FlavorNameSnake != "" {
+		item.FlavorName = aux.FlavorNameSnake
+	}
+	if item.UnitPrice == 0 {
+		if aux.UnitPriceMinor > 0 {
+			item.UnitPrice = float64(aux.UnitPriceMinor) / 100.0
+		} else if aux.UnitPriceSnake > 0 {
+			item.UnitPrice = aux.UnitPriceSnake
+		}
+	}
+	if item.Subtotal == 0 {
+		if aux.SubtotalMinor > 0 {
+			item.Subtotal = float64(aux.SubtotalMinor) / 100.0
+		} else if aux.SubtotalSnake > 0 {
+			item.Subtotal = aux.SubtotalSnake
+		}
+	}
+	return nil
 }
 
 // OrderCancelledEvent is published by Order Service when an order is cancelled.
@@ -117,6 +186,23 @@ type OrderCancelledEvent struct {
 type OrderCancelledData struct {
 	OrderID string `json:"orderId"`
 	Reason  string `json:"reason"`
+}
+
+func (c *OrderCancelledData) UnmarshalJSON(b []byte) error {
+	type Alias OrderCancelledData
+	aux := struct {
+		*Alias
+		OrderIDSnake string `json:"order_id"`
+	}{
+		Alias: (*Alias)(c),
+	}
+	if err := json.Unmarshal(b, &aux); err != nil {
+		return err
+	}
+	if c.OrderID == "" && aux.OrderIDSnake != "" {
+		c.OrderID = aux.OrderIDSnake
+	}
+	return nil
 }
 
 // WasteRecordedEvent is the event published by Batch Inventory Service
@@ -137,6 +223,35 @@ type WasteRecordedData struct {
 	FlavorName string `json:"flavorName"`
 	Portions   int    `json:"portions"`
 	Reason     string `json:"reason"`
+}
+
+func (w *WasteRecordedData) UnmarshalJSON(b []byte) error {
+	type Alias WasteRecordedData
+	aux := struct {
+		*Alias
+		WasteIDSnake    string `json:"waste_id"`
+		BatchIDSnake    string `json:"batch_id"`
+		FlavorIDSnake   string `json:"flavor_id"`
+		FlavorNameSnake string `json:"flavor_name"`
+	}{
+		Alias: (*Alias)(w),
+	}
+	if err := json.Unmarshal(b, &aux); err != nil {
+		return err
+	}
+	if w.WasteID == "" && aux.WasteIDSnake != "" {
+		w.WasteID = aux.WasteIDSnake
+	}
+	if w.BatchID == "" && aux.BatchIDSnake != "" {
+		w.BatchID = aux.BatchIDSnake
+	}
+	if w.FlavorID == "" && aux.FlavorIDSnake != "" {
+		w.FlavorID = aux.FlavorIDSnake
+	}
+	if w.FlavorName == "" && aux.FlavorNameSnake != "" {
+		w.FlavorName = aux.FlavorNameSnake
+	}
+	return nil
 }
 
 // Order represents an order stored in the analytics database for reversal on cancellation.
