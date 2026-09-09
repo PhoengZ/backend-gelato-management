@@ -51,7 +51,7 @@ type FlavorRepository interface {
 	Create(ctx context.Context, flavor *model.FlavorAdmin) error
 	FindByID(ctx context.Context, id uuid.UUID) (*model.FlavorAdmin, error)
 	List(ctx context.Context) ([]*model.FlavorAdmin, error)
-	Update(ctx context.Context, previousName string, flavor *model.FlavorAdmin) error
+	Update(ctx context.Context, previous, flavor *model.FlavorAdmin) error
 }
 
 type CatalogService interface {
@@ -135,7 +135,7 @@ func (s *catalogService) Update(ctx context.Context, id uuid.UUID, input UpdateF
 	if err != nil {
 		return nil, err
 	}
-	previousName := record.Name
+	previous := *record
 
 	if input.Name != nil {
 		record.Name, err = validateName(*input.Name)
@@ -178,7 +178,7 @@ func (s *catalogService) Update(ctx context.Context, id uuid.UUID, input UpdateF
 	}
 	record.UpdatedAt = s.now().UTC()
 
-	if err := s.repository.Update(ctx, previousName, record); err != nil {
+	if err := s.repository.Update(ctx, &previous, record); err != nil {
 		switch {
 		case errors.Is(err, repository.ErrFlavorNotFound):
 			return nil, ErrFlavorNotFound
@@ -218,7 +218,7 @@ func (s *catalogService) Replace(ctx context.Context, id uuid.UUID, input Replac
 		return previous, nil
 	}
 	replacement.UpdatedAt = s.now().UTC()
-	if err := s.repository.Update(ctx, previous.Name, replacement); err != nil {
+	if err := s.repository.Update(ctx, previous, replacement); err != nil {
 		return nil, fmt.Errorf("replace flavor: %w", err)
 	}
 	return replacement, nil
@@ -232,10 +232,10 @@ func (s *catalogService) Archive(ctx context.Context, id uuid.UUID) error {
 	if !record.Active {
 		return nil
 	}
-	previousName := record.Name
+	previous := *record
 	record.Active = false
 	record.UpdatedAt = s.now().UTC()
-	if err := s.repository.Update(ctx, previousName, record); err != nil {
+	if err := s.repository.Update(ctx, &previous, record); err != nil {
 		if errors.Is(err, repository.ErrFlavorNotFound) {
 			return ErrFlavorNotFound
 		}

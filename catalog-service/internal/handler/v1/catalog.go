@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 
+	"catalog-service/internal/repository"
 	"catalog-service/internal/service"
 
 	"github.com/gofiber/fiber/v2"
@@ -190,6 +191,11 @@ func handleServiceError(c *fiber.Ctx, err error) error {
 		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
 			"code":    "FLAVOR_NAME_CONFLICT",
 			"message": "A flavor with this name already exists",
+		})
+	case errors.Is(err, repository.ErrUpdateConflict):
+		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+			"code":    "FLAVOR_UPDATE_CONFLICT",
+			"message": "Flavor changed during this request; reload and retry",
 		})
 	default:
 		log.Printf("catalog request failed: %v", err)

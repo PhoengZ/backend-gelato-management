@@ -57,18 +57,19 @@ func TestRedisFlavorRepository(t *testing.T) {
 		t.Fatalf("List returned items=%+v err=%v", items, err)
 	}
 
-	oldName := first.Name
+	previous := cloneFlavor(first)
 	first.Name = "Roasted Pistachio"
 	first.UpdatedAt = first.UpdatedAt.Add(time.Minute)
-	if err := repo.Update(ctx, oldName, first); err != nil {
+	if err := repo.Update(ctx, previous, first); err != nil {
 		t.Fatalf("Update returned error: %v", err)
 	}
 	reusedOldName := redisTestFlavor("Pistachio")
 	if err := repo.Create(ctx, reusedOldName); err != nil {
 		t.Fatalf("old name was not released after rename: %v", err)
 	}
+	previous = cloneFlavor(first)
 	first.Name = reusedOldName.Name
-	if err := repo.Update(ctx, "Roasted Pistachio", first); !errors.Is(err, repository.ErrNameConflict) {
+	if err := repo.Update(ctx, previous, first); !errors.Is(err, repository.ErrNameConflict) {
 		t.Fatalf("expected rename conflict, got %v", err)
 	}
 	if _, err := repo.FindByID(ctx, uuid.New()); !errors.Is(err, repository.ErrFlavorNotFound) {

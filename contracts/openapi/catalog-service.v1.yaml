@@ -145,6 +145,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
     delete:
       operationId: archiveFlavor
       summary: Archive a flavor without deleting inventory history
@@ -167,6 +169,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
   /api/v1/flavors/{flavor_id}/recipe:
     parameters:
       - $ref: '#/components/parameters/FlavorId'
@@ -232,7 +236,7 @@ components:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
     Conflict:
-      description: Flavor conflicts with an existing resource
+      description: Flavor name is already used, or another request changed the flavor; reload before retrying.
       content:
         application/json:
           schema:

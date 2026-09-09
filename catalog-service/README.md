@@ -39,6 +39,10 @@ that may already be referenced by inventory history.
 preserves `id` and `created_at`. Repeating an identical replacement also preserves
 `updated_at`. Missing IDs return `404`; name conflicts return `409`.
 
+Redis compares the previously read document atomically before each write. When
+another request wins the race, PUT/PATCH/DELETE return `409 FLAVOR_UPDATE_CONFLICT`
+without overwriting its data or leaving a stale name index. Reload before retrying.
+
 `PATCH` continues to update only the provided fields. `DELETE` archives the flavor
 and returns `204`; a repeated archive is a no-op. The archived record remains
 visible through GET by ID and the unfiltered list. Use `?active=true` for the

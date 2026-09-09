@@ -19,6 +19,7 @@ import (
 var (
 	ErrFlavorNotFound = errors.New("flavor not found")
 	ErrNameConflict   = errors.New("flavor name already exists")
+	ErrUpdateConflict = errors.New("flavor changed during update")
 )
 
 var createFlavorScript = redis.NewScript(`
@@ -32,8 +33,12 @@ return 1
 `)
 
 var updateFlavorScript = redis.NewScript(`
-if redis.call("EXISTS", KEYS[1]) == 0 then
+local current = redis.call("GET", KEYS[1])
+if not current then
   return -1
+end
+if current ~= ARGV[3] then
+  return -2
 end
 local owner = redis.call("GET", KEYS[3])
 if owner and owner ~= ARGV[2] then
@@ -148,22 +153,29 @@ func (r *RedisFlavorRepository) List(ctx context.Context) ([]*model.FlavorAdmin,
 	return flavors, nil
 }
 
-func (r *RedisFlavorRepository) Update(ctx context.Context, previousName string, flavor *model.FlavorAdmin) error {
+func (r *RedisFlavorRepository) Update(ctx context.Context, previous, flavor *model.FlavorAdmin) error {
 	payload, err := json.Marshal(flavor)
 	if err != nil {
 		return fmt.Errorf("encode flavor: %w", err)
 	}
+	expected, err := json.Marshal(previous)
+	if err != nil {
+		return fmt.Errorf("encode previous flavor: %w", err)
+	}
 	result, err := updateFlavorScript.Run(
 		ctx,
 		r.client,
-		[]string{r.flavorKey(flavor.ID), r.nameKey(previousName), r.nameKey(flavor.Name)},
+		[]string{r.flavorKey(flavor.ID), r.nameKey(previous.Name), r.nameKey(flavor.Name)},
 		payload,
 		flavor.ID.String(),
+		expected,
 	).Int()
 	if err != nil {
 		return fmt.Errorf("update flavor in Redis: %w", err)
 	}
 	switch result {
+	case -2:
+		return ErrUpdateConflict
 	case -1:
 		return ErrFlavorNotFound
 	case 0:

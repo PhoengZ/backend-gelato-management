@@ -10,6 +10,7 @@ import (
 
 	"catalog-service/internal/auth"
 	"catalog-service/internal/model"
+	"catalog-service/internal/repository"
 	"catalog-service/internal/service"
 
 	"github.com/gofiber/fiber/v2"
@@ -110,6 +111,17 @@ func TestReplaceAndArchiveRequireManager(t *testing.T) {
 		catalogRequest(t, app, method, path, replacementJSON, "", 401)
 		for _, role := range []auth.Role{auth.RoleCustomer, auth.RoleStaff} {
 			catalogRequest(t, app, method, path, replacementJSON, handlerToken(t, role), 403)
+		}
+	}
+}
+
+func TestConcurrentCatalogWriteReturnsConflict(t *testing.T) {
+	stub := &stubCatalogService{updateErr: repository.ErrUpdateConflict, archiveErr: repository.ErrUpdateConflict}
+	app := newCatalogHandlerApp(stub)
+	for _, method := range []string{"PUT", "PATCH", "DELETE"} {
+		payload := catalogRequest(t, app, method, "/api/v1/flavors/"+uuid.NewString(), replacementJSON, handlerToken(t, auth.RoleManager), 409)
+		if !strings.Contains(string(payload), "FLAVOR_UPDATE_CONFLICT") {
+			t.Fatalf("wrong error: %s", payload)
 		}
 	}
 }

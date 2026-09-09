@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -48,9 +49,12 @@ func (r *memoryFlavorRepository) List(_ context.Context) ([]*model.FlavorAdmin, 
 	return items, nil
 }
 
-func (r *memoryFlavorRepository) Update(_ context.Context, _ string, flavor *model.FlavorAdmin) error {
+func (r *memoryFlavorRepository) Update(_ context.Context, previous, flavor *model.FlavorAdmin) error {
 	if _, exists := r.records[flavor.ID]; !exists {
 		return repository.ErrFlavorNotFound
+	}
+	if !reflect.DeepEqual(r.records[flavor.ID], previous) {
+		return repository.ErrUpdateConflict
 	}
 	for id, existing := range r.records {
 		if id != flavor.ID && strings.EqualFold(strings.TrimSpace(existing.Name), strings.TrimSpace(flavor.Name)) {
