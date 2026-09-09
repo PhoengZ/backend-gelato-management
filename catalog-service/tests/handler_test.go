@@ -40,11 +40,11 @@ func (s *stubCatalogService) Create(_ context.Context, _ service.CreateFlavorInp
 	return s.createResult, s.createErr
 }
 
-func (s *stubCatalogService) List(_ context.Context, _ *bool) ([]model.Flavor, error) {
+func (s *stubCatalogService) List(_ context.Context, _ *bool, _ service.ReadScope) ([]model.Flavor, error) {
 	return s.listResult, s.listErr
 }
 
-func (s *stubCatalogService) Get(_ context.Context, _ uuid.UUID) (*model.Flavor, error) {
+func (s *stubCatalogService) Get(_ context.Context, _ uuid.UUID, _ service.ReadScope) (*model.Flavor, error) {
 	return s.getResult, s.getErr
 }
 

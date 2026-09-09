@@ -55,6 +55,7 @@ func (v *Verifier) Parse(raw string) (*Claims, error) {
 		jwt.WithIssuer(v.issuer),
 		jwt.WithAudience(v.audience),
 		jwt.WithExpirationRequired(),
+		jwt.WithIssuedAt(),
 	)
 	if err != nil || !token.Valid {
 		return nil, ErrInvalidToken

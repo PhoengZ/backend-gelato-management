@@ -92,7 +92,7 @@ func TestReplaceRejectsIncompleteAndInvalidStateWithoutWriting(t *testing.T) {
 	} {
 		catalogRequest(t, app, "PUT", path, body, manager, 400)
 	}
-	stored, err := catalog.Get(context.Background(), created.ID)
+	stored, err := catalog.Get(context.Background(), created.ID, service.PublicRead)
 	if err != nil || stored.Name != "Original" || !stored.UpdatedAt.Equal(created.UpdatedAt) {
 		t.Fatalf("invalid replacement changed storage: %+v, %v", stored, err)
 	}

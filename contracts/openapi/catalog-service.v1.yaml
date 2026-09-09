@@ -1,22 +1,38 @@
 openapi: 3.1.0
 info:
   title: GelatoFlow Catalog Service API
-  version: 1.1.0
-  description: Flavor metadata contract. Stock and availability are intentionally excluded.
+  version: 1.2.0
+  description: >-
+    Flavor metadata contract. Stock and availability are intentionally excluded.
+    Anonymous, CUSTOMER and STAFF reads expose active flavors only. A verified
+    MANAGER token permits reading archived metadata and recipes. Supplied invalid
+    tokens return 401, including on otherwise public reads. Catalog responses use
+    Cache-Control no-store and Vary Authorization. JSON request field names are
+    case-sensitive; duplicate keys, unknown fields and null values are rejected.
 servers:
   - url: /
 paths:
   /api/v1/flavors:
     get:
       operationId: listFlavors
-      summary: List flavor metadata
+      summary: List visible flavor metadata
+      description: >-
+        Without a MANAGER token, returns only active flavors even when the active
+        filter is omitted. MANAGER can list all flavors or filter by active status.
+        Recipe fields are omitted for every caller on this endpoint.
       tags: [Catalog]
-      security: []
+      security:
+        - {}
+        - bearerAuth: []
       parameters:
         - name: active
           in: query
           required: false
-          description: Filter by active status. Public clients normally request active flavors.
+          description: >-
+            Filter by active status. active=false requires MANAGER (401 without
+            authentication, 403 for CUSTOMER or STAFF). Duplicate active parameters
+            are rejected with 400. Omitting active shows active-only for public
+            callers, or all flavors for MANAGER.
           schema:
             type: boolean
       responses:
@@ -35,6 +51,10 @@ paths:
                       $ref: '#/components/schemas/Flavor'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
     post:
       operationId: createFlavor
       summary: Create a flavor
@@ -68,9 +88,15 @@ paths:
       - $ref: '#/components/parameters/FlavorId'
     get:
       operationId: getFlavor
-      summary: Get public flavor metadata
+      summary: Get visible flavor metadata
+      description: >-
+        Returns 404 for an archived flavor unless a verified MANAGER token is
+        supplied. An archived ID and a missing ID have the same public error.
+        Recipe fields are omitted even for MANAGER on this endpoint.
       tags: [Catalog]
-      security: []
+      security:
+        - {}
+        - bearerAuth: []
       responses:
         '200':
           description: Flavor found
@@ -80,6 +106,8 @@ paths:
                 $ref: '#/components/schemas/Flavor'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
     put:
@@ -152,8 +180,11 @@ paths:
       summary: Archive a flavor without deleting inventory history
       description: >-
         Soft deletion sets active=false and retains the resource and its ID.
-        GET by ID and the unfiltered list still return the archived flavor;
-        GET /api/v1/flavors?active=true excludes it. Repeating DELETE is a no-op.
+        Public GET by ID returns 404 afterward and public lists exclude it.
+        MANAGER can still read archived metadata and recipes with a valid token.
+        GET /api/v1/flavors?active=true excludes it for every role.
+        Repeating DELETE is a no-op. MANAGER can explicitly reactivate the resource
+        with PUT or PATCH active=true.
       tags: [Catalog]
       security:
         - bearerAuth: []

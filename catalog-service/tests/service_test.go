@@ -87,7 +87,7 @@ func TestCatalogServiceCreateDefaultsAndPublicProjection(t *testing.T) {
 		t.Fatalf("allergens were not normalized: %v", created.Allergens)
 	}
 
-	public, err := catalog.Get(context.Background(), created.ID)
+	public, err := catalog.Get(context.Background(), created.ID, service.PublicRead)
 	if err != nil {
 		t.Fatalf("Get returned error: %v", err)
 	}
@@ -165,12 +165,12 @@ func TestCatalogServiceUpdateArchiveAndRecipe(t *testing.T) {
 		t.Fatalf("idempotent Archive returned error: %v", err)
 	}
 	active := true
-	items, err := catalog.List(context.Background(), &active)
+	items, err := catalog.List(context.Background(), &active, service.PublicRead)
 	if err != nil || len(items) != 0 {
 		t.Fatalf("active filter returned items=%+v err=%v", items, err)
 	}
 	inactive := false
-	items, err = catalog.List(context.Background(), &inactive)
+	items, err = catalog.List(context.Background(), &inactive, service.ManagerRead)
 	if err != nil || len(items) != 1 {
 		t.Fatalf("inactive filter returned items=%+v err=%v", items, err)
 	}

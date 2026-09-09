@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"bytes"
 	"context"
 	"strings"
 	"time"
@@ -26,26 +27,68 @@ func RequestTimeout(duration time.Duration) fiber.Handler {
 
 func RequireManager(verifier *auth.Verifier) fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		parts := strings.Fields(c.Get(fiber.HeaderAuthorization))
-		if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
-			return unauthorized(c)
+		if allowed, err := authenticate(c, verifier, true); !allowed {
+			return err
 		}
-
-		claims, err := verifier.Parse(parts[1])
-		if err != nil {
-			return unauthorized(c)
+		if c.Locals(LocalUserRole) != string(auth.RoleManager) {
+			return ManagerRequired(c)
 		}
-		if claims.Role != auth.RoleManager {
-			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
-				"code":    "FORBIDDEN",
-				"message": "Manager role is required",
-			})
-		}
-
-		c.Locals(LocalUserID, claims.Subject)
-		c.Locals(LocalUserRole, string(claims.Role))
 		return c.Next()
 	}
+}
+
+// AuthenticateIfPresent permits anonymous active-catalog reads. An explicitly
+// supplied but invalid token fails closed rather than becoming anonymous.
+func AuthenticateIfPresent(verifier *auth.Verifier) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		if allowed, err := authenticate(c, verifier, false); !allowed {
+			return err
+		}
+		return c.Next()
+	}
+}
+
+func authenticate(c *fiber.Ctx, verifier *auth.Verifier, required bool) (bool, error) {
+	c.Locals(LocalUserID, "")
+	c.Locals(LocalUserRole, "")
+	count := 0
+	c.Request().Header.VisitAll(func(key, _ []byte) {
+		if bytes.EqualFold(key, []byte(fiber.HeaderAuthorization)) {
+			count++
+		}
+	})
+	if count == 0 && !required {
+		return true, nil
+	}
+	parts := strings.Fields(c.Get(fiber.HeaderAuthorization))
+	if count != 1 || len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
+		return false, unauthorized(c)
+	}
+	claims, err := verifier.Parse(parts[1])
+	if err != nil {
+		return false, unauthorized(c)
+	}
+	c.Locals(LocalUserID, claims.Subject)
+	c.Locals(LocalUserRole, string(claims.Role))
+	return true, nil
+}
+
+// ManagerRequired also distinguishes a missing identity from a lower role.
+func ManagerRequired(c *fiber.Ctx) error {
+	if c.Locals(LocalUserID) == nil || c.Locals(LocalUserID) == "" {
+		return unauthorized(c)
+	}
+	return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+		"code": "FORBIDDEN", "message": "Manager role is required",
+	})
+}
+
+func PreventCaching(c *fiber.Ctx) error {
+	// Public and Manager representations share URLs, and archive changes visibility.
+	c.Set(fiber.HeaderCacheControl, "no-store")
+	c.Vary(fiber.HeaderAuthorization)
+	c.Set(fiber.HeaderXContentTypeOptions, "nosniff")
+	return c.Next()
 }
 
 func unauthorized(c *fiber.Ctx) error {

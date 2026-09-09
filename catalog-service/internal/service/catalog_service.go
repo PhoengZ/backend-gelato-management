@@ -47,6 +47,15 @@ type UpdateFlavorInput struct {
 // PUT; omitting the optional image_url removes the previous image.
 type ReplaceFlavorInput CreateFlavorInput
 
+// ReadScope is selected by the HTTP layer after verifying the Bearer token.
+// The zero value (and every value other than ManagerRead) hides archived data.
+type ReadScope uint8
+
+const (
+	PublicRead ReadScope = iota
+	ManagerRead
+)
+
 type FlavorRepository interface {
 	Create(ctx context.Context, flavor *model.FlavorAdmin) error
 	FindByID(ctx context.Context, id uuid.UUID) (*model.FlavorAdmin, error)
@@ -56,8 +65,8 @@ type FlavorRepository interface {
 
 type CatalogService interface {
 	Create(ctx context.Context, input CreateFlavorInput) (*model.FlavorAdmin, error)
-	List(ctx context.Context, active *bool) ([]model.Flavor, error)
-	Get(ctx context.Context, id uuid.UUID) (*model.Flavor, error)
+	List(ctx context.Context, active *bool, scope ReadScope) ([]model.Flavor, error)
+	Get(ctx context.Context, id uuid.UUID, scope ReadScope) (*model.Flavor, error)
 	Update(ctx context.Context, id uuid.UUID, input UpdateFlavorInput) (*model.FlavorAdmin, error)
 	Replace(ctx context.Context, id uuid.UUID, input ReplaceFlavorInput) (*model.FlavorAdmin, error)
 	Archive(ctx context.Context, id uuid.UUID) error
@@ -102,13 +111,16 @@ func (s *catalogService) Create(ctx context.Context, input CreateFlavorInput) (*
 	return flavor, nil
 }
 
-func (s *catalogService) List(ctx context.Context, active *bool) ([]model.Flavor, error) {
+func (s *catalogService) List(ctx context.Context, active *bool, scope ReadScope) ([]model.Flavor, error) {
 	records, err := s.repository.List(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list flavors: %w", err)
 	}
 	items := make([]model.Flavor, 0, len(records))
 	for _, record := range records {
+		if !record.Active && scope != ManagerRead {
+			continue
+		}
 		if active != nil && record.Active != *active {
 			continue
 		}
@@ -117,10 +129,13 @@ func (s *catalogService) List(ctx context.Context, active *bool) ([]model.Flavor
 	return items, nil
 }
 
-func (s *catalogService) Get(ctx context.Context, id uuid.UUID) (*model.Flavor, error) {
+func (s *catalogService) Get(ctx context.Context, id uuid.UUID, scope ReadScope) (*model.Flavor, error) {
 	record, err := s.find(ctx, id)
 	if err != nil {
 		return nil, err
+	}
+	if !record.Active && scope != ManagerRead {
+		return nil, ErrFlavorNotFound
 	}
 	public := record.Flavor
 	return &public, nil

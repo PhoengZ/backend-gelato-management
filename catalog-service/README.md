@@ -44,13 +44,40 @@ another request wins the race, PUT/PATCH/DELETE return `409 FLAVOR_UPDATE_CONFLI
 without overwriting its data or leaving a stale name index. Reload before retrying.
 
 `PATCH` continues to update only the provided fields. `DELETE` archives the flavor
-and returns `204`; a repeated archive is a no-op. The archived record remains
-visible through GET by ID and the unfiltered list. Use `?active=true` for the
-currently offered catalog. These semantics preserve inventory references.
+and returns `204`; a repeated archive is a no-op. The stored record and references
+are retained, but public GET by ID now returns `404` and public lists omit archived
+flavors. A verified Manager can read archived metadata and recipes and explicitly
+reactivate a flavor with PUT/PATCH `active=true`.
+
+| Read operation | Anonymous / CUSTOMER / STAFF | MANAGER with valid JWT |
+| --- | --- | --- |
+| GET list, no filter | Active flavors only | All flavors |
+| GET list, `active=true` | Active flavors only | Active flavors only |
+| GET list, `active=false` | 401 anonymous / 403 other roles | Archived flavors |
+| GET or HEAD archived ID | 404, same as missing ID | 200 |
+| GET or HEAD recipe | 401 anonymous / 403 other roles | 200, active or archived |
+
+Invalid Authorization values fail with `401` even on public reads. Caller-supplied
+role headers and cookies never grant access. Duplicate Authorization headers and
+duplicate `active` query parameters are rejected. All flavor-route responses carry
+`Cache-Control: no-store` and `Vary: Authorization` to prevent reuse of Manager
+representations or stale catalog data through compliant caches.
+
+JSON bodies must use the exact contract field names. Duplicate keys (including
+escaped spellings), alternate capitalization, nulls and unknown fields are
+rejected. A provided `price` must contain both `amount_minor` and `currency`.
+JWT verification checks HS256, signature, issuer, audience, expiry, valid user/role,
+required issued-at, and that the token was not issued in the future.
 
 The canonical interface is `../contracts/openapi/catalog-service.v1.yaml`.
 Catalog verifies the original Bearer token itself and never trusts user/role
 headers supplied by a caller. Gateway route/auth changes belong to its owner.
+
+Contract 1.2.0 tightens archive visibility compared with 1.1.0. Consumers that read
+archived flavors must use an authorized Manager flow; do not compensate by trusting
+headers or putting Manager tokens into customer-facing clients. Review the read
+policy with Gateway/frontend owners before merging the shared Catalog contract.
+See [the security audit](SECURITY.md) for verification scope and remaining limits.
 
 ## Configuration
 

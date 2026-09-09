@@ -50,6 +50,14 @@ func TestCatalogHTTPRedisLifecycle(t *testing.T) {
 		t.Fatalf("POST not persisted: %s, %v", storedJSON, err)
 	}
 	path := "/api/v1/flavors/" + created.ID.String()
+	// Reject ambiguous updates without changing the actual persisted record.
+	for _, invalid := range []string{`{"Price":{"currency":"THB"}}`, `{"active":false,"active":true}`} {
+		catalogRequest(t, app, "PATCH", path, invalid, manager, 400)
+		unchanged, err := client.Get(context.Background(), key).Result()
+		if err != nil || unchanged != storedJSON {
+			t.Fatalf("invalid PATCH changed Redis: %v", err)
+		}
+	}
 	catalogRequest(t, app, "GET", path, "", "", 200)
 	all := catalogRequest(t, app, "GET", "/api/v1/flavors", "", "", 200)
 	var list struct {
@@ -91,7 +99,17 @@ func TestCatalogHTTPRedisLifecycle(t *testing.T) {
 	if err != nil || !final.UpdatedAt.Equal(stored.UpdatedAt) {
 		t.Fatal("repeated DELETE changed state")
 	}
-	catalogRequest(t, app, "GET", path, "", "", 200)
+	catalogRequest(t, app, "GET", path, "", "", 404)
+	catalogRequest(t, app, "GET", path, "", manager, 200)
+	all = catalogRequest(t, app, "GET", "/api/v1/flavors", "", "", 200)
+	if err := json.Unmarshal(all, &list); err != nil || len(list.Items) != 0 {
+		t.Fatalf("public list disclosed archive: %s", all)
+	}
+	catalogRequest(t, app, "GET", "/api/v1/flavors?active=false", "", "", 401)
+	all = catalogRequest(t, app, "GET", "/api/v1/flavors?active=false", "", manager, 200)
+	if err := json.Unmarshal(all, &list); err != nil || len(list.Items) != 1 || list.Items[0].ID != created.ID {
+		t.Fatalf("manager lost archive history: %s", all)
+	}
 }
 
 func TestRedisConcurrentRenamesRejectStaleWritesAndPreserveIndexes(t *testing.T) {

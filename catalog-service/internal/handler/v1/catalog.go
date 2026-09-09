@@ -7,6 +7,8 @@ import (
 	"io"
 	"log"
 
+	"catalog-service/internal/auth"
+	"catalog-service/internal/middleware"
 	"catalog-service/internal/repository"
 	"catalog-service/internal/service"
 
@@ -25,6 +27,9 @@ func NewCatalogHandler(catalogService service.CatalogService) *CatalogHandler {
 func (h *CatalogHandler) List(c *fiber.Ctx) error {
 	var active *bool
 	if c.Context().QueryArgs().Has("active") {
+		if len(c.Context().QueryArgs().PeekMulti("active")) != 1 {
+			return badRequest(c, "INVALID_ARGUMENT", "active must be provided only once")
+		}
 		raw := string(c.Context().QueryArgs().Peek("active"))
 		if raw != "true" && raw != "false" {
 			return badRequest(c, "INVALID_ARGUMENT", "active must be true or false")
@@ -32,8 +37,11 @@ func (h *CatalogHandler) List(c *fiber.Ctx) error {
 		parsed := raw == "true"
 		active = &parsed
 	}
-
-	items, err := h.service.List(c.UserContext(), active)
+	scope := readScope(c)
+	if active != nil && !*active && scope != service.ManagerRead {
+		return middleware.ManagerRequired(c)
+	}
+	items, err := h.service.List(c.UserContext(), active, scope)
 	if err != nil {
 		return handleServiceError(c, err)
 	}
@@ -45,11 +53,18 @@ func (h *CatalogHandler) Get(c *fiber.Ctx) error {
 	if err != nil {
 		return badRequest(c, "INVALID_ARGUMENT", "flavor_id must be a UUID")
 	}
-	flavor, err := h.service.Get(c.UserContext(), id)
+	flavor, err := h.service.Get(c.UserContext(), id, readScope(c))
 	if err != nil {
 		return handleServiceError(c, err)
 	}
 	return c.Status(fiber.StatusOK).JSON(flavor)
+}
+
+func readScope(c *fiber.Ctx) service.ReadScope {
+	if c.Locals(middleware.LocalUserRole) == string(auth.RoleManager) {
+		return service.ManagerRead
+	}
+	return service.PublicRead
 }
 
 func (h *CatalogHandler) Create(c *fiber.Ctx) error {
@@ -127,13 +142,27 @@ func decodeJSON(body []byte, destination any) error {
 	if len(body) == 0 {
 		return io.EOF
 	}
-	var rawDocument any
-	if err := json.Unmarshal(body, &rawDocument); err != nil {
-		return errors.New("request body must be a JSON object")
+	parser := json.NewDecoder(bytes.NewReader(body))
+	parser.UseNumber()
+	rawDocument, err := uniqueJSONValue(parser, 0)
+	if err != nil {
+		return err
+	}
+	if _, err := parser.Token(); !errors.Is(err, io.EOF) {
+		return errors.New("request body must contain one JSON object")
 	}
 	document, ok := rawDocument.(map[string]any)
 	if !ok {
 		return errors.New("request body must be a JSON object")
+	}
+	// encoding/json matches struct fields without regard to case. Require the
+	// canonical names before decoding so aliases cannot bypass nested validation.
+	for key := range document {
+		switch key {
+		case "name", "description", "price", "image_url", "allergens", "recipe", "active":
+		default:
+			return errors.New("unknown flavor field")
+		}
 	}
 	if price, ok := document["price"].(map[string]any); ok {
 		if _, exists := price["amount_minor"]; !exists {
@@ -141,6 +170,9 @@ func decodeJSON(body []byte, destination any) error {
 		}
 		if _, exists := price["currency"]; !exists {
 			return errors.New("price.currency is required")
+		}
+		if len(price) != 2 {
+			return errors.New("unknown price field")
 		}
 	}
 	if containsNull(rawDocument) {
@@ -156,6 +188,61 @@ func decodeJSON(body []byte, destination any) error {
 		return errors.New("request body must contain one JSON object")
 	}
 	return nil
+}
+
+// Reject duplicate keys (including escaped aliases) before decoding into Go
+// structs. Bound nesting even for bodies that will later fail schema validation.
+func uniqueJSONValue(decoder *json.Decoder, depth int) (any, error) {
+	if depth > 16 {
+		return nil, errors.New("JSON nesting exceeds the limit")
+	}
+	token, err := decoder.Token()
+	if err != nil {
+		return nil, err
+	}
+	switch token {
+	case json.Delim('{'):
+		document := make(map[string]any)
+		for decoder.More() {
+			keyToken, err := decoder.Token()
+			if err != nil {
+				return nil, err
+			}
+			key, ok := keyToken.(string)
+			if !ok {
+				return nil, errors.New("invalid object key")
+			}
+			if _, exists := document[key]; exists {
+				return nil, errors.New("duplicate JSON key")
+			}
+			value, err := uniqueJSONValue(decoder, depth+1)
+			if err != nil {
+				return nil, err
+			}
+			document[key] = value
+		}
+		end, err := decoder.Token()
+		if err != nil || end != json.Delim('}') {
+			return nil, errors.New("invalid JSON object")
+		}
+		return document, nil
+	case json.Delim('['):
+		var values []any
+		for decoder.More() {
+			value, err := uniqueJSONValue(decoder, depth+1)
+			if err != nil {
+				return nil, err
+			}
+			values = append(values, value)
+		}
+		end, err := decoder.Token()
+		if err != nil || end != json.Delim(']') {
+			return nil, errors.New("invalid JSON array")
+		}
+		return values, nil
+	default:
+		return token, nil
+	}
 }
 
 func containsNull(value any) bool {
