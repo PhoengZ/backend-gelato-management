@@ -107,4 +107,3 @@ docker run --rm \
 The frontend demo may keep using mock flavor routes temporarily. API Gateway or a
 frontend adapter should later compose Catalog metadata with availability returned
 by Batch Inventory Service.
-
