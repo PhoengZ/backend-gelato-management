@@ -24,6 +24,7 @@ func Setup(app *fiber.App, catalogService service.CatalogService, verifier *auth
 	flavors.Post("/", managerOnly, handler.Create)
 	flavors.Get("/:flavor_id/recipe", managerOnly, handler.GetRecipe)
 	flavors.Get("/:flavor_id", handler.Get)
+	flavors.Put("/:flavor_id", managerOnly, handler.Replace)
 	flavors.Patch("/:flavor_id", managerOnly, handler.Update)
 	flavors.Delete("/:flavor_id", managerOnly, handler.Archive)
 }

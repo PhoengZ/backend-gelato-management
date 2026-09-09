@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -42,6 +43,10 @@ type UpdateFlavorInput struct {
 	Active      *bool             `json:"active"`
 }
 
+// ReplaceFlavorInput describes all client-owned state. Active is required for
+// PUT; omitting the optional image_url removes the previous image.
+type ReplaceFlavorInput CreateFlavorInput
+
 type FlavorRepository interface {
 	Create(ctx context.Context, flavor *model.FlavorAdmin) error
 	FindByID(ctx context.Context, id uuid.UUID) (*model.FlavorAdmin, error)
@@ -54,6 +59,7 @@ type CatalogService interface {
 	List(ctx context.Context, active *bool) ([]model.Flavor, error)
 	Get(ctx context.Context, id uuid.UUID) (*model.Flavor, error)
 	Update(ctx context.Context, id uuid.UUID, input UpdateFlavorInput) (*model.FlavorAdmin, error)
+	Replace(ctx context.Context, id uuid.UUID, input ReplaceFlavorInput) (*model.FlavorAdmin, error)
 	Archive(ctx context.Context, id uuid.UUID) error
 	GetRecipe(ctx context.Context, id uuid.UUID) (*model.FlavorRecipe, error)
 }
@@ -183,6 +189,39 @@ func (s *catalogService) Update(ctx context.Context, id uuid.UUID, input UpdateF
 		}
 	}
 	return record, nil
+}
+
+func (s *catalogService) Replace(ctx context.Context, id uuid.UUID, input ReplaceFlavorInput) (*model.FlavorAdmin, error) {
+	if input.Active == nil {
+		return nil, fmt.Errorf("%w: active is required for replacement", ErrInvalidInput)
+	}
+	name, description, price, imageURL, allergens, recipe, active, err := validateCreateInput(CreateFlavorInput(input))
+	if err != nil {
+		return nil, err
+	}
+	previous, err := s.find(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	replacement := &model.FlavorAdmin{
+		Flavor: model.Flavor{
+			ID: id, Name: name, Description: description, Price: price,
+			ImageURL: imageURL, Allergens: allergens, Active: active,
+			CreatedAt: previous.CreatedAt, UpdatedAt: previous.UpdatedAt,
+		},
+		Recipe: recipe,
+	}
+	// A repeated identical PUT does not create a new resource or touch timestamps.
+	if previous.Name == name && previous.Description == description && previous.Price == price &&
+		previous.ImageURL == imageURL && slices.Equal(previous.Allergens, allergens) &&
+		previous.Active == active && previous.Recipe == recipe {
+		return previous, nil
+	}
+	replacement.UpdatedAt = s.now().UTC()
+	if err := s.repository.Update(ctx, previous.Name, replacement); err != nil {
+		return nil, fmt.Errorf("replace flavor: %w", err)
+	}
+	return replacement, nil
 }
 
 func (s *catalogService) Archive(ctx context.Context, id uuid.UUID) error {

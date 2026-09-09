@@ -79,6 +79,22 @@ func (h *CatalogHandler) Update(c *fiber.Ctx) error {
 	return c.Status(fiber.StatusOK).JSON(flavor)
 }
 
+func (h *CatalogHandler) Replace(c *fiber.Ctx) error {
+	id, err := flavorID(c)
+	if err != nil {
+		return badRequest(c, "INVALID_ARGUMENT", "flavor_id must be a UUID")
+	}
+	var input service.ReplaceFlavorInput
+	if err := decodeJSON(c.Body(), &input); err != nil {
+		return badRequest(c, "INVALID_REQUEST", "Request body is invalid")
+	}
+	flavor, err := h.service.Replace(c.UserContext(), id, input)
+	if err != nil {
+		return handleServiceError(c, err)
+	}
+	return c.Status(fiber.StatusOK).JSON(flavor)
+}
+
 func (h *CatalogHandler) Archive(c *fiber.Ctx) error {
 	id, err := flavorID(c)
 	if err != nil {
@@ -114,8 +130,17 @@ func decodeJSON(body []byte, destination any) error {
 	if err := json.Unmarshal(body, &rawDocument); err != nil {
 		return errors.New("request body must be a JSON object")
 	}
-	if _, ok := rawDocument.(map[string]any); !ok {
+	document, ok := rawDocument.(map[string]any)
+	if !ok {
 		return errors.New("request body must be a JSON object")
+	}
+	if price, ok := document["price"].(map[string]any); ok {
+		if _, exists := price["amount_minor"]; !exists {
+			return errors.New("price.amount_minor is required")
+		}
+		if _, exists := price["currency"]; !exists {
+			return errors.New("price.currency is required")
+		}
 	}
 	if containsNull(rawDocument) {
 		return errors.New("null values are not supported")

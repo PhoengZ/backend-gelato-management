@@ -184,6 +184,6 @@ func validCreateInput(nameValue string) service.CreateFlavorInput {
 
 func cloneFlavor(flavor *model.FlavorAdmin) *model.FlavorAdmin {
 	copy := *flavor
-	copy.Allergens = append([]model.Allergen(nil), flavor.Allergens...)
+	copy.Allergens = append([]model.Allergen{}, flavor.Allergens...)
 	return &copy
 }

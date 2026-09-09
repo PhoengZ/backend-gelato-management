@@ -52,6 +52,10 @@ func (s *stubCatalogService) Update(_ context.Context, _ uuid.UUID, _ service.Up
 	return s.updateResult, s.updateErr
 }
 
+func (s *stubCatalogService) Replace(_ context.Context, _ uuid.UUID, _ service.ReplaceFlavorInput) (*model.FlavorAdmin, error) {
+	return s.updateResult, s.updateErr
+}
+
 func (s *stubCatalogService) Archive(_ context.Context, _ uuid.UUID) error {
 	return s.archiveErr
 }

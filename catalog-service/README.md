@@ -5,6 +5,7 @@ Catalog Service implements the canonical GelatoFlow flavor metadata contract:
 - `GET /api/v1/flavors`
 - `POST /api/v1/flavors` (`MANAGER`)
 - `GET /api/v1/flavors/{flavor_id}`
+- `PUT /api/v1/flavors/{flavor_id}` (`MANAGER`, full replacement)
 - `PATCH /api/v1/flavors/{flavor_id}` (`MANAGER`)
 - `DELETE /api/v1/flavors/{flavor_id}` (`MANAGER`)
 - `GET /api/v1/flavors/{flavor_id}/recipe` (`MANAGER`)
@@ -29,6 +30,23 @@ index change atomically.
 Recipes are retained in the owned record but projected out of every public
 response. Archive requests set `active=false`; they do not delete a flavor ID
 that may already be referenced by inventory history.
+
+## Update and archive semantics
+
+`PUT` replaces the complete editable state of an existing flavor. Send `name`,
+`description`, `price` (`amount_minor` and `currency`), `allergens`, `recipe`, and
+`active`. `image_url` is optional; omitting it removes the old image. The server
+preserves `id` and `created_at`. Repeating an identical replacement also preserves
+`updated_at`. Missing IDs return `404`; name conflicts return `409`.
+
+`PATCH` continues to update only the provided fields. `DELETE` archives the flavor
+and returns `204`; a repeated archive is a no-op. The archived record remains
+visible through GET by ID and the unfiltered list. Use `?active=true` for the
+currently offered catalog. These semantics preserve inventory references.
+
+The canonical interface is `../contracts/openapi/catalog-service.v1.yaml`.
+Catalog verifies the original Bearer token itself and never trusts user/role
+headers supplied by a caller. Gateway route/auth changes belong to its owner.
 
 ## Configuration
 

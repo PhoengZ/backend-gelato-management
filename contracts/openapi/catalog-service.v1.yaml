@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: GelatoFlow Catalog Service API
-  version: 1.0.0
+  version: 1.1.0
   description: Flavor metadata contract. Stock and availability are intentionally excluded.
 servers:
   - url: /
@@ -82,6 +82,41 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
+    put:
+      operationId: replaceFlavor
+      summary: Replace all editable flavor metadata
+      description: >-
+        Requires all editable fields except image_url. Omitting image_url clears
+        the existing image. Preserves id and created_at. An identical repeated
+        request returns the same resource without changing updated_at.
+        The flavor must already exist; this operation does not create resources.
+      tags: [Catalog]
+      security:
+        - bearerAuth: []
+      x-required-roles: [MANAGER]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReplaceFlavorRequest'
+      responses:
+        '200':
+          description: Flavor replaced
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FlavorAdmin'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
     patch:
       operationId: updateFlavor
       summary: Update flavor metadata
@@ -113,6 +148,10 @@ paths:
     delete:
       operationId: archiveFlavor
       summary: Archive a flavor without deleting inventory history
+      description: >-
+        Soft deletion sets active=false and retains the resource and its ID.
+        GET by ID and the unfiltered list still return the archived flavor;
+        GET /api/v1/flavors?active=true excludes it. Repeating DELETE is a no-op.
       tags: [Catalog]
       security:
         - bearerAuth: []
@@ -231,13 +270,30 @@ components:
           type: string
           format: date-time
     FlavorAdmin:
-      allOf:
-        - $ref: '#/components/schemas/Flavor'
-        - type: object
-          required: [recipe]
-          properties:
-            recipe:
-              type: string
+      type: object
+      additionalProperties: false
+      required: [id, name, description, price, allergens, active, created_at, updated_at, recipe]
+      properties:
+        id:
+          $ref: '#/components/schemas/Flavor/properties/id'
+        name:
+          $ref: '#/components/schemas/Flavor/properties/name'
+        description:
+          $ref: '#/components/schemas/Flavor/properties/description'
+        price:
+          $ref: '#/components/schemas/Money'
+        image_url:
+          $ref: '#/components/schemas/Flavor/properties/image_url'
+        allergens:
+          $ref: '#/components/schemas/Flavor/properties/allergens'
+        active:
+          type: boolean
+        created_at:
+          $ref: '#/components/schemas/Flavor/properties/created_at'
+        updated_at:
+          $ref: '#/components/schemas/Flavor/properties/updated_at'
+        recipe:
+          type: string
     FlavorRecipe:
       type: object
       additionalProperties: false
@@ -279,6 +335,11 @@ components:
         active:
           type: boolean
           default: true
+    ReplaceFlavorRequest:
+      allOf:
+        - $ref: '#/components/schemas/CreateFlavorRequest'
+        - type: object
+          required: [active]
     UpdateFlavorRequest:
       type: object
       additionalProperties: false
