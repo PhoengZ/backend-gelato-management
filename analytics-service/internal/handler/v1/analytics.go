@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 
+	"analytics-service/internal/models"
 	"analytics-service/internal/service"
 
 	"github.com/gofiber/fiber/v2"
@@ -24,13 +25,15 @@ func (h *AnalyticsHandler) GetAnalyticsSummary(c *fiber.Ctx) error {
 	summary, err := h.service.GetAnalyticsSummary(c.Context(), period)
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidPeriod) {
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-				"error": fmt.Sprintf("Unsupported period: %s. Valid values: 1d, 1w, 1m, 6m", period),
+			return c.Status(fiber.StatusBadRequest).JSON(models.ApiErrorResponse{
+				Message: fmt.Sprintf("Unsupported period: %s. Valid values: 1d, 1w, 1m, 6m", period),
+				Code:    "HTTP_400",
 			})
 		}
 		log.Printf("error fetching analytics summary: %v", err)
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "Failed to fetch analytics",
+		return c.Status(fiber.StatusInternalServerError).JSON(models.ApiErrorResponse{
+			Message: "Failed to fetch analytics",
+			Code:    "UNKNOWN_ERROR",
 		})
 	}
 

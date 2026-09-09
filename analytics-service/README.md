@@ -92,65 +92,75 @@ graph TD
 
 ## 📡 Standard API Spec
 
-### `GET /api/v1/analytics`
-Retrieves aggregated analytics data for the business.
+### `GET /api/v1/analytics/summary`
+Retrieves aggregated analytics data for the business (matching `docs/API_SPEC.md`).
+
+**Access**: Protected (MANAGER role)
 
 **Query Parameters:**
-- `period` (string, default `1w`): The time window for the analytics (e.g., `1w`, `1m`, `1y`).
+- `period` (string, default `1w`): The time window for the analytics (valid values: `1d`, `1w`, `1m`, `6m`).
 
 **Response (200 OK):**
 ```json
 {
-  "period": "1w",
-  "data": {
-    "id": "...",
-    "date": "2026-08-21",
-    "financials": {
-      "gross_sales": 1500.50,
-      "total_orders": 45,
-      "average_order_value": 33.34
-    },
-    "operations": {
-      "scoops_sold": 120,
-      "waste_rate": 0.05
-    }
-  }
-}
-```
-
----
-
-## 📨 Consumable Message Schemas (RabbitMQ)
-
-The service acts as an event subscriber and listens to the following routing keys:
-
-### 1. `order.success`
-Triggered when a customer successfully completes an order.
-```json
-{
-  "date": "2026-08-21",
-  "total_amount": 34.50,
-  "order_items": [
+  "totalRevenue": 15000,
+  "totalOrders": 150,
+  "totalScoops": 450,
+  "totalWaste": 80,
+  "salesByFlavor": [
     {
-      "flavor_id": "vanilla_01",
-      "qty": 2
+      "flavorId": "flv_vanilla",
+      "flavorName": "Vanilla",
+      "portions": 200,
+      "revenue": 10000
+    }
+  ],
+  "wasteByFlavor": [
+    {
+      "flavorId": "flv_vanilla",
+      "flavorName": "Vanilla",
+      "portions": 50
+    }
+  ],
+  "salesTrend": [
+    {
+      "date": "2026-09-01",
+      "label": "Sep 1",
+      "revenue": 5000,
+      "orders": 50,
+      "scoops": 150
     }
   ]
 }
 ```
 
-### 2. `inventory.waste`
-Triggered when inventory is discarded or spoiled.
+**Error Responses (conforming to `docs/API_SPEC.md` Section 8):**
+All errors follow a uniform JSON structure:
 ```json
 {
-  "date": "2026-08-21",
-  "flavor_id": "strawberry_02",
-  "portions": 5,
-  "batch_id": "batch_8912",
-  "reason": "melted",
-  "cost_lost": 12.50
+  "message": "User-friendly error message",
+  "code": "ERROR_CODE"
 }
 ```
+Common codes returned:
+- `400 Bad Request` (`HTTP_400`) - Invalid query parameter (e.g., unsupported period)
+- `404 Not Found` (`HTTP_404`) - Unmatched endpoint path
+- `500 Internal Server Error` (`UNKNOWN_ERROR`) - Unexpected internal error
+
+---
+
+## 📨 Consumable Message Schemas (RabbitMQ)
+
+The service acts as an event subscriber and listens on topic exchanges for:
+
+### 1. `order.placed` / `OrderPlaced` (Exchange: `order`)
+Triggered when an order is completed. Supports CloudEvents 1.0 schema with `snake_case` or `camelCase` payload.
+
+### 2. `order.cancelled` / `OrderCancelled` (Exchange: `order`)
+Triggered when an order is cancelled, rolling back analytics records for that order date.
+
+### 3. `inventory.waste` / `WasteRecorded` (Exchange: `inventory`)
+Triggered when inventory is recorded as waste (expired, damaged, quality).
 
 ---
 

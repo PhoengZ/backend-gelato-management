@@ -2,6 +2,7 @@ package tests
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 	"testing"
 	"time"
@@ -310,5 +311,111 @@ func TestGetAnalyticsSummary_InvalidPeriod(t *testing.T) {
 	_, err := svc.GetAnalyticsSummary(context.Background(), "invalid")
 	if err == nil {
 		t.Fatal("Expected error for invalid period, got nil")
+	}
+}
+
+func TestProcessOrderPlaced_SnakeCasePayload(t *testing.T) {
+	mockRepo := NewMockRepository()
+	mockOrderRepo := NewMockOrderRepository()
+	svc := service.NewAnalyticsService(mockRepo, mockOrderRepo)
+
+	// JSON with snake_case field names and integer minor units matching CloudEvents spec
+	canonicalJSON := `{
+		"id": "evt_canonical_001",
+		"type": "com.gelatoflow.order.placed.v1",
+		"time": "2026-08-20T10:30:00Z",
+		"source": "/gelatoflow/order-service",
+		"data": {
+			"order_id": "ord_snake_001",
+			"total_amount_minor": 15000,
+			"items": [
+				{
+					"flavor_id": "flv_01",
+					"flavor_name": "Pistachio",
+					"portions": 3,
+					"unit_price_minor": 5000,
+					"subtotal_minor": 15000
+				}
+			]
+		}
+	}`
+
+	var event models.OrderPlacedEvent
+	if err := json.Unmarshal([]byte(canonicalJSON), &event); err != nil {
+		t.Fatalf("Failed to unmarshal canonical snake_case JSON: %v", err)
+	}
+
+	if event.Data.OrderID != "ord_snake_001" {
+		t.Errorf("Expected OrderID 'ord_snake_001', got '%s'", event.Data.OrderID)
+	}
+	if event.Data.TotalAmount != 150.00 {
+		t.Errorf("Expected TotalAmount 150.00 (from 15000 minor units), got %f", event.Data.TotalAmount)
+	}
+	if len(event.Data.Items) != 1 || event.Data.Items[0].FlavorID != "flv_01" {
+		t.Fatalf("Expected 1 item with FlavorID 'flv_01', got %+v", event.Data.Items)
+	}
+
+	err := svc.ProcessOrderPlaced(context.Background(), event)
+	if err != nil {
+		t.Fatalf("Expected no error processing order, got %v", err)
+	}
+
+	record := mockRepo.Records["2026-08-20"]
+	if record == nil {
+		t.Fatalf("Expected record for 2026-08-20 to be created")
+	}
+	if record.Financials.GrossSales != 150.00 {
+		t.Errorf("Expected GrossSales 150.00, got %f", record.Financials.GrossSales)
+	}
+	if record.Operations.ScoopsSold != 3 {
+		t.Errorf("Expected ScoopsSold 3, got %d", record.Operations.ScoopsSold)
+	}
+}
+
+func TestProcessOrderPlaced_Idempotency(t *testing.T) {
+	mockRepo := NewMockRepository()
+	mockOrderRepo := NewMockOrderRepository()
+	svc := service.NewAnalyticsService(mockRepo, mockOrderRepo)
+
+	event := models.OrderPlacedEvent{
+		ID:     "evt_idem_001",
+		Time:   "2026-08-20T10:30:00Z",
+		Source: "order-service",
+		Data: models.OrderPlacedData{
+			OrderID:     "ord_idem_001",
+			TotalAmount: 100.00,
+			Items: []models.OrderPlacedItem{
+				{FlavorID: "F01", FlavorName: "Vanilla", Portions: 2, UnitPrice: 50, Subtotal: 100},
+			},
+		},
+	}
+
+	// First execution
+	if err := svc.ProcessOrderPlaced(context.Background(), event); err != nil {
+		t.Fatalf("First ProcessOrderPlaced failed: %v", err)
+	}
+
+	record1 := mockRepo.Records["2026-08-20"]
+	if record1.Financials.TotalOrders != 1 {
+		t.Fatalf("Expected TotalOrders 1, got %d", record1.Financials.TotalOrders)
+	}
+	if record1.Financials.GrossSales != 100.00 {
+		t.Fatalf("Expected GrossSales 100.00, got %f", record1.Financials.GrossSales)
+	}
+
+	// Duplicate delivery of the exact same order
+	if err := svc.ProcessOrderPlaced(context.Background(), event); err != nil {
+		t.Fatalf("Second ProcessOrderPlaced should be a no-op, got error: %v", err)
+	}
+
+	record2 := mockRepo.Records["2026-08-20"]
+	if record2.Financials.TotalOrders != 1 {
+		t.Errorf("Expected TotalOrders to remain 1 after duplicate delivery, got %d", record2.Financials.TotalOrders)
+	}
+	if record2.Financials.GrossSales != 100.00 {
+		t.Errorf("Expected GrossSales to remain 100.00 after duplicate delivery, got %f", record2.Financials.GrossSales)
+	}
+	if record2.Operations.ScoopsSold != 2 {
+		t.Errorf("Expected ScoopsSold to remain 2 after duplicate delivery, got %d", record2.Operations.ScoopsSold)
 	}
 }

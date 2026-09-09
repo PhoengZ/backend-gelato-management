@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"analytics-service/config"
+	"analytics-service/internal/handler"
 	"analytics-service/internal/messaging"
 	"analytics-service/internal/repository"
 	"analytics-service/internal/router"
@@ -50,7 +51,9 @@ func main() {
 	}
 
 	// Setup Fiber App
-	app := fiber.New()
+	app := fiber.New(fiber.Config{
+		ErrorHandler: handler.CustomErrorHandler,
+	})
 	router.SetupRoutes(app, svc)
 
 	// Start server gracefully

@@ -82,6 +82,18 @@ func (s *analyticsService) ProcessOrderPlaced(ctx context.Context, event models.
 		return err
 	}
 
+	// Check if order was already processed (event deduplication / idempotency)
+	if event.Data.OrderID != "" {
+		existingOrder, err := s.orderRepo.FindByID(ctx, event.Data.OrderID)
+		if err != nil {
+			return fmt.Errorf("failed to check existing order: %w", err)
+		}
+		if existingOrder != nil {
+			// Order already processed; idempotent no-op
+			return nil
+		}
+	}
+
 	record, err := s.getOrCreateAnalytics(ctx, date)
 	if err != nil {
 		return err
