@@ -1,0 +1,6 @@
+.env
+.git
+catalog-service
+coverage.out
+README.md
+tests
