@@ -49,7 +49,11 @@ func TestAnalyticsRepositoryIntegration(t *testing.T) {
 		record := &models.Analytics{
 			Date: "2026-08-25",
 			Financials: models.Financials{
-				GrossSales: 150.0,
+				GrossSalesMinor: 15000,
+				GrossSales:      150.0,
+			},
+			WasteStats: models.WasteStats{
+				CostLostMinor: 5000,
 			},
 		}
 
@@ -67,14 +71,21 @@ func TestAnalyticsRepositoryIntegration(t *testing.T) {
 		if found == nil {
 			t.Fatalf("Expected to find record, got nil")
 		}
+		if found.Financials.GrossSalesMinor != 15000 {
+			t.Errorf("Expected GrossSalesMinor 15000, got %d", found.Financials.GrossSalesMinor)
+		}
 		if found.Financials.GrossSales != 150.0 {
 			t.Errorf("Expected GrossSales 150.0, got %f", found.Financials.GrossSales)
+		}
+		if found.WasteStats.CostLostMinor != 5000 {
+			t.Errorf("Expected CostLostMinor 5000, got %d", found.WasteStats.CostLostMinor)
 		}
 	})
 
 	t.Run("Update Existing Record", func(t *testing.T) {
 		// Fetch existing
 		record, _ := repo.FindByDate(ctx, "2026-08-25")
+		record.Financials.GrossSalesMinor = 30000
 		record.Financials.GrossSales = 300.0 // Update field
 
 		// Test Save (Update)
@@ -85,6 +96,9 @@ func TestAnalyticsRepositoryIntegration(t *testing.T) {
 
 		// Verify Update
 		updated, _ := repo.FindByDate(ctx, "2026-08-25")
+		if updated.Financials.GrossSalesMinor != 30000 {
+			t.Errorf("Expected GrossSalesMinor to be updated to 30000, got %d", updated.Financials.GrossSalesMinor)
+		}
 		if updated.Financials.GrossSales != 300.0 {
 			t.Errorf("Expected GrossSales to be updated to 300.0, got %f", updated.Financials.GrossSales)
 		}
