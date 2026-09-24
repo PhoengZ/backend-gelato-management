@@ -52,6 +52,8 @@ flowchart LR
 
     %% Inter-service & External Connections
     OS -- gRPC: Check/Reserve/Confirm/Release Portions --> BIS
+    ANS -- "gRPC (Client-Streaming): Stream Order Details" --> OS
+    FS -- "gRPC: Query Order Details" --> OS
     PS -- Update Order Status --> OS 
     PS -- External API --> Stripe
     Stripe -- Webhook --> PS

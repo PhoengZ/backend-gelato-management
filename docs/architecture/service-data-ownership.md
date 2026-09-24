@@ -19,16 +19,26 @@ ownership of the underlying data.
 
 ## Boundary rules
 
-1. Catalog responses never contain an authoritative `available_portions` value.
-2. Batch Inventory references a flavor by `flavor_id`; it does not duplicate the
+1. Direct database access and cross-service table replication are strictly prohibited.
+   Services must not create shadow tables or duplicate collections in their own
+   database to store copies of data owned by another service. Only foreign
+   identifiers (such as `flavor_id`, `order_id`, `user_id`) may be persisted.
+2. When a service requires data owned by another service to fulfill a workflow or
+   handle an event, it must query the authoritative service synchronously via gRPC
+   instead of replicating data locally.
+3. Catalog responses never contain an authoritative `available_portions` value.
+4. Batch Inventory references a flavor by `flavor_id`; it does not duplicate the
    flavor name, price, recipe, or allergen list.
-3. Order Service uses Batch Inventory gRPC methods to check and reserve portions.
+5. Order Service uses Batch Inventory gRPC methods to check and reserve portions.
    It must not query inventory tables.
-4. Batch Inventory is the only service allowed to change available, reserved,
+6. Batch Inventory is the only service allowed to change available, reserved,
    sold, or wasted portion balances.
-5. Analytics consumes versioned events and never participates in a synchronous
-   order or inventory transaction.
-6. API Gateway may return a composed flavor view containing Catalog metadata and
+7. Analytics consumes versioned events and never participates in or blocks an
+   operational checkout or inventory transaction. When Analytics requires line
+   items or order details for analytics reporting and aggregation, it queries
+   Order Service via client-streaming gRPC (streaming order IDs to retrieve item
+   breakdowns) rather than creating replicated order tables in its MongoDB database.
+8. API Gateway may return a composed flavor view containing Catalog metadata and
    Inventory availability, but that view is not a new data owner.
 
 ## Shared conventions

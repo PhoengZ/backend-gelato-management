@@ -110,12 +110,10 @@ items in version 1 use the same event-level currency.
 ### 3.2 OrderCancelled
 
 The payload contains `order_id` and a stable `reason` code. Services that need
-the paid amount or line items keep an event-fed local projection created from
-`OrderPlaced` and look up the order there. They do not call Order synchronously
-while handling the event.
-
-This is local state materialization, not full event sourcing: the Order database
-remains the operational source of truth.
+the paid amount or line items (such as Fulfillment or Notification) call Order
+Service directly via gRPC using `order_id` to retrieve authoritative order details.
+Services do not maintain replicated tables or duplicate collections of foreign
+orders in their local databases.
 
 ### 3.3 Fulfillment events
 
@@ -166,6 +164,13 @@ Analytics stores sales and lost-cost aggregates as integer minor units, for
 example `gross_sales_minor`, `average_order_value_minor`, and
 `cost_lost_minor`. Decimal display values are derived only at the API or UI
 boundary.
+
+Analytics must not build full replicated copies or shadow tables of operational
+orders in its MongoDB database. When Analytics requires order item breakdowns
+(such as calculating item popularity or basket composition), it calls Order
+Service using client-streaming gRPC (`StreamOrderItems`), streaming a sequence of
+`order_id`s and receiving consolidated order item details for analytical batch
+computation.
 
 The current Analytics prototype still consumes legacy flat `order.success` and
 `inventory.waste` payloads containing floating-point fields. It must add the

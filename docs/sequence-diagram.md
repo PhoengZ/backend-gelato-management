@@ -10,6 +10,7 @@ sequenceDiagram
     participant RMQ as RabbitMQ
     participant FS as Fulfillment Service
     participant NS as Notification Service
+    participant ANS as Analytics Service
 
     rect rgb(30, 30, 30)
     note right of C: 1. Check Real-time Availability
@@ -70,6 +71,17 @@ sequenceDiagram
         activate NS
         NS->>C: Send Order Confirmation with Queue Number
         deactivate NS
+    and Analytics
+        RMQ->>ANS: Consume OrderPlaced event
+        activate ANS
+        ANS->>ANS: Update sales metrics (minor units)
+        opt Detailed Breakdown Query (Batch / Popularity)
+            ANS->>OS: gRPC (Client-Streaming): StreamOrderItems(order_id stream)
+            activate OS
+            OS-->>ANS: Consolidated order line items & flavors
+            deactivate OS
+        end
+        deactivate ANS
     end
 
     C->>AG: Poll GET /api/v1/orders/{id}/status
