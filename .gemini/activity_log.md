@@ -77,3 +77,16 @@
   - Aligning testing architecture with industry standards (broad unit test base, narrow adapter integration tests, and a single full pipeline E2E smoke test) provides fast debugging, avoids hybrid test ambiguity, and proves end-to-end event-to-database persistence and deduplication against real containers.
 - **The observed result/outcome:**
   - All tests passed cleanly: `TestConsumerIntegration` (0.33s), `TestAnalyticsRepositoryIntegration` (0.13s), `TestEventRepositoryIntegration` (0.17s), and all unit tests in 2.75s total.
+
+## [2026-09-24] Fix PR #17 CI Failures: Buf Lint RPC Naming and Go Code Formatting
+
+- **What was attempted:**
+  - Renamed `StreamOrderItemRequest` and `StreamOrderItemResponse` to `StreamOrderItemsRequest` and `StreamOrderItemsResponse` in `contracts/proto/order/v1/order.proto` to satisfy Buf linter RPC standard naming conventions.
+  - Updated corresponding Go structs in `analytics-service/internal/client/order_client.go` and `analytics-service/tests/order_client_integration_test.go`.
+  - Executed `gofmt -s -w .` across `analytics-service` to satisfy `gofmt -s -l .` formatting checks.
+- **The hypothesis being tested:**
+  - Standardizing RPC message names to match Buf lint rules and enforcing Go formatting standardizes cross-service contracts and ensures all CI workflow checks pass.
+- **The observed result/outcome:**
+  - `gofmt -s -l .` reports 0 unformatted files.
+  - All unit and bufconn integration tests in `analytics-service` passed cleanly.
+  - `git diff --check` passed with 0 errors.
