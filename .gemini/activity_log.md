@@ -65,3 +65,15 @@
   - All 12 unit and in-memory bufconn integration tests passed cleanly in 0.27s.
   - Service binary built successfully (`go build ./cmd/api`).
   - `git diff --check` passed with 0 errors.
+
+## [2026-09-24] Analytics Service: Testing Pyramid Alignment & Full Pipeline E2E Integration Test
+
+- **What was attempted:**
+  - Upgraded `analytics-service/tests/consumer_integration_test.go` from a hybrid mock test to a true Full Pipeline E2E Integration Test connecting to both real RabbitMQ and real MongoDB.
+  - Added event deduplication verification in real MongoDB `processed_events` collection within `consumer_integration_test.go` using duplicate `OrderPlaced` events.
+  - Created `analytics-service/tests/event_repo_integration_test.go` as a dedicated Narrow Integration Test for `EventRepository` against MongoDB.
+  - Enhanced `analytics-service/tests/analytics_repo_integration_test.go` to assert persistence and retrieval of integer minor units (`gross_sales_minor`, `cost_lost_minor`).
+- **The hypothesis being tested:**
+  - Aligning testing architecture with industry standards (broad unit test base, narrow adapter integration tests, and a single full pipeline E2E smoke test) provides fast debugging, avoids hybrid test ambiguity, and proves end-to-end event-to-database persistence and deduplication against real containers.
+- **The observed result/outcome:**
+  - All tests passed cleanly: `TestConsumerIntegration` (0.33s), `TestAnalyticsRepositoryIntegration` (0.13s), `TestEventRepositoryIntegration` (0.17s), and all unit tests in 2.75s total.
