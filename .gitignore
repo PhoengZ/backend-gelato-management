@@ -8,3 +8,6 @@ data/
 docker-compose.override.yml
 *.exe
 analytics-service/main
+
+# Gemini / IDE
+.gemini/

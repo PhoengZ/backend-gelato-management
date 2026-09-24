@@ -29,3 +29,18 @@
 - **The observed result/outcome:**
   - All 9 unit and handler tests passed cleanly (`go test -v ./tests/...`).
   - `git diff --check` and `docker compose ... config --quiet` passed with exit code 0.
+
+## [2026-09-24] Docs: Cross-Service gRPC Architecture and Analytics Client Streaming
+
+- **What was attempted:**
+  - Switched to branch `docs/grpc-cross-service-and-analytics-streaming`.
+  - Added `.gemini/` to `.gitignore`.
+  - Updated `docs/architecture/service-data-ownership.md` Boundary Rules to prohibit cross-service table replication (no shadow/duplicate tables) and mandate gRPC queries on demand. Added Analytics client-streaming gRPC rule.
+  - Updated `docs/overview-architecture.md` Section 1 and Section 3.B to formalize inter-service gRPC data access and Analytics-to-Order client-streaming RPC (`StreamOrderItems`).
+  - Updated `docs/event-schema-spec.md` Section 3.2 (`OrderCancelled`) and Section 4 (Analytics projection rules) to replace local table materialization with direct gRPC queries and client streaming.
+  - Updated `docs/architecture-diagram.md` and `docs/sequence-diagram.md` to depict inter-service gRPC calls and Analytics client-streaming interaction.
+- **The hypothesis being tested:**
+  - Replacing cross-service replicated tables with on-demand gRPC queries establishes single authoritative data ownership, eliminates state drift and storage duplication, and fulfills client-streaming requirements for analytics batch reporting.
+- **The observed result/outcome:**
+  - All documentation references updated consistently.
+  - `git diff --check` passed cleanly with exit code 0.
