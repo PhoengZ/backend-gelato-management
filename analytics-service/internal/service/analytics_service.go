@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"analytics-service/internal/client"
 	"analytics-service/internal/factory"
 	"analytics-service/internal/models"
 	"analytics-service/internal/repository"
@@ -21,15 +22,25 @@ type AnalyticsService interface {
 	ProcessOrderCancelled(ctx context.Context, event models.OrderCancelledEvent) error
 	ProcessWasteRecorded(ctx context.Context, event models.WasteRecordedEvent) error
 	GetAnalyticsSummary(ctx context.Context, period string) (*models.AnalyticsSummaryResponse, error)
+	BatchQueryOrderItems(ctx context.Context, orderIDs []string) ([]models.OrderItemDetail, error)
 }
 
 type analyticsService struct {
-	repo      repository.AnalyticsRepository
-	orderRepo repository.OrderRepository
+	repo        repository.AnalyticsRepository
+	eventRepo   repository.EventRepository
+	orderClient client.OrderClient
 }
 
-func NewAnalyticsService(repo repository.AnalyticsRepository, orderRepo repository.OrderRepository) AnalyticsService {
-	return &analyticsService{repo: repo, orderRepo: orderRepo}
+func NewAnalyticsService(
+	repo repository.AnalyticsRepository,
+	eventRepo repository.EventRepository,
+	orderClient client.OrderClient,
+) AnalyticsService {
+	return &analyticsService{
+		repo:        repo,
+		eventRepo:   eventRepo,
+		orderClient: orderClient,
+	}
 }
 
 // extractDate parses an ISO 8601 timestamp from the event envelope and
@@ -75,23 +86,24 @@ func (s *analyticsService) getOrCreateAnalytics(ctx context.Context, date string
 
 // ProcessOrderPlaced handles the OrderPlaced event published by the Order
 // Service after successful payment. It updates daily revenue, order count,
-// scoops sold, and per-flavor sales statistics.
+// scoops sold, and per-flavor sales statistics in integer minor units.
+// Note: Analytics Service does NOT store shadow copies of orders in its database.
 func (s *analyticsService) ProcessOrderPlaced(ctx context.Context, event models.OrderPlacedEvent) error {
-	date, err := extractDate(event.Time)
-	if err != nil {
-		return err
-	}
-
-	// Check if order was already processed (event deduplication / idempotency)
-	if event.Data.OrderID != "" {
-		existingOrder, err := s.orderRepo.FindByID(ctx, event.Data.OrderID)
+	// Check event deduplication by event.ID (CloudEvents 1.0)
+	if event.ID != "" && s.eventRepo != nil {
+		processed, err := s.eventRepo.IsProcessed(ctx, event.ID)
 		if err != nil {
-			return fmt.Errorf("failed to check existing order: %w", err)
+			return fmt.Errorf("failed to check event deduplication: %w", err)
 		}
-		if existingOrder != nil {
+		if processed {
 			// Order already processed; idempotent no-op
 			return nil
 		}
+	}
+
+	date, err := extractDate(event.Time)
+	if err != nil {
+		return err
 	}
 
 	record, err := s.getOrCreateAnalytics(ctx, date)
@@ -99,34 +111,40 @@ func (s *analyticsService) ProcessOrderPlaced(ctx context.Context, event models.
 		return err
 	}
 
-	// Save Order to MongoDB
-	order := &models.Order{
-		ID:          event.Data.OrderID,
-		Status:      "Wait",
-		CreatedAt:   event.Time,
-		TotalAmount: event.Data.TotalAmount,
-		Items:       event.Data.Items,
-	}
-	if err := s.orderRepo.Save(ctx, order); err != nil {
-		return fmt.Errorf("failed to save order: %w", err)
+	// Calculate minor units
+	totalAmountMinor := event.Data.TotalAmountMinor
+	if totalAmountMinor == 0 && event.Data.TotalAmount > 0 {
+		totalAmountMinor = int64(event.Data.TotalAmount * 100.0)
 	}
 
 	// Update financials
-	record.Financials.GrossSales += event.Data.TotalAmount
+	record.Financials.GrossSalesMinor += totalAmountMinor
+	record.Financials.GrossSales = float64(record.Financials.GrossSalesMinor) / 100.0
 	record.Financials.TotalOrders += 1
-	record.Financials.AverageOrderValue = record.Financials.GrossSales / float64(record.Financials.TotalOrders)
+	if record.Financials.TotalOrders > 0 {
+		record.Financials.AverageOrderValueMinor = record.Financials.GrossSalesMinor / int64(record.Financials.TotalOrders)
+		record.Financials.AverageOrderValue = float64(record.Financials.AverageOrderValueMinor) / 100.0
+	}
+	if event.Data.Currency != "" {
+		record.Financials.Currency = event.Data.Currency
+	}
 
 	// Update operations and flavor stats
 	for _, item := range event.Data.Items {
 		record.Operations.ScoopsSold += item.Portions
+
+		subtotalMinor := item.SubtotalMinor
+		if subtotalMinor == 0 && item.Subtotal > 0 {
+			subtotalMinor = int64(item.Subtotal * 100.0)
+		}
 
 		// Update FlavorStats
 		found := false
 		for i, fs := range record.FlavorStats {
 			if fs.FlavorID == item.FlavorID {
 				record.FlavorStats[i].ScoopsSold += item.Portions
-				record.FlavorStats[i].Revenue += item.Subtotal
-				// Always update the name in case it was missing from older records
+				record.FlavorStats[i].RevenueMinor += subtotalMinor
+				record.FlavorStats[i].Revenue = float64(record.FlavorStats[i].RevenueMinor) / 100.0
 				if item.FlavorName != "" {
 					record.FlavorStats[i].Name = item.FlavorName
 				}
@@ -136,10 +154,11 @@ func (s *analyticsService) ProcessOrderPlaced(ctx context.Context, event models.
 		}
 		if !found {
 			record.FlavorStats = append(record.FlavorStats, models.FlavorStat{
-				FlavorID:   item.FlavorID,
-				Name:       item.FlavorName,
-				ScoopsSold: item.Portions,
-				Revenue:    item.Subtotal,
+				FlavorID:     item.FlavorID,
+				Name:         item.FlavorName,
+				ScoopsSold:   item.Portions,
+				RevenueMinor: subtotalMinor,
+				Revenue:      float64(subtotalMinor) / 100.0,
 			})
 		}
 	}
@@ -149,25 +168,51 @@ func (s *analyticsService) ProcessOrderPlaced(ctx context.Context, event models.
 		record.Operations.WasteRate = float64(record.WasteStats.TotalWastePortions) / float64(record.Operations.ScoopsSold)
 	}
 
-	return s.repo.Save(ctx, record)
+	if err := s.repo.Save(ctx, record); err != nil {
+		return err
+	}
+
+	// Mark event as processed for idempotency
+	if event.ID != "" && s.eventRepo != nil {
+		_ = s.eventRepo.MarkProcessed(ctx, event.ID, "OrderPlaced")
+	}
+
+	return nil
 }
 
-// ProcessOrderCancelled handles the OrderCancelled event. It fetches the order
-// and reduces daily analytics stats for the date the order was created.
+// ProcessOrderCancelled handles the OrderCancelled thin event. It queries the
+// Order Service via gRPC to obtain the order snapshot, then applies the negative
+// offset to the daily analytics stats without using any local shadow database table.
 func (s *analyticsService) ProcessOrderCancelled(ctx context.Context, event models.OrderCancelledEvent) error {
-	order, err := s.orderRepo.FindByID(ctx, event.Data.OrderID)
-	if err != nil {
-		return fmt.Errorf("failed to find order: %w", err)
-	}
-	if order == nil {
-		return fmt.Errorf("order not found for cancellation: %s", event.Data.OrderID)
-	}
-	if order.Status == "Cancel" {
-		// Already cancelled
-		return nil
+	// Deduplicate event by event.ID
+	if event.ID != "" && s.eventRepo != nil {
+		processed, err := s.eventRepo.IsProcessed(ctx, event.ID)
+		if err != nil {
+			return fmt.Errorf("failed to check event deduplication: %w", err)
+		}
+		if processed {
+			return nil
+		}
 	}
 
-	date, err := extractDate(order.CreatedAt)
+	if s.orderClient == nil {
+		return fmt.Errorf("order client is not configured for gRPC query")
+	}
+
+	// Fetch authoritative order details from Order Service via gRPC
+	order, err := s.orderClient.GetOrderDetails(ctx, event.Data.OrderID)
+	if err != nil {
+		return fmt.Errorf("failed to fetch order details from order service via gRPC: %w", err)
+	}
+	if order == nil {
+		return fmt.Errorf("order not found from order service for cancellation: %s", event.Data.OrderID)
+	}
+
+	dateStr := order.CreatedAt
+	if dateStr == "" {
+		dateStr = event.Time
+	}
+	date, err := extractDate(dateStr)
 	if err != nil {
 		return err
 	}
@@ -178,23 +223,41 @@ func (s *analyticsService) ProcessOrderCancelled(ctx context.Context, event mode
 	}
 
 	// Update financials
-	record.Financials.GrossSales -= order.TotalAmount
+	record.Financials.GrossSalesMinor -= order.TotalAmountMinor
+	if record.Financials.GrossSalesMinor < 0 {
+		record.Financials.GrossSalesMinor = 0
+	}
+	record.Financials.GrossSales = float64(record.Financials.GrossSalesMinor) / 100.0
+
 	record.Financials.TotalOrders -= 1
 	if record.Financials.TotalOrders > 0 {
-		record.Financials.AverageOrderValue = record.Financials.GrossSales / float64(record.Financials.TotalOrders)
+		record.Financials.AverageOrderValueMinor = record.Financials.GrossSalesMinor / int64(record.Financials.TotalOrders)
+		record.Financials.AverageOrderValue = float64(record.Financials.AverageOrderValueMinor) / 100.0
 	} else {
+		record.Financials.TotalOrders = 0
+		record.Financials.AverageOrderValueMinor = 0
 		record.Financials.AverageOrderValue = 0
 	}
 
 	// Update operations and flavor stats
 	for _, item := range order.Items {
 		record.Operations.ScoopsSold -= item.Portions
+		if record.Operations.ScoopsSold < 0 {
+			record.Operations.ScoopsSold = 0
+		}
 
 		// Update FlavorStats
 		for i, fs := range record.FlavorStats {
 			if fs.FlavorID == item.FlavorID {
 				record.FlavorStats[i].ScoopsSold -= item.Portions
-				record.FlavorStats[i].Revenue -= item.Subtotal
+				if record.FlavorStats[i].ScoopsSold < 0 {
+					record.FlavorStats[i].ScoopsSold = 0
+				}
+				record.FlavorStats[i].RevenueMinor -= item.SubtotalMinor
+				if record.FlavorStats[i].RevenueMinor < 0 {
+					record.FlavorStats[i].RevenueMinor = 0
+				}
+				record.FlavorStats[i].Revenue = float64(record.FlavorStats[i].RevenueMinor) / 100.0
 				break
 			}
 		}
@@ -204,21 +267,35 @@ func (s *analyticsService) ProcessOrderCancelled(ctx context.Context, event mode
 	if record.Operations.ScoopsSold > 0 {
 		record.Operations.WasteRate = float64(record.WasteStats.TotalWastePortions) / float64(record.Operations.ScoopsSold)
 	} else {
-		record.Operations.WasteRate = 0 // Or handle appropriately if ScoopsSold <= 0
+		record.Operations.WasteRate = 0
 	}
 
 	if err := s.repo.Save(ctx, record); err != nil {
 		return err
 	}
 
-	// Update order status
-	order.Status = "Cancel"
-	return s.orderRepo.Save(ctx, order)
+	// Mark event as processed
+	if event.ID != "" && s.eventRepo != nil {
+		_ = s.eventRepo.MarkProcessed(ctx, event.ID, "OrderCancelled")
+	}
+
+	return nil
 }
 
 // ProcessWasteRecorded handles the WasteRecorded event published by the
 // Batch Inventory Service when waste is logged (e.g., expired batch).
 func (s *analyticsService) ProcessWasteRecorded(ctx context.Context, event models.WasteRecordedEvent) error {
+	// Deduplicate event by event.ID
+	if event.ID != "" && s.eventRepo != nil {
+		processed, err := s.eventRepo.IsProcessed(ctx, event.ID)
+		if err != nil {
+			return fmt.Errorf("failed to check event deduplication: %w", err)
+		}
+		if processed {
+			return nil
+		}
+	}
+
 	date, err := extractDate(event.Time)
 	if err != nil {
 		return err
@@ -231,6 +308,7 @@ func (s *analyticsService) ProcessWasteRecorded(ctx context.Context, event model
 
 	// Update waste stats
 	record.WasteStats.TotalWastePortions += event.Data.Portions
+	record.WasteStats.CostLostMinor += event.Data.CostLostMinor
 	if record.Operations.ScoopsSold > 0 {
 		record.Operations.WasteRate = float64(record.WasteStats.TotalWastePortions) / float64(record.Operations.ScoopsSold)
 	}
@@ -240,14 +318,16 @@ func (s *analyticsService) ProcessWasteRecorded(ctx context.Context, event model
 	for i, wr := range record.WasteStats.WasteByReason {
 		if wr.Reason == event.Data.Reason {
 			record.WasteStats.WasteByReason[i].Portions += event.Data.Portions
+			record.WasteStats.WasteByReason[i].CostLostMinor += event.Data.CostLostMinor
 			foundReason = true
 			break
 		}
 	}
 	if !foundReason {
 		record.WasteStats.WasteByReason = append(record.WasteStats.WasteByReason, models.WasteByReason{
-			Reason:   event.Data.Reason,
-			Portions: event.Data.Portions,
+			Reason:        event.Data.Reason,
+			Portions:      event.Data.Portions,
+			CostLostMinor: event.Data.CostLostMinor,
 		})
 	}
 
@@ -256,7 +336,7 @@ func (s *analyticsService) ProcessWasteRecorded(ctx context.Context, event model
 	for i, fs := range record.FlavorStats {
 		if fs.FlavorID == event.Data.FlavorID {
 			record.FlavorStats[i].WastePortions += event.Data.Portions
-			// Update name if available
+			record.FlavorStats[i].CostLostMinor += event.Data.CostLostMinor
 			if event.Data.FlavorName != "" {
 				record.FlavorStats[i].Name = event.Data.FlavorName
 			}
@@ -269,10 +349,29 @@ func (s *analyticsService) ProcessWasteRecorded(ctx context.Context, event model
 			FlavorID:      event.Data.FlavorID,
 			Name:          event.Data.FlavorName,
 			WastePortions: event.Data.Portions,
+			CostLostMinor: event.Data.CostLostMinor,
 		})
 	}
 
-	return s.repo.Save(ctx, record)
+	if err := s.repo.Save(ctx, record); err != nil {
+		return err
+	}
+
+	// Mark event as processed
+	if event.ID != "" && s.eventRepo != nil {
+		_ = s.eventRepo.MarkProcessed(ctx, event.ID, "WasteRecorded")
+	}
+
+	return nil
+}
+
+// BatchQueryOrderItems streams multiple order IDs over client-streaming gRPC
+// to Order Service to retrieve consolidated line items for batch analytics.
+func (s *analyticsService) BatchQueryOrderItems(ctx context.Context, orderIDs []string) ([]models.OrderItemDetail, error) {
+	if s.orderClient == nil {
+		return nil, fmt.Errorf("order client is not configured for gRPC streaming")
+	}
+	return s.orderClient.StreamOrderItems(ctx, orderIDs)
 }
 
 // GetAnalyticsSummary fetches daily records for the given period from MongoDB

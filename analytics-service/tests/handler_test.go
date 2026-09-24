@@ -16,21 +16,22 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-func setupTestApp() (*fiber.App, *MockRepository, *MockOrderRepository) {
+func setupTestApp() (*fiber.App, *MockRepository) {
 	mockRepo := NewMockRepository()
-	mockOrderRepo := NewMockOrderRepository()
-	svc := service.NewAnalyticsService(mockRepo, mockOrderRepo)
+	mockEventRepo := NewMockEventRepository()
+	mockOrderClient := NewMockOrderClient()
+	svc := service.NewAnalyticsService(mockRepo, mockEventRepo, mockOrderClient)
 
 	app := fiber.New(fiber.Config{
 		ErrorHandler: handler.CustomErrorHandler,
 	})
 	router.SetupRoutes(app, svc)
 
-	return app, mockRepo, mockOrderRepo
+	return app, mockRepo
 }
 
 func TestGetAnalyticsSummary_Handler_Success(t *testing.T) {
-	app, mockRepo, _ := setupTestApp()
+	app, mockRepo := setupTestApp()
 
 	today := time.Now().Format("2006-01-02")
 	mockRepo.Records[today] = &models.Analytics{
@@ -80,7 +81,7 @@ func TestGetAnalyticsSummary_Handler_Success(t *testing.T) {
 }
 
 func TestGetAnalyticsSummary_Handler_InvalidPeriod(t *testing.T) {
-	app, _, _ := setupTestApp()
+	app, _ := setupTestApp()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/analytics/summary?period=invalid_period", nil)
 	resp, err := app.Test(req, -1)
@@ -108,7 +109,7 @@ func TestGetAnalyticsSummary_Handler_InvalidPeriod(t *testing.T) {
 }
 
 func TestGetAnalyticsSummary_Handler_NotFound(t *testing.T) {
-	app, _, _ := setupTestApp()
+	app, _ := setupTestApp()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/analytics/unknown-path", nil)
 	resp, err := app.Test(req, -1)
