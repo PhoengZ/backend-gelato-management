@@ -67,13 +67,13 @@ func NewOrderClient(addr string, opts ...grpc.DialOption) (OrderClient, error) {
 	return &grpcOrderClient{conn: conn}, nil
 }
 
-// StreamOrderItemRequest message for streaming order IDs
-type StreamOrderItemRequest struct {
+// StreamOrderItemsRequest message for streaming order IDs
+type StreamOrderItemsRequest struct {
 	OrderID string `json:"order_id"`
 }
 
-// StreamOrderItemResponse message returning consolidated items
-type StreamOrderItemResponse struct {
+// StreamOrderItemsResponse message returning consolidated items
+type StreamOrderItemsResponse struct {
 	Items []models.OrderItemDetail `json:"items"`
 }
 
@@ -81,7 +81,6 @@ type StreamOrderItemResponse struct {
 type GetOrderDetailsRequest struct {
 	OrderID string `json:"order_id"`
 }
-
 
 // StreamOrderItems streams a list of order IDs over a single HTTP/2 client stream.
 func (c *grpcOrderClient) StreamOrderItems(ctx context.Context, orderIDs []string) ([]models.OrderItemDetail, error) {
@@ -98,7 +97,7 @@ func (c *grpcOrderClient) StreamOrderItems(ctx context.Context, orderIDs []strin
 
 	// Stream each order ID to the server
 	for _, id := range orderIDs {
-		req := StreamOrderItemRequest{OrderID: id}
+		req := StreamOrderItemsRequest{OrderID: id}
 		if err := stream.SendMsg(&req); err != nil {
 			return nil, fmt.Errorf("failed to stream order id %s: %w", id, err)
 		}
@@ -110,7 +109,7 @@ func (c *grpcOrderClient) StreamOrderItems(ctx context.Context, orderIDs []strin
 	}
 
 	// Receive consolidated response
-	var resp StreamOrderItemResponse
+	var resp StreamOrderItemsResponse
 	if err := stream.RecvMsg(&resp); err != nil {
 		if err == io.EOF {
 			return nil, nil

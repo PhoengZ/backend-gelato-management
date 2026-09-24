@@ -29,11 +29,11 @@ func startInMemoryOrderGRPCServer(t *testing.T) (*bufconn.Listener, func()) {
 		Handler: func(srv any, stream grpc.ServerStream) error {
 			var receivedIDs []string
 			for {
-				var req client.StreamOrderItemRequest
+				var req client.StreamOrderItemsRequest
 				err := stream.RecvMsg(&req)
 				if err == io.EOF {
 					// Client finished streaming; return consolidated response
-					resp := client.StreamOrderItemResponse{
+					resp := client.StreamOrderItemsResponse{
 						Items: []models.OrderItemDetail{
 							{FlavorID: "flv_01", FlavorName: "Pistachio", Portions: 3, SubtotalMinor: 15000},
 							{FlavorID: "flv_02", FlavorName: "Strawberry", Portions: 2, SubtotalMinor: 10000},
