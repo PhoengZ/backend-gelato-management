@@ -40,17 +40,24 @@ Explain the directory organization and the responsibilities of each component:
 
 ### 6. Data Access Layer
 * **Directory:** `internal/repository`
-* **Purpose:** Abstracts all interactions with the MongoDB database.
+* **Purpose:** Abstracts interactions with the MongoDB database. Note: Shadow tables of other services are strictly prohibited; Analytics does not maintain an `orders` collection.
 * **Key Files:**
-  - `analytics_repo.go`: Implements operations to query and update analytics records.
+  - `analytics_repo.go`: Implements operations to query and update daily analytics records.
+  - `event_repo.go`: Implements `ProcessedEventRepository` for idempotency and event deduplication by CloudEvents `event.id`.
 
-### 7. Core Service Logic
+### 7. External Service Clients (gRPC)
+* **Directory:** `internal/client`
+* **Purpose:** Interfaces with internal backend services via synchronous gRPC.
+* **Key Files:**
+  - `order_client.go`: Connects to `Order Service`, implementing `StreamOrderItems` (client-streaming RPC) and `GetOrderDetails` (unary RPC).
+
+### 8. Core Service Logic
 * **Directory:** `internal/service`
 * **Purpose:** Houses the core business logic, aggregating data and applying domain rules.
 * **Key Files:**
-  - `analytics_service.go`: Processes raw events from the messaging layer and prepares analytical data for the handler.
+  - `analytics_service.go`: Processes raw events from the messaging layer and prepares analytical data for the handler, querying `Order Service` via gRPC when order details are needed.
 
-### 8. Router Setup
+### 9. Router Setup
 * **Directory:** `internal/router`
 * **Purpose:** Configures all HTTP API routes.
 * **Key Files:**
@@ -215,6 +222,12 @@ MONGO_URI=mongodb://<username>:<password>@localhost:27017
 # ==========================================
 # [Required] Connection string for RabbitMQ server
 RABBITMQ_URL=amqp://<username>:<password>@localhost:5672/
+
+# ==========================================
+# gRPC Services Configurations
+# ==========================================
+# [Optional] Target address for Order Service gRPC (Default: localhost:50051)
+ORDER_SERVICE_GRPC_ADDR=localhost:50051
 
 # ==========================================
 # Application Configurations

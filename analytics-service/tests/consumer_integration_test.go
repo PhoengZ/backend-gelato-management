@@ -28,8 +28,9 @@ func TestConsumerIntegration(t *testing.T) {
 
 	// 1. Setup Mock Repository and Service
 	mockRepo := NewMockRepository()
-	mockOrderRepo := NewMockOrderRepository()
-	svc := service.NewAnalyticsService(mockRepo, mockOrderRepo)
+	mockEventRepo := NewMockEventRepository()
+	mockOrderClient := NewMockOrderClient()
+	svc := service.NewAnalyticsService(mockRepo, mockEventRepo, mockOrderClient)
 
 	// 2. Setup and Start Consumer
 	consumer, err := messaging.NewConsumer(rabbitURL, svc)

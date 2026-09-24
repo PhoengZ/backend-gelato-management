@@ -1,0 +1,44 @@
+syntax = "proto3";
+
+package order.v1;
+
+option go_package = "github.com/gelatoflow/backend-gelato-management/contracts/gen/go/order/v1;orderv1";
+
+service OrderService {
+  // StreamOrderItems is a client-streaming RPC where the client streams OrderItemRequests
+  // (containing order_ids) and the server returns a consolidated OrderItemsResponse.
+  rpc StreamOrderItems(stream StreamOrderItemRequest) returns (StreamOrderItemResponse);
+
+  // GetOrderDetails is a unary RPC to fetch details of a single order.
+  rpc GetOrderDetails(GetOrderDetailsRequest) returns (GetOrderDetailsResponse);
+}
+
+message StreamOrderItemRequest {
+  string order_id = 1;
+}
+
+message OrderItem {
+  string flavor_id = 1;
+  string flavor_name = 2;
+  int32 portions = 3;
+  int64 unit_price_minor = 4;
+  int64 subtotal_minor = 5;
+}
+
+message StreamOrderItemResponse {
+  repeated OrderItem items = 1;
+}
+
+message GetOrderDetailsRequest {
+  string order_id = 1;
+}
+
+message GetOrderDetailsResponse {
+  string order_id = 1;
+  string customer_id = 2;
+  string status = 3;
+  string pickup_at = 4;
+  int64 total_amount_minor = 5;
+  string currency = 6;
+  repeated OrderItem items = 7;
+}

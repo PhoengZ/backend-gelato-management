@@ -21,8 +21,13 @@ func BuildAnalyticsSummaryResponse(records []models.Analytics) *models.Analytics
 	wasteMap := make(map[string]*models.FlavorWaste)
 
 	for _, record := range records {
+		recordGrossSales := float64(record.Financials.GrossSalesMinor) / 100.0
+		if record.Financials.GrossSalesMinor == 0 && record.Financials.GrossSales > 0 {
+			recordGrossSales = record.Financials.GrossSales
+		}
+
 		// Accumulate totals
-		response.TotalRevenue += record.Financials.GrossSales
+		response.TotalRevenue += recordGrossSales
 		response.TotalOrders += record.Financials.TotalOrders
 		response.TotalScoops += record.Operations.ScoopsSold
 		response.TotalWaste += record.WasteStats.TotalWastePortions
@@ -32,18 +37,23 @@ func BuildAnalyticsSummaryResponse(records []models.Analytics) *models.Analytics
 		response.SalesTrend = append(response.SalesTrend, models.SalesTrendData{
 			Date:    record.Date,
 			Label:   dateLabel,
-			Revenue: record.Financials.GrossSales,
+			Revenue: recordGrossSales,
 			Orders:  record.Financials.TotalOrders,
 			Scoops:  record.Operations.ScoopsSold,
 		})
 
 		// Aggregate per-flavor stats
 		for _, fs := range record.FlavorStats {
+			flavorRevenue := float64(fs.RevenueMinor) / 100.0
+			if fs.RevenueMinor == 0 && fs.Revenue > 0 {
+				flavorRevenue = fs.Revenue
+			}
+
 			// Sales aggregation
-			if fs.ScoopsSold > 0 || fs.Revenue > 0 {
+			if fs.ScoopsSold > 0 || flavorRevenue > 0 {
 				if existing, ok := salesMap[fs.FlavorID]; ok {
 					existing.Portions += fs.ScoopsSold
-					existing.Revenue += fs.Revenue
+					existing.Revenue += flavorRevenue
 					// Update name if we have a newer non-empty one
 					if fs.Name != "" {
 						existing.FlavorName = fs.Name
@@ -53,7 +63,7 @@ func BuildAnalyticsSummaryResponse(records []models.Analytics) *models.Analytics
 						FlavorID:   fs.FlavorID,
 						FlavorName: fs.Name,
 						Portions:   fs.ScoopsSold,
-						Revenue:    fs.Revenue,
+						Revenue:    flavorRevenue,
 					}
 				}
 			}

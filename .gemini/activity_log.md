@@ -44,3 +44,24 @@
 - **The observed result/outcome:**
   - All documentation references updated consistently.
   - `git diff --check` passed cleanly with exit code 0.
+
+## [2026-09-24] Analytics Service: Remove Shadow Order Table, Add gRPC Client Streaming, and Align with Docs
+
+- **What was attempted:**
+  - Created and switched to branch `feature/analytics-service-grpc-and-no-shadow-table`.
+  - Deleted `analytics-service/internal/repository/order_repo.go` and purged the shadow `orders` MongoDB collection.
+  - Created `analytics-service/internal/repository/event_repo.go` implementing `ProcessedEventRepository` for CloudEvents deduplication by `event.id`.
+  - Created `contracts/proto/order/v1/order.proto` defining `StreamOrderItems` (client-streaming) and `GetOrderDetails` (unary).
+  - Implemented `analytics-service/internal/client/order_client.go` with gRPC client supporting client-streaming and unary RPCs.
+  - Refactored `analytics-service/internal/models/analytics.go` to store integer minor units (`gross_sales_minor`, `cost_lost_minor`, `revenue_minor`), added `CostLostMinor` to `WasteRecordedData`, and replaced `models.Order` with `OrderDetails`.
+  - Updated `analytics-service/internal/service/analytics_service.go` to use `eventRepo` for deduplication, accumulate minor units, and query Order Service via gRPC upon `OrderCancelled` without saving any local orders.
+  - Updated `analytics-service/internal/factory/analytics_factory.go` to convert integer minor units to floating-point currency at the API presentation boundary.
+  - Wired `eventRepo` and `orderClient` in `analytics-service/cmd/api/main.go` and added `ORDER_SERVICE_GRPC_ADDR` in `config/config.go` and `.env.example`.
+  - Created comprehensive unit tests in `tests/service_test.go` and `tests/handler_test.go`, and created in-memory `bufconn` gRPC integration test in `tests/order_client_integration_test.go`.
+  - Updated `analytics-service/README.md`.
+- **The hypothesis being tested:**
+  - Eliminating shadow tables and using on-demand gRPC queries alongside event-id deduplication ensures strict microservice autonomy, data integrity, and compliance with repository architecture boundaries.
+- **The observed result/outcome:**
+  - All 12 unit and in-memory bufconn integration tests passed cleanly in 0.27s.
+  - Service binary built successfully (`go build ./cmd/api`).
+  - `git diff --check` passed with 0 errors.
