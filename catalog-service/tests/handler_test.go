@@ -48,6 +48,10 @@ func (s *stubCatalogService) Get(_ context.Context, _ uuid.UUID, _ service.ReadS
 	return s.getResult, s.getErr
 }
 
+func (s *stubCatalogService) BatchGet(_ context.Context, _ []uuid.UUID, _ service.ReadScope) ([]model.Flavor, error) {
+	return s.listResult, s.listErr
+}
+
 func (s *stubCatalogService) Update(_ context.Context, _ uuid.UUID, _ service.UpdateFlavorInput) (*model.FlavorAdmin, error) {
 	return s.updateResult, s.updateErr
 }

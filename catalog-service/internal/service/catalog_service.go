@@ -47,7 +47,7 @@ type UpdateFlavorInput struct {
 // PUT; omitting the optional image_url removes the previous image.
 type ReplaceFlavorInput CreateFlavorInput
 
-// ReadScope is selected by the HTTP layer after verifying the Bearer token.
+// ReadScope is selected by the transport after verifying the Bearer token.
 // The zero value (and every value other than ManagerRead) hides archived data.
 type ReadScope uint8
 
@@ -67,6 +67,7 @@ type CatalogService interface {
 	Create(ctx context.Context, input CreateFlavorInput) (*model.FlavorAdmin, error)
 	List(ctx context.Context, active *bool, scope ReadScope) ([]model.Flavor, error)
 	Get(ctx context.Context, id uuid.UUID, scope ReadScope) (*model.Flavor, error)
+	BatchGet(ctx context.Context, ids []uuid.UUID, scope ReadScope) ([]model.Flavor, error)
 	Update(ctx context.Context, id uuid.UUID, input UpdateFlavorInput) (*model.FlavorAdmin, error)
 	Replace(ctx context.Context, id uuid.UUID, input ReplaceFlavorInput) (*model.FlavorAdmin, error)
 	Archive(ctx context.Context, id uuid.UUID) error
@@ -139,6 +140,33 @@ func (s *catalogService) Get(ctx context.Context, id uuid.UUID, scope ReadScope)
 	}
 	public := record.Flavor
 	return &public, nil
+}
+
+// BatchGet preserves request order and returns no partial result on failure.
+// It reuses Get visibility rules; it is not a transactional price snapshot.
+func (s *catalogService) BatchGet(ctx context.Context, ids []uuid.UUID, scope ReadScope) ([]model.Flavor, error) {
+	if len(ids) < 1 || len(ids) > 100 {
+		return nil, fmt.Errorf("%w: between 1 and 100 flavor IDs are required", ErrInvalidInput)
+	}
+	seen := make(map[uuid.UUID]bool, len(ids))
+	for _, id := range ids {
+		if seen[id] {
+			return nil, fmt.Errorf("%w: flavor IDs must be unique", ErrInvalidInput)
+		}
+		seen[id] = true
+	}
+	items := make([]model.Flavor, 0, len(ids))
+	for _, id := range ids {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		flavor, err := s.Get(ctx, id, scope)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, *flavor)
+	}
+	return items, nil
 }
 
 func (s *catalogService) Update(ctx context.Context, id uuid.UUID, input UpdateFlavorInput) (*model.FlavorAdmin, error) {
