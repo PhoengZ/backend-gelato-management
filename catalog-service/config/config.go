@@ -2,8 +2,10 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -14,6 +16,7 @@ const minimumJWTSecretBytes = 32
 
 type Config struct {
 	Port           string
+	GRPCAddr       string
 	RedisURL       string
 	RedisKeyPrefix string
 	JWTSecret      string
@@ -27,6 +30,7 @@ func Load() (Config, error) {
 
 	cfg := Config{
 		Port:           envOrDefault("PORT", "3002"),
+		GRPCAddr:       envOrDefault("GRPC_ADDR", "127.0.0.1:50052"),
 		RedisURL:       os.Getenv("REDIS_URL"),
 		RedisKeyPrefix: envOrDefault("REDIS_KEY_PREFIX", "catalog:v1"),
 		JWTSecret:      os.Getenv("JWT_SECRET"),
@@ -34,6 +38,9 @@ func Load() (Config, error) {
 		JWTAudience:    envOrDefault("JWT_AUDIENCE", "gelatoflow-api"),
 	}
 
+	if err := validateGRPCAddr(cfg.GRPCAddr); err != nil {
+		return Config{}, err
+	}
 	if err := validateRedisURL(cfg.RedisURL); err != nil {
 		return Config{}, err
 	}
@@ -51,6 +58,15 @@ func Load() (Config, error) {
 	cfg.RequestTimeout = timeout
 
 	return cfg, nil
+}
+
+func validateGRPCAddr(address string) error {
+	_, rawPort, err := net.SplitHostPort(address)
+	port, parseErr := strconv.Atoi(rawPort)
+	if err != nil || parseErr != nil || port < 1 || port > 65535 || strings.ContainsAny(address, " \t\r\n") {
+		return fmt.Errorf("GRPC_ADDR must be host:port with a port between 1 and 65535")
+	}
+	return nil
 }
 
 func validateRedisURL(raw string) error {
