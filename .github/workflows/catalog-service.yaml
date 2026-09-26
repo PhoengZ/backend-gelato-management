@@ -6,12 +6,16 @@ on:
     paths:
       - "catalog-service/**"
       - "contracts/openapi/catalog-service.v1.yaml"
+      - "contracts/proto/catalog/**"
+      - "contracts/buf.yaml"
       - ".github/workflows/catalog-service.yaml"
   pull_request:
     branches: ["main"]
     paths:
       - "catalog-service/**"
       - "contracts/openapi/catalog-service.v1.yaml"
+      - "contracts/proto/catalog/**"
+      - "contracts/buf.yaml"
       - ".github/workflows/catalog-service.yaml"
 
 permissions:
@@ -48,6 +52,19 @@ jobs:
 
       - name: Verify dependencies
         run: go mod verify
+
+      - name: Set up Buf for Catalog generation
+        uses: bufbuild/buf-action@v1
+        with:
+          version: "1.73.0"
+          setup_only: true
+
+      - name: Verify Catalog generated code
+        working-directory: .
+        run: |
+          sh catalog-service/scripts/generate-proto.sh
+          git diff --exit-code -- catalog-service/gen
+          test -z "$(git ls-files --others --exclude-standard -- catalog-service/gen)"
 
       - name: Check formatting
         run: test -z "$(gofmt -s -l .)"
