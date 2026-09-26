@@ -43,6 +43,24 @@ ownership of the underlying data.
 
 ## Shared conventions
 
+### Catalog transport status
+
+Catalog exposes REST and `catalog.v1.CatalogService` gRPC through the same
+application service and Redis repository. Neither transport exposes authoritative
+stock. Read projections omit recipe; privileged writes and archive visibility
+follow the Catalog JWT policy in both transports.
+
+Order using GetFlavor/BatchGetFlavors for active status and pricing, and Inventory
+using GetFlavor before creating a batch, are planned consumer integrations.
+Those clients are not implemented by the Catalog change. Before checkout
+integration, the team must resolve the distinction between immutable order
+transaction facts (price at purchase) and prohibited Catalog entity replication;
+the existing blanket identifier-only rule above is not silently changed here.
+
+See [ADR-006](adr-006-catalog-rest-and-grpc.md), proposed for team review.
+
+### Interface conventions
+
 - Public REST APIs use `/api/v1`.
 - Internal protobuf packages use a versioned namespace such as `inventory.v1`.
 - Resource identifiers are UUID strings.

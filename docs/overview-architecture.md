@@ -28,6 +28,12 @@ GelatoFlow utilizes an **Event-Driven Microservices Architecture**.
 Used for communication between the Front-end (Customer Web, Staff/Manager Dashboards) and the backend services via the API Gateway.
 
 ### B. gRPC (Internal Synchronous)
+* **Catalog gRPC (implemented locally):** Unary CreateFlavor, GetFlavor,
+  ListFlavors, BatchGetFlavors, UpdateFlavor (full replacement), and DeleteFlavor
+  (archive) share the existing REST application logic and Redis data. Writes
+  require Manager JWTs. Proposed Order/Inventory callers are not connected yet;
+  see [ADR-006](architecture/adr-006-catalog-rest-and-grpc.md).
+
 Used for internal synchronous inter-service data requests and atomic operations, establishing a single source of truth without replicating tables:
 * **Order Service <-> Batch Inventory Service (Unary RPC):**
   * `CheckAvailability`: Verify sellable portions.
