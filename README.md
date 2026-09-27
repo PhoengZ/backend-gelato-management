@@ -9,7 +9,7 @@ GelatoFlow preorder, queue, and batch inventory system.
 | --- | --- |
 | Analytics Service | Implemented prototype |
 | Auth Service | Contract and PostgreSQL infrastructure defined |
-| Catalog Service | Contract and Redis infrastructure defined |
+| Catalog Service | REST and gRPC CRUD implemented with shared Redis persistence; consumer integrations pending |
 | Batch Inventory Service | REST, gRPC, event contracts and PostgreSQL infrastructure defined |
 | Other application services | Added by their owners in later pull requests |
 

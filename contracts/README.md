@@ -17,10 +17,45 @@ changes.
 | --- | --- | --- |
 | Auth REST API | Auth Service | API Gateway, frontend |
 | Catalog REST API | Catalog Service | API Gateway, frontend |
+| Catalog gRPC API | Catalog Service | Direct clients; planned Order and Inventory integrations |
 | Inventory REST API | Batch Inventory Service | API Gateway, staff and manager UI |
 | Inventory gRPC API | Batch Inventory Service | Order Service |
 | `order.placed` event | Order Service | Fulfillment, Notification, Analytics |
 | `inventory.waste` event | Batch Inventory Service | Analytics Service |
+
+## Catalog gRPC behavior
+
+`proto/catalog/v1/catalog.proto` is the canonical `catalog.v1.CatalogService`
+interface. The implementation uses the same application service and Redis as
+Catalog REST. Order/Inventory clients are not integrated by this change.
+
+- Unary methods: CreateFlavor, GetFlavor, ListFlavors, BatchGetFlavors,
+  UpdateFlavor, DeleteFlavor.
+- UpdateFlavor is a full replacement, equivalent to REST PUT. It requires all
+  editable fields including active; omitted image_url clears the previous image.
+- DeleteFlavor archives (active=false), preserving references and the name index.
+  Repeating delete on an existing archive succeeds; missing IDs return NOT_FOUND.
+- Writes require a verified Manager JWT in authorization metadata. Reads follow
+  REST visibility: anonymous/customer/staff see active flavors only. Manager can
+  see archived metadata. An explicit active=false filter requires Manager.
+- Read representations never include recipe. Invalid supplied credentials fail
+  closed even for public reads. Callers cannot select their own read scope.
+- BatchGetFlavors accepts 1–100 unique UUIDs and preserves input order. Any
+  missing/hidden ID fails the whole call; it is not an atomic price snapshot.
+- Standard gRPC statuses carry ErrorInfo with domain `catalog.gelatoflow` and a
+  stable reason. Validation is INVALID_ARGUMENT, missing/hidden resources are
+  NOT_FOUND, duplicate names are ALREADY_EXISTS, and concurrent writes are ABORTED
+  with reason FLAVOR_UPDATE_CONFLICT. Authentication/authorization use
+  UNAUTHENTICATED/PERMISSION_DENIED. Storage connection failures are UNAVAILABLE;
+  deadlines/cancellation remain DEADLINE_EXCEEDED/CANCELLED.
+- Create has no idempotency key. Clients must not automatically retry mutations
+  after an ambiguous timeout; reconcile the result first.
+
+See [Catalog gRPC guide](../catalog-service/GRPC.md) for request examples,
+generation, runtime limits and local verification. The canonical proto's Go
+package follows the shared contract convention; it does not imply a published Go
+module. Each Go consumer generates into its own module using a scoped import
+override, as Catalog's generation template demonstrates.
 
 ## Inventory gRPC behavior
 

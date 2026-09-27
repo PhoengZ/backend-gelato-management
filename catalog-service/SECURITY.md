@@ -1,5 +1,31 @@
 # Catalog security review — 2026-09-09
 
+## gRPC extension — 2026-09-27
+
+The gRPC transport reuses the JWT verifier and application rules. Unary
+interceptors reject malformed/duplicate credentials and require Manager for
+writes. Public projections hide archives/recipes; explicit inactive lists require
+Manager. Caller-supplied identity headers are ignored. This does not grant machine
+identities or authorize background services to impersonate Manager.
+
+Optional protobuf scalars and nested messages preserve required-field presence;
+the binary protocol has normal protobuf unknown/duplicate-field behavior, not
+the strict REST JSON parser's semantics. Limits are 1 MiB receive, 4 MiB send,
+16 KiB metadata and the configured request deadline. Errors use bounded public
+messages and standard status/details rather than returning storage errors.
+
+GRPC_ADDR defaults to loopback. Plaintext is limited to isolated development;
+TLS/network controls must be defined before remote exposure. Request limits do
+not replace deployment rate limiting. List pagination and service-to-service
+identity remain follow-ups. The original review below describes the earlier REST
+work; its dated verification results are not evidence of gRPC deployment.
+
+New regression evidence lives in grpc_test.go, grpc_redis_integration_test.go,
+grpc_process_integration_test.go and internal/server/server_test.go. Tests cover
+real TCP/protobuf calls, shared Redis/REST state, archive/auth policy, request
+presence, CAS status mapping, deadlines reaching a stalled Redis socket, process
+restart and bounded shutdown. See [GRPC.md](GRPC.md) for reproduction commands.
+
 ## Scope and access policy
 
 This review covers Catalog HTTP routing, JWT verification, DTOs, validation,

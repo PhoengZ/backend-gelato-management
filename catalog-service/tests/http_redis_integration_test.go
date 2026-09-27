@@ -26,6 +26,7 @@ func redisRepositoryForTest(t *testing.T) (*repository.RedisFlavorRepository, *r
 	if err != nil {
 		t.Fatal(err)
 	}
+	options.ContextTimeoutEnabled = true
 	client := redis.NewClient(options)
 	if err := client.Ping(context.Background()).Err(); err != nil {
 		t.Fatal(err)

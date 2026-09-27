@@ -13,6 +13,12 @@ external requests by validating the access token issued by Auth Service.
 5. Downstream services authorize the request using the trusted user ID and role
    forwarded by the gateway.
 
+Catalog implementation clarification: both its REST and gRPC transports verify
+the original Bearer JWT locally and derive roles from verified claims. Catalog
+does not trust forwarded user/role headers. gRPC uses authorization metadata;
+public reads may omit it, while mutations and archived-list filters require
+Manager. This does not introduce machine identities or change Auth/Gateway code.
+
 The frontend demo may continue using its mock session cookie until integration.
 The backend bearer-token contract remains canonical.
 

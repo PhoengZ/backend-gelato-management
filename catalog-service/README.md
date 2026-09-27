@@ -1,5 +1,11 @@
 # Catalog Service
 
+Catalog also exposes a protobuf gRPC CRUD API at `127.0.0.1:50052` by default,
+running beside REST with shared application logic and Redis records. See the
+[gRPC guide](GRPC.md) for methods, Manager authorization, generation, examples,
+tests and local-only plaintext limitations. Order/Inventory clients remain
+planned integrations.
+
 Catalog Service implements the canonical GelatoFlow flavor metadata contract:
 
 - `GET /api/v1/flavors`
