@@ -172,10 +172,18 @@ func TestGRPCDeadlineRollsBackBlockedReservation(t *testing.T) {
 func TestExpiryTTLAndInvalidRequests(t *testing.T) {
 	s, _ := fixture(t)
 	s.TTL = 2 * time.Hour
-	b := batch(t, s, uuid.NewString(), 2, time.Now().Add(time.Hour))
+	// Exercise sub-microsecond input even on hosts with a coarser clock.
+	expiry := time.Now().Add(time.Hour).Truncate(time.Microsecond).Add(867 * time.Nanosecond)
+	b := batch(t, s, uuid.NewString(), 2, expiry)
 	r := reserve(t, s, inventory.Item{FlavorID: b.FlavorID, Portions: 1})
-	if !r.ExpiresAt.Equal(b.ExpiresAt) {
-		t.Fatalf("TTL exceeds batch expiry: %s vs %s", r.ExpiresAt, b.ExpiresAt)
+	// PostgreSQL persists timestamps at microsecond precision. The reservation
+	// must use the stored expiry, rather than the original nanosecond input.
+	stored, err := s.Get(context.Background(), b.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.ExpiresAt.Equal(stored.ExpiresAt) || r.ExpiresAt.After(expiry) {
+		t.Fatalf("TTL not capped at persisted batch expiry: %s vs %s (input %s)", r.ExpiresAt, stored.ExpiresAt, expiry)
 	}
 	c := rpcClient(t, s)
 	for _, items := range [][]*pb.PortionRequest{nil, {{FlavorId: b.FlavorID, Portions: 0}}, {{FlavorId: b.FlavorID, Portions: -1}}, {{FlavorId: "bad", Portions: 1}}, {{FlavorId: b.FlavorID, Portions: 1}, {FlavorId: b.FlavorID, Portions: 1}}} {
