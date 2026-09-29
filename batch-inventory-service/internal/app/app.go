@@ -81,12 +81,18 @@ func loop(ctx context.Context, interval time.Duration, work func(context.Context
 	}
 }
 func Serve(ctx context.Context, httpAddr, grpcAddr string, h *http.Server, g *grpc.Server, workers func(context.Context)) error {
-	hl, err := net.Listen("tcp", httpAddr)
+	return serve(ctx, httpAddr, grpcAddr, h, g, workers, net.Listen)
+}
+
+// Inject listener creation so lifecycle tests can inspect the actual sockets
+// without releasing and reclaiming ephemeral ports shared with other processes.
+func serve(ctx context.Context, httpAddr, grpcAddr string, h *http.Server, g *grpc.Server, workers func(context.Context), listen func(string, string) (net.Listener, error)) error {
+	hl, err := listen("tcp", httpAddr)
 	if err != nil {
 		return fmt.Errorf("bind HTTP: %w", err)
 	}
 	defer hl.Close()
-	gl, err := net.Listen("tcp", grpcAddr)
+	gl, err := listen("tcp", grpcAddr)
 	if err != nil {
 		return fmt.Errorf("bind gRPC: %w", err)
 	}
