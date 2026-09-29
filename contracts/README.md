@@ -17,7 +17,7 @@ changes.
 | --- | --- | --- |
 | Auth REST API | Auth Service | API Gateway, frontend |
 | Catalog REST API | Catalog Service | API Gateway, frontend |
-| Catalog gRPC API | Catalog Service | Direct clients; planned Order and Inventory integrations |
+| Catalog gRPC API | Catalog Service | Direct clients, Inventory batch validation; planned Order integration |
 | Inventory REST API | Batch Inventory Service | API Gateway, staff and manager UI |
 | Inventory gRPC API | Batch Inventory Service | Order Service |
 | `order.placed` event | Order Service | Fulfillment, Notification, Analytics |
@@ -27,7 +27,8 @@ changes.
 
 `proto/catalog/v1/catalog.proto` is the canonical `catalog.v1.CatalogService`
 interface. The implementation uses the same application service and Redis as
-Catalog REST. Order/Inventory clients are not integrated by this change.
+Catalog REST. Inventory now calls GetFlavor before creating a batch; Order
+integration remains planned.
 
 - Unary methods: CreateFlavor, GetFlavor, ListFlavors, BatchGetFlavors,
   UpdateFlavor, DeleteFlavor.
@@ -72,6 +73,18 @@ The gRPC service uses standard status codes:
 Repeating an operation with the same idempotency key and the same request returns
 the original successful response.
 
+Inventory implementation details are in [its README](../batch-inventory-service/README.md)
+and [proposed ADR-007](../docs/architecture/adr-007-inventory-transactions-and-callers.md).
+Every Inventory RPC requires a dedicated Order service token in authorization
+metadata for isolated development; missing/invalid credentials are UNAUTHENTICATED.
+UUIDs must be non-nil. Reservation items are limited to 1–100 distinct flavors.
+Same-key replay returns the original successful response, even after a later
+reservation transition. V1 allows one reservation per order ID; a different key
+for that order is ALREADY_EXISTS. Confirm/Release require a matching order ID.
+TTL defaults to 10 minutes, capped by the earliest allocated batch expiry.
+Late confirmation is FAILED_PRECONDITION; release after expiry returns EXPIRED.
+Availability exceeding the proto int32 capacity is OUT_OF_RANGE.
+
 ## Event compatibility
 
 Events use CloudEvents 1.0 structured JSON with domain fields nested under
@@ -83,11 +96,13 @@ resource IDs, RFC 3339 UTC timestamps, and integer minor-unit money.
 `order.placed`. `WasteRecorded` is published to the `inventory` topic exchange
 with routing key `inventory.waste`.
 
-The existing Analytics prototype's flat event shapes are legacy interfaces, not
-the canonical version 1 contract. Its consumer and MongoDB projection require a
-coordinated migration before canonical producers are enabled. In particular,
-`total_amount`, `unit_price`, `subtotal`, and `cost_lost` decimal fields become
-`*_minor` integers with an explicit currency.
+The Analytics implementation currently accepts the canonical waste routing key
+and snake_case waste identifiers and minor-unit cost fields, alongside legacy
+shapes. Parsing support alone does not prove end-to-end compatibility or atomic
+deduplication. Validate its projection, date semantics and duplicate handling
+with its owner before enabling the Inventory producer on the shared broker.
+Canonical monetary fields remain integer `*_minor` values with explicit currency;
+legacy decimal fields are not the v1 contract.
 
 Consumers must ignore unknown fields so compatible metadata can be added without
 breaking existing readers. Removing a field or changing its meaning requires a

@@ -19,6 +19,12 @@ does not trust forwarded user/role headers. gRPC uses authorization metadata;
 public reads may omit it, while mutations and archived-list filters require
 Manager. This does not introduce machine identities or change Auth/Gateway code.
 
+Inventory implementation clarification: REST verifies the original user JWT
+locally, with roles matching the table below. Its internal gRPC currently uses a
+distinct configured Order service token for isolated development, not forwarded
+user headers or Manager credentials. The machine-identity deployment decision is
+proposed in [ADR-007](adr-007-inventory-transactions-and-callers.md).
+
 The frontend demo may continue using its mock session cookie until integration.
 The backend bearer-token contract remains canonical.
 

@@ -50,10 +50,9 @@ application service and Redis repository. Neither transport exposes authoritativ
 stock. Read projections omit recipe; privileged writes and archive visibility
 follow the Catalog JWT policy in both transports.
 
-Order using GetFlavor/BatchGetFlavors for active status and pricing, and Inventory
-using GetFlavor before creating a batch, are planned consumer integrations.
-Those clients are not implemented by the Catalog change. Before checkout
-integration, the team must resolve the distinction between immutable order
+Inventory uses GetFlavor before creating a batch, without persisting Catalog
+metadata. Order using GetFlavor/BatchGetFlavors for active status and pricing is
+a planned consumer integration. Before checkout integration, the team must resolve the distinction between immutable order
 transaction facts (price at purchase) and prohibited Catalog entity replication;
 the existing blanket identifier-only rule above is not silently changed here.
 
