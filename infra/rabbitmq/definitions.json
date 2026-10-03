@@ -19,6 +19,12 @@
       "password_hash": "Rh4i9PkLLV0GIP4lsA4bwNRkBVl5b9bjFJuUNlBJ2+5/nHNE",
       "hashing_algorithm": "rabbit_password_hashing_sha256",
       "tags": []
+    },
+    {
+      "name": "order_service",
+      "password_hash": "xaZtou061bnEs68ac3M3B+uDJvll5JzCyMCP5zodVfxLRHiM",
+      "hashing_algorithm": "rabbit_password_hashing_sha256",
+      "tags": []
     }
   ],
   "vhosts": [
@@ -56,6 +62,13 @@
       "vhost": "gelato_vhost",
       "configure": "^inventory$",
       "write": "^inventory$",
+      "read": "^$"
+    },
+    {
+      "user": "order_service",
+      "vhost": "gelato_vhost",
+      "configure": "^order$",
+      "write": "^order$",
       "read": "^$"
     }
   ],

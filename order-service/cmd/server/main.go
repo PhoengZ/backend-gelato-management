@@ -1,7 +1,13 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"log"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"order-service/internal/client"
 	"order-service/internal/config"
@@ -19,62 +25,91 @@ import (
 )
 
 func main() {
-	// 1. Load configuration
-	cfg := config.LoadConfig()
+	if err := run(); err != nil {
+		log.Fatal(err)
+	}
+}
 
-	// 2. Connect to Database (PostgreSQL)
-	// We handle errors gracefully instead of fatal, so tests can run without DB if mocked
+func run() error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+
 	db, err := gorm.Open(postgres.Open(cfg.DatabaseURL), &gorm.Config{})
 	if err != nil {
-		log.Printf("Warning: Failed to connect to database: %v", err)
-	} else {
-		log.Println("Connected to PostgreSQL database")
-		// Auto Migrate models
-		err = db.AutoMigrate(&domain.Order{}, &domain.OrderItem{})
-		if err != nil {
-			log.Fatalf("Failed to migrate database: %v", err)
-		}
+		return errors.New("connect to Order PostgreSQL: " + err.Error())
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		return err
+	}
+	if err = sqlDB.Ping(); err != nil {
+		return errors.New("ping Order PostgreSQL: " + err.Error())
+	}
+	if err = db.AutoMigrate(&domain.Order{}, &domain.OrderItem{}, &domain.OutboxEvent{}); err != nil {
+		return errors.New("migrate Order database: " + err.Error())
 	}
 
-	// 3. Connect to RabbitMQ
+	repo, err := repository.NewOrderRepository(db)
+	if err != nil {
+		return err
+	}
+	inv, err := client.NewInventoryClient(cfg.BatchInventoryGRPCURL, cfg.OrderServiceToken)
+	if err != nil {
+		return errors.New("connect Inventory gRPC: " + err.Error())
+	}
+	defer inv.Close()
+	cat, err := client.NewCatalogClient(cfg.CatalogGRPCURL)
+	if err != nil {
+		return errors.New("connect Catalog gRPC: " + err.Error())
+	}
+	defer cat.Close()
 	pub, err := publisher.NewRabbitMQPublisher(cfg.RabbitMQURL)
 	if err != nil {
-		log.Printf("Warning: Failed to connect to RabbitMQ: %v", err)
-	} else {
-		defer pub.Close()
+		return errors.New("connect RabbitMQ: " + err.Error())
 	}
+	defer pub.Close()
 
-	// 4. Connect to gRPC Batch Inventory Service
-	invClient, err := client.NewInventoryClient(cfg.BatchInventoryGRPC_URL)
+	svc, err := service.NewOrderService(repo, inv, cat)
 	if err != nil {
-		log.Printf("Warning: Failed to connect to Batch Inventory Service: %v", err)
-	} else {
-		defer invClient.Close()
+		return err
+	}
+	h, err := handler.NewOrderHandler(svc, cfg.PaymentServiceToken)
+	if err != nil {
+		return err
 	}
 
-	// 5. Initialize dependencies
-	repo := repository.NewOrderRepository(db)
-	svc := service.NewOrderService(repo, invClient, pub)
-	orderHandler := handler.NewOrderHandler(svc)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	go service.RunOutboxWorker(ctx, repo, pub)
 
-	// 6. Setup Fiber App
-	app := fiber.New()
-	app.Use(logger.New())
-	app.Use(recover.New())
+	app := fiber.New(fiber.Config{DisableStartupMessage: true})
+	app.Use(logger.New(), recover.New())
+	api := app.Group("/api/v1/orders")
+	api.Post("/", h.CreateOrder)
+	api.Get("/:id", h.GetOrder)
+	api.Post("/:id/payment-succeeded", h.PaymentSucceeded)
+	api.Post("/:id/payment-failed", h.PaymentFailed)
+	api.Post("/:id/cancel", h.CancelOrder)
+	app.Get("/health", func(c *fiber.Ctx) error { return c.SendString("ok") })
 
-	// API Routes
-	api := app.Group("/api/v1")
-	api.Post("/orders", orderHandler.CreateOrder)
-	api.Patch("/orders/:id/status", orderHandler.UpdateOrderStatus)
-	
-	// Health check
-	app.Get("/health", func(c *fiber.Ctx) error {
-		return c.SendString("Order Service is healthy")
-	})
-
-	// 7. Start Server
-	log.Printf("Starting Order Service on port %s", cfg.Port)
-	if err := app.Listen(":" + cfg.Port); err != nil {
-		log.Fatalf("Error starting server: %v", err)
+	listenErr := make(chan error, 1)
+	go func() { listenErr <- app.Listen(":" + cfg.Port) }()
+	select {
+	case err := <-listenErr:
+		if err != nil {
+			return err
+		}
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := app.ShutdownWithContext(shutdownCtx); err != nil {
+			return err
+		}
+		if err := <-listenErr; err != nil {
+			return err
+		}
 	}
+	return nil
 }

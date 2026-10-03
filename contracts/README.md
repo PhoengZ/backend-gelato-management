@@ -17,9 +17,10 @@ changes.
 | --- | --- | --- |
 | Auth REST API | Auth Service | API Gateway, frontend |
 | Catalog REST API | Catalog Service | API Gateway, frontend |
-| Catalog gRPC API | Catalog Service | Direct clients, Inventory batch validation; planned Order integration |
+| Catalog gRPC API | Catalog Service | Direct clients, Inventory batch validation, Order checkout |
 | Inventory REST API | Batch Inventory Service | API Gateway, staff and manager UI |
 | Inventory gRPC API | Batch Inventory Service | Order Service |
+| Order REST API | Order Service | API Gateway, frontend, Payment Service |
 | `order.placed` event | Order Service | Fulfillment, Notification, Analytics |
 | `inventory.waste` event | Batch Inventory Service | Analytics Service |
 
@@ -27,8 +28,9 @@ changes.
 
 `proto/catalog/v1/catalog.proto` is the canonical `catalog.v1.CatalogService`
 interface. The implementation uses the same application service and Redis as
-Catalog REST. Inventory now calls GetFlavor before creating a batch; Order
-integration remains planned.
+Catalog REST. Inventory calls GetFlavor before creating a batch, and Order uses
+BatchGetFlavors before reserving stock to validate active flavors and snapshot
+the agreed purchase price.
 
 - Unary methods: CreateFlavor, GetFlavor, ListFlavors, BatchGetFlavors,
   UpdateFlavor, DeleteFlavor.

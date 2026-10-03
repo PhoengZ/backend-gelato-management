@@ -19,6 +19,10 @@ services:
     ports:
       - "5434:5432"
 
+  order-postgres:
+    ports:
+      - "5436:5432"
+
   catalog-redis:
     ports:
       - "6380:6379"

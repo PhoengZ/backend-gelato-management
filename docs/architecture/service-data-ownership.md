@@ -21,8 +21,11 @@ ownership of the underlying data.
 
 1. Direct database access and cross-service table replication are strictly prohibited.
    Services must not create shadow tables or duplicate collections in their own
-   database to store copies of data owned by another service. Only foreign
-   identifiers (such as `flavor_id`, `order_id`, `user_id`) may be persisted.
+   database to store current entities owned by another service. Services may
+   persist the minimum immutable facts required to represent a completed business
+   transaction. Order line items are such a snapshot: `flavor_id`, `flavor_name`,
+   `unit_price_minor`, `subtotal_minor`, and currency as agreed at checkout. They
+   do not replace or mirror the current Catalog flavor record.
 2. When a service requires data owned by another service to fulfill a workflow or
    handle an event, it must query the authoritative service synchronously via gRPC
    instead of replicating data locally.
@@ -51,10 +54,9 @@ stock. Read projections omit recipe; privileged writes and archive visibility
 follow the Catalog JWT policy in both transports.
 
 Inventory uses GetFlavor before creating a batch, without persisting Catalog
-metadata. Order using GetFlavor/BatchGetFlavors for active status and pricing is
-a planned consumer integration. Before checkout integration, the team must resolve the distinction between immutable order
-transaction facts (price at purchase) and prohibited Catalog entity replication;
-the existing blanket identifier-only rule above is not silently changed here.
+metadata. Order uses BatchGetFlavors to verify active status and obtain the
+checkout price. It persists flavor name and integer minor-unit price as immutable
+order transaction facts; this is not a copy of the mutable Catalog entity.
 
 See [ADR-006](adr-006-catalog-rest-and-grpc.md), proposed for team review.
 

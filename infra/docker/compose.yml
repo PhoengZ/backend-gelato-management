@@ -75,6 +75,24 @@ services:
       timeout: 5s
       retries: 10
 
+  order-postgres:
+    image: postgres:16-alpine
+    container_name: order-postgres
+    environment:
+      POSTGRES_DB: ${ORDER_POSTGRES_DB:?ORDER_POSTGRES_DB is required}
+      POSTGRES_USER: ${ORDER_POSTGRES_USER:?ORDER_POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${ORDER_POSTGRES_PASSWORD:?ORDER_POSTGRES_PASSWORD is required}
+    networks:
+      - gelato_network
+    volumes:
+      - order_postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
   catalog-redis:
     image: redis:7-alpine
     container_name: catalog-redis
@@ -119,4 +137,5 @@ volumes:
   analytics_mongodb_data:
   auth_postgres_data:
   inventory_postgres_data:
+  order_postgres_data:
   catalog_redis_data:
