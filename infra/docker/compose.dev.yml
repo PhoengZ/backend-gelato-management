@@ -22,6 +22,9 @@ services:
   fulfillment-postgres:
     ports:
       - "5435:5432"
+  order-postgres:
+    ports:
+      - "5436:5432"
 
   catalog-redis:
     ports:

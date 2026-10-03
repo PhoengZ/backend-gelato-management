@@ -15,6 +15,7 @@ same Docker network.
 | `fulfillment-postgres` | Fulfillment Service | 5432 | 5435 |
 | `fulfillment-service` | Fulfillment Service | 8080 | 8081 |
 | `notification-service` | Notification Service (stateless, no database) | 8080 | 8082 |
+| `order-postgres` | Order Service | 5432 | 5436 |
 | `catalog-redis` | Catalog Service | 6379 | 6380 |
 
 The default compose file references pre-built images for application services.
@@ -31,7 +32,7 @@ docker compose \
   --env-file .env \
   -f docker/compose.yml \
   -f docker/compose.dev.yml \
-  up -d rabbitmq analytics-mongodb auth-postgres inventory-postgres catalog-redis
+  up -d rabbitmq analytics-mongodb auth-postgres inventory-postgres order-postgres catalog-redis
 ```
 
 Inspect health and resolved configuration:
@@ -67,7 +68,7 @@ In production, deploy using only the base `docker/compose.yml` to ensure data st
    docker compose \
      --env-file .env \
      -f docker/compose.yml \
-     up -d rabbitmq analytics-mongodb auth-postgres inventory-postgres catalog-redis
+     up -d rabbitmq analytics-mongodb auth-postgres inventory-postgres order-postgres catalog-redis
    ```
    Or specify an external secret store path:
    ```bash
@@ -87,6 +88,7 @@ ports:
 ```text
 Auth PostgreSQL:      auth-postgres:5432
 Inventory PostgreSQL: inventory-postgres:5432
+Order PostgreSQL:     order-postgres:5432
 Catalog Redis:        catalog-redis:6379
 RabbitMQ:             rabbitmq:5672/gelato_vhost
 Analytics MongoDB:    analytics-mongodb:27017
@@ -106,6 +108,7 @@ Current topology:
 | User | Purpose | Allowed resources |
 | --- | --- | --- |
 | `inventory_service` | Publish Inventory events | `inventory` exchange |
+| `order_service` | Publish Order events | `order` exchange |
 | `analytics_service` | Consume Order and Inventory events | `order`, `inventory`, `analytics_queue` |
 | `fulfillment_service` | Consume Order events, publish Fulfillment events | `order`, `fulfillment`, `fulfillment_queue` |
 | `notification_service` | Consume Order, Fulfillment and Inventory events | read `order`, `fulfillment`, `inventory`; own `notification_queue` |

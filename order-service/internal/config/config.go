@@ -1,36 +1,49 @@
 package config
 
 import (
-	"log"
+	"errors"
 	"os"
+	"strings"
 
 	"github.com/joho/godotenv"
 )
 
 type Config struct {
-	Port                   string
-	DatabaseURL            string
-	RabbitMQURL            string
-	BatchInventoryGRPC_URL string
+	Port                  string
+	DatabaseURL           string
+	RabbitMQURL           string
+	BatchInventoryGRPCURL string
+	OrderServiceToken     string
+	CatalogGRPCURL        string
+	PaymentServiceToken   string
 }
 
-func LoadConfig() Config {
-	err := godotenv.Load()
-	if err != nil {
-		log.Println("No .env file found, relying on environment variables")
+func Load() (Config, error) {
+	_ = godotenv.Load()
+	cfg := Config{
+		Port:                  value("PORT", "8080"),
+		DatabaseURL:           value("DATABASE_URL", ""),
+		RabbitMQURL:           value("RABBITMQ_URL", ""),
+		BatchInventoryGRPCURL: value("BATCH_INVENTORY_GRPC_URL", ""),
+		OrderServiceToken:     value("ORDER_SERVICE_TOKEN", ""),
+		CatalogGRPCURL:        value("CATALOG_GRPC_URL", ""),
+		PaymentServiceToken:   value("PAYMENT_SERVICE_TOKEN", ""),
 	}
-
-	return Config{
-		Port:                   getEnv("PORT", "8080"),
-		DatabaseURL:            getEnv("DATABASE_URL", "host=localhost user=postgres password=postgres dbname=order_db port=5432 sslmode=disable"),
-		RabbitMQURL:            getEnv("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/"),
-		BatchInventoryGRPC_URL: getEnv("BATCH_INVENTORY_GRPC_URL", "localhost:50051"),
+	if cfg.Port == "" || strings.ContainsAny(cfg.Port, ":/\\") {
+		return Config{}, errors.New("PORT must be a port number")
 	}
+	if cfg.DatabaseURL == "" || cfg.RabbitMQURL == "" || cfg.BatchInventoryGRPCURL == "" || cfg.OrderServiceToken == "" || cfg.CatalogGRPCURL == "" || cfg.PaymentServiceToken == "" {
+		return Config{}, errors.New("DATABASE_URL, RABBITMQ_URL, BATCH_INVENTORY_GRPC_URL, ORDER_SERVICE_TOKEN, CATALOG_GRPC_URL, and PAYMENT_SERVICE_TOKEN are required")
+	}
+	if len([]byte(cfg.OrderServiceToken)) < 32 || len([]byte(cfg.PaymentServiceToken)) < 32 {
+		return Config{}, errors.New("ORDER_SERVICE_TOKEN and PAYMENT_SERVICE_TOKEN must each contain at least 32 bytes")
+	}
+	return cfg, nil
 }
 
-func getEnv(key, defaultVal string) string {
-	if value, exists := os.LookupEnv(key); exists {
-		return value
+func value(key, fallback string) string {
+	if v, ok := os.LookupEnv(key); ok {
+		return v
 	}
-	return defaultVal
+	return fallback
 }

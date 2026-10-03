@@ -9,8 +9,9 @@ GelatoFlow preorder, queue, and batch inventory system.
 | --- | --- |
 | Analytics Service | Implemented prototype |
 | Auth Service | Contract and PostgreSQL infrastructure defined |
-| Catalog Service | REST and gRPC CRUD with shared Redis; Inventory validates flavors through gRPC; Order integration pending |
-| Batch Inventory Service | REST, reservation gRPC, PostgreSQL transactions, expiry and waste outbox implemented; Order/Analytics integration pending |
+| Catalog Service | REST and gRPC CRUD with shared Redis; Inventory and Order validate flavors through gRPC |
+| Batch Inventory Service | REST, reservation gRPC, PostgreSQL transactions, expiry and waste outbox implemented; Order reservation client added, end-to-end runtime integration pending |
+| Order Service | Catalog checkout lookup, Inventory reservation lifecycle, payment confirmation, and OrderPlaced/OrderCancelled outbox implemented; Gateway auth and Analytics gRPC read integration pending |
 | Notification Service | SSE stream and RabbitMQ consumer implemented (stateless); Gateway route, runtime verification with Order/Inventory publishers pending |
 | Other application services | Added by their owners in later pull requests |
 
@@ -22,7 +23,6 @@ requests.
 
 ```text
 analytics-service/   Existing analytics implementation
-notification-service/ In-app notifications over SSE, fed by RabbitMQ events
 contracts/           Versioned REST, gRPC, and event interfaces
 docs/architecture/   Service boundaries and architecture decisions
 infra/               Docker Compose and RabbitMQ definitions

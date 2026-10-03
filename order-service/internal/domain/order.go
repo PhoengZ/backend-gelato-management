@@ -1,9 +1,8 @@
 package domain
 
 import (
+	"encoding/json"
 	"time"
-
-	"gorm.io/gorm"
 )
 
 type OrderStatus string
@@ -18,34 +17,38 @@ const (
 )
 
 type Order struct {
-	ID             string         `gorm:"primaryKey;type:uuid;default:gen_random_uuid()" json:"id"`
-	CustomerName   string         `json:"customerName"` // Simple customer identifier for MVP
-	TimeSlot       string         `json:"timeSlot"`     // e.g. "14:00 - 14:15"
-	Status         OrderStatus    `json:"status"`
-	IdempotencyKey string         `gorm:"uniqueIndex" json:"-"`
-	Items          []OrderItem    `gorm:"foreignKey:OrderID" json:"items"`
-	CreatedAt      time.Time      `json:"createdAt"`
-	UpdatedAt      time.Time      `json:"updatedAt"`
-	DeletedAt      gorm.DeletedAt `gorm:"index" json:"-"`
+	ID                    string      `gorm:"primaryKey;type:uuid" json:"order_id"`
+	CustomerID            string      `gorm:"type:uuid;not null;uniqueIndex:idx_customer_idempotency" json:"customer_id"`
+	PickupAt              time.Time   `gorm:"not null" json:"pickup_at"`
+	Status                OrderStatus `gorm:"not null;index" json:"status"`
+	IdempotencyKey        string      `gorm:"not null;uniqueIndex:idx_customer_idempotency;size:255" json:"-"`
+	RequestHash           string      `gorm:"not null;size:64" json:"-"`
+	ReservationID         string      `gorm:"type:uuid;not null;uniqueIndex" json:"-"`
+	ReservationExpiresAt  time.Time   `json:"reservation_expires_at"`
+	ConfirmIdempotencyKey string      `gorm:"not null;size:36" json:"-"`
+	ReleaseIdempotencyKey string      `gorm:"not null;size:36" json:"-"`
+	TotalAmountMinor      int64       `gorm:"not null" json:"total_amount_minor"`
+	Currency              string      `gorm:"not null;size:3" json:"currency"`
+	Items                 []OrderItem `gorm:"foreignKey:OrderID;constraint:OnDelete:CASCADE" json:"items"`
+	CreatedAt             time.Time   `json:"created_at"`
+	UpdatedAt             time.Time   `json:"updated_at"`
 }
 
 type OrderItem struct {
-	ID        uint      `gorm:"primaryKey" json:"id"`
-	OrderID   string    `gorm:"index" json:"orderId"`
-	FlavorID  string    `json:"flavorId"`
-	Portions  int       `json:"portions"`
-	Price     float64   `json:"price"` // Price at the time of order
+	ID             uint   `gorm:"primaryKey" json:"-"`
+	OrderID        string `gorm:"type:uuid;not null;index" json:"-"`
+	FlavorID       string `gorm:"type:uuid;not null" json:"flavor_id"`
+	FlavorName     string `gorm:"not null" json:"flavor_name"`
+	Portions       int32  `gorm:"not null" json:"portions"`
+	UnitPriceMinor int64  `gorm:"not null" json:"unit_price_minor"`
+	SubtotalMinor  int64  `gorm:"not null" json:"subtotal_minor"`
 }
 
-// Event Models for Message Broker
-
-type OrderPlacedEvent struct {
-	OrderID  string      `json:"orderId"`
-	TimeSlot string      `json:"timeSlot"`
-	Status   OrderStatus `json:"status"`
-	Items    []OrderItem `json:"items"`
-}
-
-type OrderCancelledEvent struct {
-	OrderID string `json:"orderId"`
+type OutboxEvent struct {
+	ID          string          `gorm:"primaryKey;type:uuid" json:"id"`
+	OrderID     string          `gorm:"type:uuid;not null;index" json:"order_id"`
+	RoutingKey  string          `gorm:"not null;size:128" json:"routing_key"`
+	Payload     json.RawMessage `gorm:"type:jsonb;not null" json:"payload"`
+	PublishedAt *time.Time      `gorm:"index" json:"published_at,omitempty"`
+	CreatedAt   time.Time       `json:"created_at"`
 }

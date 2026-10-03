@@ -1,0 +1,17 @@
+version: v2
+managed:
+  enabled: true
+  override:
+    - file_option: go_package
+      path: inventory/v1/inventory.proto
+      value: order-service/gen/inventory/v1;inventoryv1
+    - file_option: go_package
+      path: catalog/v1/catalog.proto
+      value: order-service/gen/catalog/v1;catalogv1
+plugins:
+  - local: [go, run, google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.11]
+    out: order-service/gen
+    opt: paths=source_relative
+  - local: [go, run, google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.5.1]
+    out: order-service/gen
+    opt: paths=source_relative
