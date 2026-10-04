@@ -141,3 +141,11 @@ a service implementation is ready:
 
 Local iteration may run the application process on the host while its database
 and RabbitMQ run in Docker.
+
+## Payment local build
+
+Payment has no database or broker dependency. `docker/compose.payment.yml` is an
+optional local build override, used with the base/development files. It requires
+Stripe, Auth and Payment-to-Order secrets supplied by the shell or a private env
+file; no published image is assumed. See `../payment-service/README.md` for exact
+commands, TLS configuration and the required Order gRPC implementation.

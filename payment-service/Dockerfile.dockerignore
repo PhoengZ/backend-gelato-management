@@ -1,0 +1,9 @@
+**
+!contracts/
+!contracts/proto/
+!contracts/proto/**
+!payment-service/
+!payment-service/pom.xml
+!payment-service/src/
+!payment-service/src/**
+!payment-service/Dockerfile

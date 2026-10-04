@@ -1,0 +1,33 @@
+server:
+  port: ${PORT:3007}
+  shutdown: graceful
+spring:
+  application:
+    name: payment-service
+  jackson:
+    deserialization:
+      fail-on-unknown-properties: true
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never
+      probes:
+        enabled: true
+payment:
+  stripe:
+    secret-key: ${STRIPE_SECRET_KEY}
+    webhook-secret: ${STRIPE_WEBHOOK_SECRET}
+    live-mode: ${STRIPE_LIVE_MODE:false}
+  order:
+    target: ${ORDER_GRPC_TARGET:localhost:50054}
+    service-token: ${ORDER_SERVICE_TOKEN}
+    tls: ${ORDER_GRPC_TLS:true}
+    deadline-ms: ${ORDER_GRPC_DEADLINE_MS:5000}
+  jwt:
+    secret: ${JWT_SECRET}
+    issuer: ${JWT_ISSUER:gelatoflow-auth}
+    audience: ${JWT_AUDIENCE:gelatoflow-api}

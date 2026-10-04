@@ -11,6 +11,8 @@ apis:
     root: contracts/openapi/batch-inventory-service.v1.yaml
   notification@v1:
     root: contracts/openapi/notification-service.v1.yaml
+  payment@v1:
+    root: contracts/openapi/payment-service.v1.yaml
 
 extends:
   - recommended

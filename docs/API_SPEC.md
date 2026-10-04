@@ -835,10 +835,16 @@ Get sales and production analytics (Manager only).
 
 The selected backend checkout returns a Stripe Checkout URL through Order.
 Frontend does not call Payment separately or submit its own amount. Payment
-must add the new [internal checkout gRPC API](../contracts/proto/payment/v1/payment.proto).
-Its existing PaymentIntent implementation on `chelsea/payment-service` instead
-accepts `order_id`, verifies customer ownership through Order, and returns
-`client_secret`. That implementation also needs migration to the selected flow.
+implements the [internal checkout gRPC API](../contracts/proto/payment/v1/payment.proto)
+and Stripe Checkout adapter. Checkout webhook reporting to Order's HTTP callbacks
+and end-to-end verification remain pending.
+
+The retained PaymentIntent endpoint is defined in
+`contracts/openapi/payment-service.v1.yaml`: it accepts `order_id`, obtains the
+amount/currency from Order and returns `client_secret`, `payment_intent_id`,
+`amount_minor` and `currency`. Client amounts and camelCase aliases are rejected.
+That path depends on Order gRPC methods whose server is not implemented; see
+[Payment integration](architecture/payment-integration.md) for migration work.
 
 The amount/clientSecret examples below are preserved legacy demo shapes; neither
 the current Order checkout nor the Payment branch accepts client-selected totals.

@@ -16,7 +16,7 @@ ownership of the underlying data.
 | Catalog Service | Flavor names, descriptions, prices, images, recipes, allergens, active status | Redis | Available portions, batches, reservations |
 | Batch Inventory Service | Batches, portion balances, reservations, waste, inventory movements | PostgreSQL | Flavor descriptions and prices, orders, payments |
 | Order Service | Orders, immutable checkout prices, reservation references, Checkout Session binding, order outbox | PostgreSQL | Current Catalog metadata, stock balances, Stripe credentials |
-| Payment Service | Stripe integration, verified provider notifications and payment reconciliation | None in existing PaymentIntent adapter; Checkout pending | Order totals and status, stock balances |
+| Payment Service | Stripe integration and signature verification; Checkout result reporting and durable reconciliation/refunds pending | None (stateless Checkout and legacy PaymentIntent adapters) | Order totals and status, stock balances |
 | Fulfillment Service | Kitchen tickets, pickup time-slots, slot queue numbers, fulfillment status | PostgreSQL | Orders, inventory batches, payment processing |
 | Analytics Service | Derived daily sales and waste aggregates in integer minor units | MongoDB | Operational source records |
 | Notification Service | Nothing durable. Live SSE connections and, in memory only, a TTL-bounded `order_id` to `customer_id` routing map and recent event ids | None (stateless) | Orders, customer profiles, inventory batches |
@@ -65,12 +65,24 @@ once Order Service owner agrees.
 9. Order orchestrates frontend checkout by calling Payment's versioned gRPC API
    after persisting the pending order. Payment creates the provider session from
    Order's immutable total; Order persists its binding before returning the URL.
-   Payment's Checkout implementation is pending. See [checkout architecture](order-checkout.md).
+   Payment's inbound Checkout gRPC and Stripe adapter are implemented; verified
+   Checkout result reporting to Order remains pending. See [checkout architecture](order-checkout.md).
 10. Cancellation releases stock through Inventory and changes Order state locally.
     It does not currently close the Stripe session. Payment reconciliation/refund
     and later fulfillment transitions remain separate integration responsibilities.
 
 ## Shared conventions
+
+In the selected flow, Order sends its immutable checkout facts to Payment's gRPC
+server and durably binds the returned Checkout Session before exposing its URL.
+Verified provider results must go back to Order's authenticated HTTP callbacks;
+Payment's Checkout webhook adapter is still pending. Order owns payment state,
+Inventory orchestration and outbox publication.
+
+The retained PaymentIntent REST/webhook path instead retrieves Order details,
+binds a provider intent and reports results through proposed Order gRPC methods.
+Order does not implement those RPCs. See [Payment integration](payment-integration.md)
+for the legacy dependency, migration and durable reconciliation work.
 
 ### Catalog transport status
 
