@@ -90,3 +90,14 @@
   - `gofmt -s -l .` reports 0 unformatted files.
   - All unit and bufconn integration tests in `analytics-service` passed cleanly.
   - `git diff --check` passed with 0 errors.
+
+## [2026-09-24] Analytics Service: Upgrade gRPC to v1.83.2 for Trivy CVE Remediation
+
+- **What was attempted:**
+  - Upgraded `google.golang.org/grpc` from `v1.67.1` to `v1.83.2` and updated transitive dependencies via `go get` and `go mod tidy`.
+- **The hypothesis being tested:**
+  - Upgrading `google.golang.org/grpc` to `v1.83.2` resolves CVE-2026-33186 (CRITICAL), CVE-2026-84304 (HIGH), CVE-2026-84445 (HIGH), and GHSA-hrxh-6v49-42gf (HIGH) detected during Trivy container vulnerability scanning in GitHub Actions.
+- **The observed result/outcome:**
+  - `go build ./cmd/api` succeeded with 0 errors.
+  - All unit and bufconn integration tests passed.
+  - `git diff --check` passed with 0 errors.
