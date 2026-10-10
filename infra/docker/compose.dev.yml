@@ -19,6 +19,10 @@ services:
     ports:
       - "5434:5432"
 
+  fulfillment-postgres:
+    ports:
+      - "5435:5432"
+
   catalog-redis:
     ports:
       - "6380:6379"
@@ -26,3 +30,7 @@ services:
   analytics-service:
     ports:
       - "8080:8080"
+
+  fulfillment-service:
+    ports:
+      - "8081:8080"

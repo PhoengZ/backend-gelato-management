@@ -1,121 +1,114 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 
-	"kitchen-ticket-service/internal/messaging"
-	"kitchen-ticket-service/internal/models"
-	"kitchen-ticket-service/internal/repository"
+	"fulfillment-service/internal/models"
+	"fulfillment-service/internal/repository"
 )
 
-type TicketHandler struct {
-	repo      *repository.TicketRepository
-	publisher *messaging.Publisher
+// Store is the persistence the handler needs; *repository.FulfillmentRepository implements it.
+type Store interface {
+	List(ctx context.Context, statuses []models.Status) ([]models.Fulfillment, error)
+	GetByOrderID(ctx context.Context, orderID uuid.UUID) (models.Fulfillment, error)
+	UpdateStatus(ctx context.Context, orderID uuid.UUID, to models.Status) (models.Fulfillment, error)
 }
 
-func NewTicketHandler(repo *repository.TicketRepository, publisher *messaging.Publisher) *TicketHandler {
-	return &TicketHandler{repo: repo, publisher: publisher}
+type FulfillmentHandler struct {
+	store Store
+}
+
+func NewFulfillmentHandler(store Store) *FulfillmentHandler {
+	return &FulfillmentHandler{store: store}
 }
 
 type errorResponse struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
+	Code    string            `json:"code"`
+	Message string            `json:"message"`
+	Details map[string]string `json:"details,omitempty"`
 }
 
-// POST /tickets
-func (h *TicketHandler) Create(c echo.Context) error {
-	var req models.CreateTicketRequest
+func fail(c echo.Context, status int, code, message string, details map[string]string) error {
+	return c.JSON(status, errorResponse{Code: code, Message: message, Details: details})
+}
+
+func internalError(c echo.Context, err error) error {
+	c.Logger().Errorf("internal error: %v", err)
+	return fail(c, http.StatusInternalServerError, "INTERNAL_ERROR", "unexpected error", nil)
+}
+
+func parseOrderID(c echo.Context) (uuid.UUID, error) {
+	return uuid.Parse(c.Param("order_id"))
+}
+
+// GET /api/v1/fulfillments?status=PREPARING,READY_FOR_PICKUP
+func (h *FulfillmentHandler) List(c echo.Context) error {
+	var statuses []models.Status
+	if raw := c.QueryParam("status"); raw != "" {
+		for _, part := range strings.Split(raw, ",") {
+			s := models.Status(strings.TrimSpace(part))
+			if !s.IsValid() {
+				return fail(c, http.StatusBadRequest, "VALIDATION_ERROR", "invalid status filter",
+					map[string]string{"status": "unknown status " + string(s)})
+			}
+			statuses = append(statuses, s)
+		}
+	}
+
+	items, err := h.store.List(c.Request().Context(), statuses)
+	if err != nil {
+		return internalError(c, err)
+	}
+	return c.JSON(http.StatusOK, map[string]any{"items": items})
+}
+
+// GET /api/v1/fulfillments/:order_id
+func (h *FulfillmentHandler) Get(c echo.Context) error {
+	orderID, err := parseOrderID(c)
+	if err != nil {
+		return fail(c, http.StatusBadRequest, "VALIDATION_ERROR", "order_id must be a valid UUID", nil)
+	}
+
+	f, err := h.store.GetByOrderID(c.Request().Context(), orderID)
+	if errors.Is(err, repository.ErrNotFound) {
+		return fail(c, http.StatusNotFound, "NOT_FOUND", "fulfillment not found", nil)
+	}
+	if err != nil {
+		return internalError(c, err)
+	}
+	return c.JSON(http.StatusOK, f)
+}
+
+// PATCH /api/v1/fulfillments/:order_id/status
+func (h *FulfillmentHandler) UpdateStatus(c echo.Context) error {
+	orderID, err := parseOrderID(c)
+	if err != nil {
+		return fail(c, http.StatusBadRequest, "VALIDATION_ERROR", "order_id must be a valid UUID", nil)
+	}
+
+	var req models.UpdateStatusRequest
 	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, errorResponse{"BAD_REQUEST", "invalid request body"})
+		return fail(c, http.StatusBadRequest, "BAD_REQUEST", "invalid request body", nil)
 	}
-	if req.OrderID == "" || req.PickupSlot == "" || req.QueueNumber <= 0 {
-		return c.JSON(http.StatusBadRequest, errorResponse{"VALIDATION_ERROR", "order_id, pickup_slot and a positive queue_number are required"})
-	}
-
-	ticket, err := h.repo.Create(c.Request().Context(), req)
-	if err != nil {
-		return c.JSON(http.StatusInternalServerError, errorResponse{"INTERNAL_ERROR", err.Error()})
+	if !req.Status.IsUpdatable() {
+		return fail(c, http.StatusBadRequest, "VALIDATION_ERROR", "invalid status",
+			map[string]string{"status": "must be READY_FOR_PICKUP or PICKED_UP"})
 	}
 
-	h.publisher.Publish(c.Request().Context(), "fulfillment.ticket_created", ticket)
-	return c.JSON(http.StatusCreated, ticket)
-}
-
-// GET /tickets/:id
-func (h *TicketHandler) GetOne(c echo.Context) error {
-	id, err := uuid.Parse(c.Param("id"))
-	if err != nil {
-		return c.JSON(http.StatusBadRequest, errorResponse{"BAD_REQUEST", "id must be a valid UUID"})
+	f, err := h.store.UpdateStatus(c.Request().Context(), orderID, req.Status)
+	switch {
+	case errors.Is(err, repository.ErrNotFound):
+		return fail(c, http.StatusNotFound, "NOT_FOUND", "fulfillment not found", nil)
+	case errors.Is(err, repository.ErrInvalidTransition):
+		return fail(c, http.StatusConflict, "INVALID_TRANSITION", "status cannot move to the requested value", nil)
+	case err != nil:
+		return internalError(c, err)
 	}
-
-	ticket, err := h.repo.GetByID(c.Request().Context(), id)
-	if errors.Is(err, repository.ErrNotFound) {
-		return c.JSON(http.StatusNotFound, errorResponse{"NOT_FOUND", "kitchen ticket not found"})
-	}
-	if err != nil {
-		return c.JSON(http.StatusInternalServerError, errorResponse{"INTERNAL_ERROR", err.Error()})
-	}
-	return c.JSON(http.StatusOK, ticket)
-}
-
-// GET /tickets?status=PREPARING
-func (h *TicketHandler) GetAll(c echo.Context) error {
-	status := c.QueryParam("status")
-
-	tickets, err := h.repo.GetAll(c.Request().Context(), status)
-	if err != nil {
-		return c.JSON(http.StatusInternalServerError, errorResponse{"INTERNAL_ERROR", err.Error()})
-	}
-	return c.JSON(http.StatusOK, tickets)
-}
-
-// PUT /tickets/:id
-// Body: {"status": "READY_FOR_PICKUP"} — mirrors markOrderReady / markOrderPickedUp.
-func (h *TicketHandler) Update(c echo.Context) error {
-	id, err := uuid.Parse(c.Param("id"))
-	if err != nil {
-		return c.JSON(http.StatusBadRequest, errorResponse{"BAD_REQUEST", "id must be a valid UUID"})
-	}
-
-	var req models.UpdateTicketRequest
-	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, errorResponse{"BAD_REQUEST", "invalid request body"})
-	}
-	if !req.Status.IsValid() {
-		return c.JSON(http.StatusBadRequest, errorResponse{"VALIDATION_ERROR", "status must be one of PREPARING, READY_FOR_PICKUP, PICKED_UP"})
-	}
-
-	ticket, err := h.repo.UpdateStatus(c.Request().Context(), id, req.Status)
-	if errors.Is(err, repository.ErrNotFound) {
-		return c.JSON(http.StatusNotFound, errorResponse{"NOT_FOUND", "kitchen ticket not found"})
-	}
-	if err != nil {
-		return c.JSON(http.StatusInternalServerError, errorResponse{"INTERNAL_ERROR", err.Error()})
-	}
-
-	if ticket.Status == models.StatusReady {
-		h.publisher.Publish(c.Request().Context(), "fulfillment.ticket_ready", ticket)
-	}
-	return c.JSON(http.StatusOK, ticket)
-}
-
-// DELETE /tickets/:id
-func (h *TicketHandler) Delete(c echo.Context) error {
-	id, err := uuid.Parse(c.Param("id"))
-	if err != nil {
-		return c.JSON(http.StatusBadRequest, errorResponse{"BAD_REQUEST", "id must be a valid UUID"})
-	}
-
-	err = h.repo.Delete(c.Request().Context(), id)
-	if errors.Is(err, repository.ErrNotFound) {
-		return c.JSON(http.StatusNotFound, errorResponse{"NOT_FOUND", "kitchen ticket not found"})
-	}
-	if err != nil {
-		return c.JSON(http.StatusInternalServerError, errorResponse{"INTERNAL_ERROR", err.Error()})
-	}
-	return c.NoContent(http.StatusNoContent)
+	return c.JSON(http.StatusOK, f)
 }

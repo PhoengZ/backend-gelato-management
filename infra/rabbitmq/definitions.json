@@ -19,6 +19,12 @@
       "password_hash": "Rh4i9PkLLV0GIP4lsA4bwNRkBVl5b9bjFJuUNlBJ2+5/nHNE",
       "hashing_algorithm": "rabbit_password_hashing_sha256",
       "tags": []
+    },
+    {
+      "name": "fulfillment_service",
+      "password_hash": "SqQPLl3Wnu28ThaWuHRA29gUUHpyU7PSgCZKAp39sqdZsX0c",
+      "hashing_algorithm": "rabbit_password_hashing_sha256",
+      "tags": []
     }
   ],
   "vhosts": [
@@ -57,6 +63,13 @@
       "configure": "^inventory$",
       "write": "^inventory$",
       "read": "^$"
+    },
+    {
+      "user": "fulfillment_service",
+      "vhost": "gelato_vhost",
+      "configure": "^(fulfillment|order|fulfillment_queue)$",
+      "write": "^(fulfillment|fulfillment_queue)$",
+      "read": "^(order|fulfillment_queue)$"
     }
   ],
   "policies": [],

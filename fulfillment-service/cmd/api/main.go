@@ -3,22 +3,26 @@ package main
 import (
 	"context"
 	"log"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"kitchen-ticket-service/internal/config"
-	"kitchen-ticket-service/internal/handler"
-	"kitchen-ticket-service/internal/messaging"
-	"kitchen-ticket-service/internal/repository"
-	"kitchen-ticket-service/internal/router"
+	"fulfillment-service/internal/config"
+	"fulfillment-service/internal/handler"
+	"fulfillment-service/internal/messaging"
+	"fulfillment-service/internal/repository"
+	"fulfillment-service/internal/router"
 )
 
 func main() {
 	cfg := config.Load()
 
-	ctx := context.Background()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
-	// --- PostgreSQL (via pgx) ---
 	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
 	if err != nil {
 		log.Fatalf("unable to connect to postgres: %v", err)
@@ -30,21 +34,35 @@ func main() {
 	}
 	log.Println("[db] connected to postgres")
 
-	// --- RabbitMQ (via amqp091-go) — optional for this assignment ---
-	publisher, err := messaging.NewPublisher(cfg.RabbitMQURL)
+	repo := repository.NewFulfillmentRepository(pool)
+
+	// RabbitMQ is optional: without it the REST API still works, events queue in the outbox.
+	broker, err := messaging.Connect(cfg.RabbitMQURL)
 	if err != nil {
 		log.Printf("[messaging] could not connect to RabbitMQ, continuing without it: %v", err)
-		publisher = nil
+		broker = nil
 	}
-	defer publisher.Close()
+	if broker != nil {
+		defer broker.Close()
+		go messaging.NewRelay(pool, broker).Run(ctx)
+		go func() {
+			if err := broker.Consume(ctx, repo); err != nil && ctx.Err() == nil {
+				log.Printf("[consumer] stopped: %v", err)
+			}
+		}()
+	}
 
-	// --- wire layers ---
-	repo := repository.NewTicketRepository(pool)
-	h := handler.NewTicketHandler(repo, publisher)
-	e := router.New(h)
+	e := router.New(handler.NewFulfillmentHandler(repo))
 
-	log.Printf("[http] kitchen-ticket-service listening on :%s", cfg.Port)
-	if err := e.Start(":" + cfg.Port); err != nil {
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = e.Shutdown(shutdownCtx)
+	}()
+
+	log.Printf("[http] fulfillment-service listening on :%s", cfg.Port)
+	if err := e.Start(":" + cfg.Port); err != nil && ctx.Err() == nil {
 		log.Fatalf("server stopped: %v", err)
 	}
 }

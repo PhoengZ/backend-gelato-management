@@ -12,6 +12,8 @@ same Docker network.
 | `analytics-mongodb` | Analytics Service | 27017 | 27017 |
 | `auth-postgres` | Auth Service | 5432 | 5433 |
 | `inventory-postgres` | Batch Inventory Service | 5432 | 5434 |
+| `fulfillment-postgres` | Fulfillment Service | 5432 | 5435 |
+| `fulfillment-service` | Fulfillment Service | 8080 | 8081 |
 | `catalog-redis` | Catalog Service | 6379 | 6380 |
 
 The default compose file references pre-built images for application services.

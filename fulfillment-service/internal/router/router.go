@@ -6,10 +6,10 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 
-	"kitchen-ticket-service/internal/handler"
+	"fulfillment-service/internal/handler"
 )
 
-func New(h *handler.TicketHandler) *echo.Echo {
+func New(h *handler.FulfillmentHandler) *echo.Echo {
 	e := echo.New()
 
 	e.Use(middleware.Logger())
@@ -20,14 +20,10 @@ func New(h *handler.TicketHandler) *echo.Echo {
 		return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
 	})
 
-	v1 := e.Group("/api/v1")
-
-	tickets := v1.Group("/tickets")
-	tickets.POST("", h.Create)     // POST   /api/v1/tickets
-	tickets.GET("", h.GetAll)      // GET    /api/v1/tickets            (GET ALL)
-	tickets.GET("/:id", h.GetOne)  // GET    /api/v1/tickets/:id        (GET ONE)
-	tickets.PUT("/:id", h.Update)  // PUT    /api/v1/tickets/:id
-	tickets.DELETE("/:id", h.Delete) // DELETE /api/v1/tickets/:id
+	f := e.Group("/api/v1/fulfillments")
+	f.GET("", h.List)                            // GET   /api/v1/fulfillments
+	f.GET("/:order_id", h.Get)                   // GET   /api/v1/fulfillments/:order_id
+	f.PATCH("/:order_id/status", h.UpdateStatus) // PATCH /api/v1/fulfillments/:order_id/status
 
 	return e
 }
