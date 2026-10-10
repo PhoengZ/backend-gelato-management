@@ -114,4 +114,3 @@ sequenceDiagram
         ANS->>ANS: Deduct revenue & sold portions (minor units)
         deactivate ANS
     end
-
