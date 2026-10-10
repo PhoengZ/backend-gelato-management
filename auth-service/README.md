@@ -142,6 +142,14 @@ The frontend uses backend authentication by default through its server-side
 demo mode; it is not an Auth Service identity. The bearer-token OpenAPI contract
 remains the source of truth.
 
+## Round 2 authentication demo
+
+See [demo/README.md](demo/README.md) for an Auth-only stack, trusted local
+Customer/Staff/Manager fixtures, real login/token verification and frontend
+runtime configuration. It is based on the latest main and excludes the earlier
+Gateway, Analytics and Fulfillment patches from `auth-hardening`. It does not
+claim that the three business use cases are integrated or demo-ready.
+
 ## Gateway integration boundary
 
 API Gateway validates bearer JWTs before forwarding protected external requests.
