@@ -172,12 +172,17 @@ Service using client-streaming gRPC (`StreamOrderItems`), streaming a sequence o
 `order_id`s and receiving consolidated order item details for analytical batch
 computation.
 
-The current Analytics prototype still consumes legacy flat `order.success` and
-`inventory.waste` payloads containing floating-point fields. It must add the
-CloudEvents envelope, event-ID deduplication, integer storage, and the
-`order.placed` binding before the canonical contracts are enabled in production.
-That consumer migration is intentionally outside the Contracts and
-Infrastructure pull request.
+When processing thin `order.cancelled` events (`com.gelatoflow.order.cancelled.v1`),
+Analytics Service calls Order Service synchronously via unary gRPC (`GetOrderDetails`)
+to obtain the authoritative order snapshot, deducting the cancelled item quantities
+and minor-unit totals from daily analytics metrics without maintaining any local
+replicated order entities.
+
+Analytics Service consumes canonical CloudEvents 1.0 routing keys (`order.placed`,
+`order.cancelled`, and `inventory.waste`) with dual-binding fallback for legacy keys.
+Incoming events are deduplicated idempotently using `event.id` stored in its
+`processed_events` collection, and all persistent aggregates remain in integer
+minor units.
 
 ## 5. Ordering and failure handling
 

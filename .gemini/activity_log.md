@@ -90,3 +90,24 @@
   - `gofmt -s -l .` reports 0 unformatted files.
   - All unit and bufconn integration tests in `analytics-service` passed cleanly.
   - `git diff --check` passed with 0 errors.
+
+## [2026-10-10] API Gateway: JWT Verification, Identity Header Sanitization, and CORS Idempotency Headers
+
+- **What was attempted:**
+  - Created and switched to branch `feature/api-gateway-jwt-verification-and-cors`.
+  - Added `github.com/golang-jwt/jwt/v5` dependency and updated `api-gateway/config/config.go` and `.env.example` with `JWT_SECRET` (enforcing >= 32 bytes), `JWT_ISSUER`, and `JWT_AUDIENCE`.
+  - Created JWT Verifier in `api-gateway/internal/auth/verifier.go` strictly validating HMAC-SHA256 signature, expiration (`exp`), issued-at (`iat`), issuer (`iss`), audience (`aud`), UUID subject (`sub`), and valid roles (`CUSTOMER`, `STAFF`, `MANAGER`).
+  - Created `StripIdentityHeaders` middleware in `api-gateway/internal/middleware/sanitize.go` to strip client-sent spoofed identity headers (`X-User-*`, `X-Role*`, `X-Authenticated-*`) before routing downstream, while strictly preserving the original `Authorization: Bearer <token>` header for downstream services.
+  - Implemented `RequireAuth` and `AuthenticateIfPresent` middlewares in `api-gateway/internal/middleware/auth.go`.
+  - Updated `api-gateway/cmd/api/main.go` to validate configuration on startup and allow `Idempotency-Key` and `X-Idempotency-Key` in CORS `AllowHeaders`.
+  - Wired route protections in `api-gateway/internal/router/router.go` to secure protected downstream routes (`/orders/*`, `/fulfillments/*`, `/analytics/*`, `/payments/*`, `/auth/me`, catalog mutations, inventory batch mutations) while allowing unauthenticated public reads and public auth actions (`signup`, `login`).
+  - Committed work in minor milestone commits to ensure traceability.
+  - Created comprehensive unit and integration test suites covering config, verifier, middlewares, route security, header forwarding/sanitization, and CORS preflight.
+- **The hypothesis being tested:**
+  - Verifying JWT claims at the API Gateway prevents unauthorized traffic from penetrating the internal mesh, while stripping identity headers and forwarding the original Bearer token prevents spoofing while allowing downstream services (like Catalog and Inventory) to locally verify user identity. Adding idempotency headers to CORS prevents browser preflight rejections.
+- **The observed result/outcome:**
+  - All tests in `api-gateway` passed with 100% success (`go test -count=1 ./...`).
+  - Redocly lint passed with 0 errors (`npx @redocly/cli lint`).
+  - Docker compose configuration verified cleanly (`docker compose ... config --quiet`).
+  - Event schema example validation passed cleanly (`python contracts/scripts/validate_event_examples.py`).
+  - `git diff --check` passed with 0 errors.

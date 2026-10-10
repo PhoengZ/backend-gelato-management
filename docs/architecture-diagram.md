@@ -61,8 +61,8 @@ flowchart LR
     OS -. "Planned gRPC: GetFlavor / BatchGetFlavors" .-> CS
     BIS -- "gRPC: GetFlavor before creating batch" --> CS
     OS -- gRPC: Check/Reserve/Confirm/Release Portions --> BIS
-    ANS -- "gRPC (Client-Streaming): Stream Order Details" --> OS
-    FS -- "gRPC: Query Order Details" --> OS
+    ANS -- "gRPC: GetOrderDetails (Unary) & StreamOrderItems (Streaming)" --> OS
+    FS -- "gRPC: GetOrderDetails" --> OS
     PS -- Update Order Status --> OS 
     PS -- External API --> Stripe
     Stripe -- Webhook --> PS
