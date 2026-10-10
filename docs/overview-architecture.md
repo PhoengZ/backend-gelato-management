@@ -40,10 +40,11 @@ Used for internal synchronous inter-service data requests and atomic operations,
   * `ReservePortions`: Atomically reserve portions using FEFO.
   * `ReleaseReservation`: Free reserved portions on timeout or cancellation.
   * `ConfirmReservation`: Transition reserved portions to sold upon verified payment.
-* **Analytics Service -> Order Service (Client-Streaming RPC):**
-  * `StreamOrderItems`: Analytics Service streams a sequence of `order_id`s over a single gRPC stream to Order Service, which returns the requested order line items and pricing breakdowns for batch calculations, avoiding replicated order tables in Analytics MongoDB.
+* **Analytics Service -> Order Service:**
+  * `GetOrderDetails` (Unary RPC): Analytics Service queries this RPC synchronously upon receiving an `order.cancelled` thin event to retrieve the cancelled order line items and pricing breakdown, offsetting daily revenue and flavor sales without maintaining local shadow order tables.
+  * `StreamOrderItems` (Client-Streaming RPC): Analytics Service streams a sequence of `order_id`s over a single gRPC stream to Order Service, which returns consolidated order line items and pricing breakdowns for batch calculations and flavor popularity analysis.
 * **Cross-Service Entity Queries (Unary RPC):**
-  * When a downstream service (e.g., Fulfillment Service or Notification Service) receives a thin event containing only an `order_id`, it calls Order Service via gRPC to retrieve authoritative order details on demand.
+  * When a downstream service (e.g., Fulfillment Service, Notification Service, or Analytics Service) receives a thin event containing an `order_id`, it calls Order Service via `GetOrderDetails(GetOrderDetailsRequest)` to retrieve authoritative order details (`status`, `items`, `total_amount_minor`, `pickup_at`) on demand.
 
 ### C. Message Broker - RabbitMQ (Internal Asynchronous)
 Used for decoupling services and handling asynchronous workflows. (RabbitMQ preferred over Kafka for this scope).
