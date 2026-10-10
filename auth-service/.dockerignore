@@ -1,0 +1,5 @@
+.env
+.git
+coverage.out
+README.md
+tests
