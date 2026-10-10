@@ -1,4 +1,4 @@
-module kitchen-ticket-service
+module fulfillment-service
 
 go 1.21
 

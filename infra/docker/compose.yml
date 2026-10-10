@@ -75,6 +75,25 @@ services:
       timeout: 5s
       retries: 10
 
+  fulfillment-postgres:
+    image: postgres:16-alpine
+    container_name: fulfillment-postgres
+    environment:
+      POSTGRES_DB: ${FULFILLMENT_POSTGRES_DB:?FULFILLMENT_POSTGRES_DB is required}
+      POSTGRES_USER: ${FULFILLMENT_POSTGRES_USER:?FULFILLMENT_POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${FULFILLMENT_POSTGRES_PASSWORD:?FULFILLMENT_POSTGRES_PASSWORD is required}
+    networks:
+      - gelato_network
+    volumes:
+      - fulfillment_postgres_data:/var/lib/postgresql/data
+      - ../../fulfillment-service/migrations:/docker-entrypoint-initdb.d:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
   catalog-redis:
     image: redis:7-alpine
     container_name: catalog-redis
@@ -110,6 +129,22 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  fulfillment-service:
+    build:
+      context: ../../fulfillment-service
+    container_name: fulfillment-service
+    environment:
+      PORT: "8080"
+      DATABASE_URL: postgres://${FULFILLMENT_POSTGRES_USER}:${FULFILLMENT_POSTGRES_PASSWORD}@fulfillment-postgres:5432/${FULFILLMENT_POSTGRES_DB}?sslmode=disable
+      # Empty keeps messaging disabled until a fulfillment broker user exists.
+      RABBITMQ_URL: ${FULFILLMENT_RABBITMQ_URL:-}
+    networks:
+      - gelato_network
+    depends_on:
+      fulfillment-postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
 networks:
   gelato_network:
     driver: bridge
@@ -119,4 +154,5 @@ volumes:
   analytics_mongodb_data:
   auth_postgres_data:
   inventory_postgres_data:
+  fulfillment_postgres_data:
   catalog_redis_data:

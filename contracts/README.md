@@ -19,8 +19,11 @@ changes.
 | Catalog REST API | Catalog Service | API Gateway, frontend |
 | Catalog gRPC API | Catalog Service | Direct clients, Inventory batch validation; planned Order integration |
 | Inventory REST API | Batch Inventory Service | API Gateway, staff and manager UI |
+| Fulfillment REST API | Fulfillment Service | API Gateway, staff UI |
 | Inventory gRPC API | Batch Inventory Service | Order Service |
 | `order.placed` event | Order Service | Fulfillment, Notification, Analytics |
+| `fulfillment.order_ready` event | Fulfillment Service | Notification Service |
+| `fulfillment.order_picked_up` event | Fulfillment Service | None in MVP |
 | `inventory.waste` event | Batch Inventory Service | Analytics Service |
 
 ## Catalog gRPC behavior
@@ -93,7 +96,9 @@ without an inbound request trace. Domain payload fields use `snake_case`, UUID
 resource IDs, RFC 3339 UTC timestamps, and integer minor-unit money.
 
 `OrderPlaced` is published to the `order` topic exchange with routing key
-`order.placed`. `WasteRecorded` is published to the `inventory` topic exchange
+`order.placed`. `OrderReady` and `OrderPickedUp` are published to the
+`fulfillment` topic exchange with routing keys `fulfillment.order_ready` and
+`fulfillment.order_picked_up`. `WasteRecorded` is published to the `inventory` topic exchange
 with routing key `inventory.waste`.
 
 The Analytics implementation currently accepts the canonical waste routing key

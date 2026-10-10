@@ -1,0 +1,12 @@
+{
+  "specversion": "1.0",
+  "id": "9e7d2a64-1c38-4b7f-b3d5-4a1f8c6e2b33",
+  "source": "/gelatoflow/fulfillment-service",
+  "type": "com.gelatoflow.fulfillment.order-picked-up.v1",
+  "time": "2026-09-02T15:04:00Z",
+  "datacontenttype": "application/json",
+  "data": {
+    "order_id": "8d29d6cf-bd4d-48ca-9e4f-dcd8ec54e594",
+    "picked_up_at": "2026-09-02T15:04:00Z"
+  }
+}

@@ -1,90 +1,66 @@
-# Kitchen Ticket Service
+# Fulfillment Service
 
-REST API สำหรับ resource `kitchen_ticket` (ส่วนหนึ่งของ Fulfillment Service ในโปรเจกต์ GelatoFlow)
-ทำขึ้นสำหรับ assignment งานเดี่ยวเรื่อง REST API — ใช้ Go + Echo + pgx (PostgreSQL) + amqp091-go (RabbitMQ, optional)
+คิวครัวและสถานะการรับสินค้าของ GelatoFlow — สร้าง ticket จาก event `order.placed`, ให้พนักงานเปลี่ยนสถานะ, แล้วส่ง event `fulfillment.order_ready` / `fulfillment.order_picked_up`
 
-## 1. เตรียม PostgreSQL
+Contract อยู่ที่ [`contracts/openapi/fulfillment-service.v1.yaml`](../contracts/openapi/fulfillment-service.v1.yaml) และ `contracts/events/fulfillment-*.schema.json`
+Stack: Go, Echo, pgx (PostgreSQL), amqp091-go (RabbitMQ, optional)
 
-ใช้ Docker เร็วสุด:
+## สถานะการพัฒนา
 
-```bash
-docker run --name fulfillment-pg -e POSTGRES_PASSWORD=postgres \
-  -e POSTGRES_DB=fulfillment -p 5432:5432 -d postgres:16
-```
+| ส่วน | สถานะ |
+| --- | --- |
+| REST: list / get / `PATCH .../status`, state machine, error แบบ `code/message/details` | ทำแล้ว (unit test ผ่าน) |
+| Consumer `order.placed` / `order.cancelled` + dedupe ด้วย event `id` | ทำแล้ว (unit test ผ่าน; ยังไม่ได้ทดสอบกับ broker จริง) |
+| Queue number ต่อ pickup slot (slot 15 นาที สร้างอัตโนมัติจาก `pickup_at`) | ทำแล้ว (SQL ยังไม่ได้ทดสอบกับ Postgres จริง) |
+| Publisher CloudEvents ผ่าน transactional outbox → exchange `fulfillment` | ทำแล้ว (ยังไม่ได้ทดสอบกับ broker จริง) |
+| Pickup slot management (ความจุ, endpoint ให้ Order ดู slot ว่าง) | ยังไม่ทำ |
+| QR pickup | นอกขอบเขตตอนนี้ |
+| JWT / role check (ทำที่ API Gateway), route ใน Gateway | ยังไม่ทำ |
+| RabbitMQ user `fulfillment_service` + permission ใน `infra/rabbitmq/definitions.json` | เพิ่มแล้ว (ยังไม่ได้ทดสอบกับ broker จริง; ควรให้เจ้าของ service อื่นรีวิวตอน PR) |
 
-รัน migration (สร้างตาราง + seed ข้อมูลตัวอย่าง):
+## Endpoints
 
-```bash
-docker exec -i fulfillment-pg psql -U postgres -d fulfillment < migrations/001_create_kitchen_tickets.sql
-```
+| Method | Path | หมายเหตุ |
+| --- | --- | --- |
+| GET | `/api/v1/fulfillments?status=PREPARING,READY_FOR_PICKUP` | เรียงตาม slot แล้วตาม queue |
+| GET | `/api/v1/fulfillments/{order_id}` | |
+| PATCH | `/api/v1/fulfillments/{order_id}/status` | body `{"status":"READY_FOR_PICKUP"}` หรือ `PICKED_UP`; ข้ามขั้น → 409 `INVALID_TRANSITION` |
+| GET | `/health` | |
 
-## 2. ตั้งค่า .env
+Ticket ไม่ถูกสร้างผ่าน REST — สร้างจาก event `order.placed` เท่านั้น และ `order.cancelled` จะเปลี่ยน ticket ที่ยัง `PREPARING` เป็น `CANCELLED`
 
-```bash
-cp .env.example .env
-```
+## รันในเครื่อง
 
-ถ้าไม่อยากรัน RabbitMQ ระหว่าง demo ก็ปล่อย `RABBITMQ_URL` ว่างไว้ได้เลย — โค้ดจะรันต่อโดยไม่ publish event
-(เช็คได้จาก log ตอน start: `RABBITMQ_URL not set, running without a message broker`)
-
-ถ้าอยากโชว์ event ด้วย รัน RabbitMQ:
-
-```bash
-docker run --name fulfillment-rabbit -p 5672:5672 -p 15672:15672 -d rabbitmq:3-management
-```
-
-## 3. ติดตั้ง dependency แล้วรัน
+ผ่าน compose (จาก repo root):
 
 ```bash
-go mod tidy
-go run ./cmd/api
+cp infra/.env.example infra/.env
+docker compose --env-file infra/.env \
+  -f infra/docker/compose.yml -f infra/docker/compose.dev.yml up --build fulfillment-service
+# service: http://localhost:8081   postgres: localhost:5435
 ```
 
-เซิร์ฟเวอร์จะขึ้นที่ `http://localhost:8080`
+Migration ใน `migrations/` ถูก mount เข้า Postgres และรันครั้งแรกที่สร้าง volume (001 สร้างตารางเดิมของ assignment แล้ว 002 แทนที่ด้วย schema ปัจจุบัน)
 
-## 4. ทดสอบ / ใช้ demo วิดีโอ
+หรือรันตรง ๆ: `cp .env.example .env` แล้ว `go run ./cmd/api` (ต้องมี Postgres ที่รัน migration แล้ว)
+`RABBITMQ_URL` ว่าง = ไม่ใช้ broker; API ยังทำงานและ event จะค้างใน outbox จนกว่าจะเชื่อม broker
 
-**GET ALL**
+## ทดสอบ
+
 ```bash
-curl http://localhost:8080/api/v1/tickets
+gofmt -l .
+go vet ./...
+go test ./...
 ```
 
-**POST (สร้างตั๋วใหม่)**
-```bash
-curl -X POST http://localhost:8080/api/v1/tickets \
-  -H "Content-Type: application/json" \
-  -d '{"order_id":"order-2001","pickup_slot":"15:00-15:15","queue_number":1}'
-```
-
-**GET ONE** (แทน `{id}` ด้วย id ที่ได้จาก POST หรือจาก seed data)
-```bash
-curl http://localhost:8080/api/v1/tickets/{id}
-```
-
-**PUT (เปลี่ยนสถานะ)**
-```bash
-curl -X PUT http://localhost:8080/api/v1/tickets/{id} \
-  -H "Content-Type: application/json" \
-  -d '{"status":"READY_FOR_PICKUP"}'
-```
-
-**DELETE**
-```bash
-curl -X DELETE http://localhost:8080/api/v1/tickets/{id}
-```
-
-หลังยิงแต่ละ method แนะนำเปิด `psql` หรือ pgAdmin คู่กันไว้ แล้ว `SELECT * FROM kitchen_tickets;`
-เพื่อโชว์ว่าค่าใน DB เปลี่ยนตามจริงตามที่ assignment ต้องการ
-
-## โครงสร้างโปรเจกต์
+## โครงสร้าง
 
 ```
-cmd/api/main.go          bootstrap: config, pgx pool, rabbitmq publisher, echo server
-internal/config          โหลด .env
-internal/models          struct ของ resource + request DTO
-internal/repository      query กับ postgres ผ่าน pgx (Create/GetByID/GetAll/UpdateStatus/Delete)
-internal/handler         echo handler แปลง HTTP <-> repository
-internal/router          ผูก route กับ handler
-internal/messaging       publish event ไปยัง RabbitMQ (optional, ไม่ทำให้ request ล้มถ้า broker ไม่พร้อม)
-migrations/              SQL สร้างตาราง + seed
+cmd/api            bootstrap: config, pgx pool, broker, relay, consumer, echo
+internal/models    Fulfillment, สถานะ และ state machine
+internal/events    CloudEvents envelope + payload ของ event ที่รับ/ส่ง
+internal/repository SQL: ticket, slot/queue, dedupe, outbox (ทุกการเปลี่ยนสถานะอยู่ใน transaction เดียว)
+internal/handler   Echo handler
+internal/messaging broker, outbox relay, consumer
+migrations         schema
 ```
