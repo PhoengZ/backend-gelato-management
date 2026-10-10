@@ -137,10 +137,13 @@ Build the local image:
 docker build -t gelatoflow/auth-service:local ./auth-service
 ```
 
-The frontend uses backend authentication by default through its server-side
-`AUTH_SERVICE_URL`. The mock session exists only as an explicit non-production
-demo mode; it is not an Auth Service identity. The bearer-token OpenAPI contract
-remains the source of truth.
+The separate frontend `auth-integration` branch uses backend authentication by
+default through its server-side `AUTH_SERVICE_URL`. Frontend `main` still uses
+mock authentication; this backend PR does not update that repository. In the
+integration branch, Auth uses a HttpOnly session cookie and real Go identity
+checks, while business handlers still use mock data. Setting a business API URL
+alone does not convert that cookie into a Gateway Bearer token. The backend
+bearer-token OpenAPI contract remains the source of truth.
 
 ## Round 2 authentication demo
 
@@ -152,14 +155,19 @@ claim that the three business use cases are integrated or demo-ready.
 
 ## Gateway integration boundary
 
-API Gateway validates bearer JWTs before forwarding protected external requests.
-It removes client-supplied `X-User-ID`, `X-User-Role`, `X-Gelato-User-ID`, and
-`X-Gelato-User-Role` headers, then regenerates both identity-header forms from the
-validated `sub` and `role` claims. It preserves the original Bearer token so each
-service can validate it independently.
+API Gateway on main `7c46029` validates bearer JWTs before forwarding protected
+external requests. It removes client-supplied `X-User-*`, `X-Authenticated-*`,
+`X-Role`, and `X-Roles` headers and preserves the original Bearer token so each
+service can validate it independently. The verified subject and role are stored
+in Gateway's process-local context; it does not regenerate trusted identity
+headers for downstream services. Order's current header-based identity handoff
+therefore remains integration work for the Gateway and Order owners.
 Auth Service owns users, roles, credential checks, and token issuance; Gateway
 does not query the Auth database or create privileged roles.
 
 `GET /api/v1/auth/me` still requires and validates the bearer token when Auth
 Service is called directly. Supplying identity headers without a bearer token is
 rejected.
+
+See [INTEGRATION.md](INTEGRATION.md) for the reviewed service revisions, JWT/role
+compatibility, local verification and integration work outside this Auth PR.
