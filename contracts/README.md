@@ -21,7 +21,9 @@ changes.
 | Inventory REST API | Batch Inventory Service | API Gateway, staff and manager UI |
 | Fulfillment REST API | Fulfillment Service | API Gateway, staff UI |
 | Inventory gRPC API | Batch Inventory Service | Order Service |
+| Notification SSE API | Notification Service | Frontend (Gateway route pending) |
 | `order.placed` event | Order Service | Fulfillment, Notification, Analytics |
+| `order.cancelled` event | Order Service | Fulfillment, Notification, Analytics |
 | `fulfillment.order_ready` event | Fulfillment Service | Notification Service |
 | `fulfillment.order_picked_up` event | Fulfillment Service | None in MVP |
 | `inventory.waste` event | Batch Inventory Service | Analytics Service |

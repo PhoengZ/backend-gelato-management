@@ -1,0 +1,12 @@
+{
+  "specversion": "1.0",
+  "id": "e6a1d0b4-7c52-4f0e-9d3a-2b8c5f1a9e47",
+  "source": "/gelatoflow/order-service",
+  "type": "com.gelatoflow.order.cancelled.v1",
+  "time": "2026-09-02T14:40:00Z",
+  "datacontenttype": "application/json",
+  "data": {
+    "order_id": "8d29d6cf-bd4d-48ca-9e4f-dcd8ec54e594",
+    "reason": "CUSTOMER_REQUEST"
+  }
+}

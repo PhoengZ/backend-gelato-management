@@ -7,6 +7,8 @@ apis:
     root: contracts/openapi/fulfillment-service.v1.yaml
   batch-inventory@v1:
     root: contracts/openapi/batch-inventory-service.v1.yaml
+  notification@v1:
+    root: contracts/openapi/notification-service.v1.yaml
 
 extends:
   - recommended
