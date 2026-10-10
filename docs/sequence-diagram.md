@@ -70,7 +70,7 @@ sequenceDiagram
     and Notification
         RMQ->>NS: Consume OrderPlaced event
         activate NS
-        NS->>C: Send Order Confirmation with Queue Number
+        NS->>C: Push order confirmation (queue number follows in OrderReady)
         deactivate NS
     and Analytics
         RMQ->>ANS: Consume OrderPlaced event

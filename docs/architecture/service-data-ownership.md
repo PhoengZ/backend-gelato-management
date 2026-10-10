@@ -18,6 +18,18 @@ ownership of the underlying data.
 | Order Service | Orders, line items, pricing snapshots, payment status, customer references | PostgreSQL | Available portion balances, inventory batches, flavor metadata, payments |
 | Fulfillment Service | Kitchen tickets, pickup time-slots, slot queue numbers, fulfillment status | PostgreSQL | Orders, inventory batches, payment processing |
 | Analytics Service | Derived daily sales and waste aggregates in integer minor units | MongoDB | Operational source records |
+| Notification Service | Nothing durable. Live SSE connections and, in memory only, a TTL-bounded `order_id` to `customer_id` routing map and recent event ids | None (stateless) | Orders, customer profiles, inventory batches |
+
+## Notification routing exception
+
+`order.cancelled` and `fulfillment.order_ready` carry no `customer_id`, and Order
+Service's gRPC `GetOrderDetails` is not yet available to call. Notification
+therefore remembers `order_id` to `customer_id` from `order.placed` in process
+memory (identifiers only, never persisted, bounded and expiring). This is a
+deliberate, temporary exception to rule 2 below. An order placed before the
+process started, or older than `ORDER_OWNER_TTL`, produces no notification. Replace
+the map with a `GetOrderDetails` call, or add `customer_id` to the thin events,
+once Order Service owner agrees.
 
 ## Boundary rules
 

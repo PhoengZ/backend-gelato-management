@@ -76,7 +76,7 @@ Used for decoupling services and handling asynchronous workflows. (RabbitMQ pref
 10. **Publish Event:** **Order Service** writes a transactional outbox record and publishes the versioned `OrderPlaced` CloudEvent containing integer minor-unit totals.
 11. **Time-Slot Queue Allocation:**
     * **Fulfillment Service** consumes `OrderPlaced`, allocates a sequential **Queue Number scoped to that specific Time Slot** (e.g., Slot `14:00 - 14:15` -> Queue `#01`), and places it into the kitchen prep queue.
-12. **Notify Customer:** **Notification Service** consumes `OrderPlaced` and sends an order confirmation with the **Slot Details & Slot Queue Number** to the Customer.
+12. **Notify Customer:** **Notification Service** consumes `OrderPlaced` and pushes an in-app order confirmation (pickup time and order summary) to the Customer's open SSE stream. `OrderPlaced` has no queue number, so the **Slot Queue Number** reaches the Customer in the `OrderReady` notification instead.
 
 *(If stock is insufficient at step 3, Batch Inventory returns an Out of Stock error, and Order Service aborts the order).*
 
