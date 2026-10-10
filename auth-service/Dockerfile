@@ -8,6 +8,7 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/auth-service ./cmd/api
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/migrate ./cmd/migrate
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/demo ./cmd/demo
 
 FROM alpine:3.22
 
@@ -19,6 +20,7 @@ RUN apk --no-cache add ca-certificates tzdata \
 
 COPY --from=builder /out/auth-service /app/auth-service
 COPY --from=builder /out/migrate /app/migrate
+COPY --from=builder /out/demo /app/demo
 
 USER appuser
 
