@@ -24,7 +24,7 @@ jobs:
 
     services:
       mongodb:
-        image: mongo:7-alpine
+        image: mongo:7.0
         ports: ['27017:27017']
         options: >-
           --health-cmd "mongosh --quiet --eval \"db.adminCommand('ping').ok\" localhost:27017/test"
