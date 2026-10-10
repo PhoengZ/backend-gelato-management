@@ -83,4 +83,3 @@ func SetupRoutes(app *fiber.App, cfg config.Config) {
 		return proxy.Do(c, url)
 	})
 }
-
