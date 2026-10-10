@@ -1,0 +1,88 @@
+name: Notification Service CI/CD
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - 'notification-service/**'
+      - 'contracts/events/**'
+      - 'contracts/examples/**'
+      - '.github/workflows/notification-service.yaml'
+  pull_request:
+    branches: [ "main" ]
+    paths:
+      - 'notification-service/**'
+      - 'contracts/events/**'
+      - 'contracts/examples/**'
+      - '.github/workflows/notification-service.yaml'
+
+permissions:
+  contents: read
+
+jobs:
+  security-and-quality:
+    name: Security Scan, Code Quality, and Tests
+    runs-on: ubuntu-latest
+
+    # Define working directory for steps that need it
+    defaults:
+      run:
+        working-directory: ./notification-service
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Required for TruffleHog to scan full history
+
+      - name: Secret Scanning with TruffleHog
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          extra_args: --debug --only-verified
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: notification-service/go.mod
+          cache-dependency-path: notification-service/go.sum
+
+      - name: Verify Dependencies
+        run: go mod verify
+
+      - name: Code Formatting Check
+        run: |
+          if [ "$(gofmt -s -l . | wc -l)" -gt 0 ]; then
+            echo "The following files are not formatted correctly:"
+            gofmt -s -l .
+            exit 1
+          fi
+
+      - name: Static Code Analysis (Vet)
+        run: go vet ./...
+
+      - name: Run Tests
+        run: go test -v -count=1 ./...
+
+  build-and-scan-image:
+    name: Build Docker Image and Trivy Scan
+    runs-on: ubuntu-latest
+    needs: security-and-quality
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build an image from Dockerfile
+        run: |
+          docker build -t notification-service:${{ github.sha }} ./notification-service
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'notification-service:${{ github.sha }}'
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
