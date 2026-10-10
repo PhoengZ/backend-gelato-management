@@ -2,7 +2,29 @@ openapi: 3.1.0
 info:
   title: GelatoFlow Auth Service API
   version: 1.0.0
-  description: Canonical external contract for user registration, login, and identity.
+  description: |
+    Canonical external contract for user registration, login, and identity.
+    Auth owns PostgreSQL user records, password hashes, roles, and HS256 access
+    tokens. Public signup always creates an ACTIVE CUSTOMER; callers cannot
+    choose a role. Auth responses are marked Cache-Control: no-store.
+
+    Credential requests must be uncompressed UTF-8 application/json objects of
+    at most 16 KiB. Field names are case-sensitive. Unknown, duplicate, missing,
+    null, or non-string fields, invalid JSON, and trailing JSON values are
+    rejected. Charset, when supplied, must be utf-8; Content-Encoding may be
+    absent or identity. Duplicate Content-Type or Content-Encoding headers are
+    rejected.
+
+    Signup and login share in-memory, per-process limits: 20 attempts per minute
+    per canonical validated email across all peers, 600 requests per minute per
+    direct peer IP, and at most four concurrent credential operations. The peer
+    limit applies before JSON decoding and counts malformed requests. Forwarded
+    IP headers are ignored; proxied callers share the peer budget but distinct
+    emails have separate account budgets. Account attempts are counted only
+    after strict JSON decoding and email normalization/validation. A busy
+    credential operation returns 429 with Retry-After: 1 without consuming an
+    account attempt. Other limit rejections return 429 with Retry-After in
+    seconds. These limits are local to each process, not distributed.
 servers:
   - url: /
 paths:
@@ -10,6 +32,11 @@ paths:
     post:
       operationId: signUp
       summary: Register a customer account
+      description: |
+        Creates an ACTIVE CUSTOMER and returns its public user representation.
+        Does not issue a token; call login after successful registration.
+        Email is trimmed and lowercased before validation and uniqueness checks;
+        display_name is trimmed. Passwords are not trimmed.
       tags: [Auth]
       security: []
       requestBody:
@@ -29,10 +56,24 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '409':
           $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/v1/auth/login:
     post:
       operationId: logIn
       summary: Authenticate and issue an access token
+      description: |
+        Accepts only email and password. Missing accounts, disabled accounts,
+        incorrect passwords, and invalid credential values return the same
+        INVALID_CREDENTIALS response. An invalid JSON object returns
+        INVALID_REQUEST instead. Email is trimmed and lowercased; passwords
+        are not trimmed.
       tags: [Auth]
       security: []
       requestBody:
@@ -49,13 +90,28 @@ paths:
               schema:
                 $ref: '#/components/schemas/AuthTokenResponse'
         '400':
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/InvalidRequest'
         '401':
-          $ref: '#/components/responses/Unauthorized'
+          $ref: '#/components/responses/InvalidCredentials'
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/v1/auth/me:
     get:
       operationId: getCurrentUser
       summary: Return the authenticated user
+      description: |
+        Requires exactly one Authorization header containing a Bearer token.
+        Verifies the token, then loads the current user from Auth PostgreSQL.
+        Missing or disabled accounts return UNAUTHORIZED. The response reflects
+        the current stored role and profile, not a caller-supplied identity
+        header. Other services that verify tokens locally can retain the issued
+        role until token expiry; this endpoint is not global token revocation.
       tags: [Auth]
       security:
         - bearerAuth: []
@@ -68,34 +124,120 @@ paths:
                 $ref: '#/components/schemas/User'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
 components:
   securitySchemes:
     bearerAuth:
       type: http
       scheme: bearer
       bearerFormat: JWT
+      description: |
+        Auth-issued HS256 JWT with required sub (non-nil user UUID), role
+        (CUSTOMER, STAFF, or MANAGER), iss, aud, iat, and exp claims. The issuer
+        and audience must match runtime configuration. Expiration must be in the
+        future and later than issued-at; issued-at must not be in the future.
+        Invalid, duplicate, or combined Authorization credentials fail closed.
+        Forwarded user and role headers are not authentication credentials.
+        Refresh tokens and server-side token revocation are not implemented.
   responses:
     BadRequest:
-      description: Invalid request
+      description: Invalid JSON object (INVALID_REQUEST) or invalid signup values (INVALID_INPUT)
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            invalidObject:
+              value:
+                code: INVALID_REQUEST
+                message: Request body is invalid
+            invalidValues:
+              value:
+                code: INVALID_INPUT
+                message: 'invalid input: email is invalid'
+    InvalidRequest:
+      description: Invalid JSON object, field names, required fields, or field types
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: INVALID_REQUEST
+            message: Request body is invalid
+    InvalidCredentials:
+      description: Invalid credentials, unknown account, or disabled account
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: INVALID_CREDENTIALS
+            message: Email or password is invalid
     Unauthorized:
-      description: Authentication required or credentials are invalid
+      description: Missing or invalid Bearer token, or user no longer exists or is disabled
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: UNAUTHORIZED
+            message: Authentication is required
     Conflict:
       description: A user with the supplied email already exists
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: EMAIL_ALREADY_EXISTS
+            message: An account with this email already exists
+    RequestTooLarge:
+      description: Request body exceeds the 16 KiB limit
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: REQUEST_TOO_LARGE
+            message: Request body exceeds 16 KiB
+    UnsupportedMediaType:
+      description: Missing, invalid, or duplicate media headers; unsupported charset or compression
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: UNSUPPORTED_MEDIA_TYPE
+            message: Uncompressed application/json is required
+    RateLimited:
+      description: Account or peer request budget exhausted, or all four credential operations are busy
+      headers:
+        Retry-After:
+          description: Seconds to wait before retrying; 1 when all credential operations are busy
+          schema:
+            type: integer
+            minimum: 1
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: RATE_LIMITED
+            message: Too many authentication requests
+    InternalError:
+      description: Auth could not complete the request, including storage failures
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: INTERNAL_ERROR
+            message: The request could not be completed
   schemas:
     SignUpRequest:
       type: object
+      description: Exactly these three string fields are accepted; role is not a signup field.
       additionalProperties: false
       required: [email, password, display_name]
       properties:
@@ -103,17 +245,22 @@ components:
           type: string
           format: email
           maxLength: 254
+          description: Trimmed and lowercased; at most 254 UTF-8 bytes after normalization.
         password:
           type: string
           format: password
           minLength: 8
           maxLength: 72
+          writeOnly: true
+          description: At least 8 Unicode characters and at most 72 UTF-8 bytes; not trimmed.
         display_name:
           type: string
           minLength: 1
           maxLength: 100
+          description: Between 1 and 100 Unicode characters after trimming.
     LoginRequest:
       type: object
+      description: Exactly these two string fields are accepted.
       additionalProperties: false
       required: [email, password]
       properties:
@@ -121,11 +268,14 @@ components:
           type: string
           format: email
           maxLength: 254
+          description: Trimmed and lowercased; at most 254 UTF-8 bytes after normalization.
         password:
           type: string
           format: password
           minLength: 1
           maxLength: 72
+          writeOnly: true
+          description: At least 1 Unicode character and at most 72 UTF-8 bytes; not trimmed.
     AuthTokenResponse:
       type: object
       additionalProperties: false
@@ -134,13 +284,15 @@ components:
         access_token:
           type: string
           minLength: 1
+          description: Short-lived HS256 Bearer token issued by Auth.
         token_type:
           type: string
           const: Bearer
         expires_in:
           type: integer
           minimum: 1
-          description: Access-token lifetime in seconds.
+          maximum: 3600
+          description: Configured access-token lifetime in seconds; defaults to 900 (15 minutes).
         user:
           $ref: '#/components/schemas/User'
     User:

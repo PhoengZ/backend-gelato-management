@@ -1,0 +1,77 @@
+name: Auth Service CI
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "auth-service/**"
+      - "contracts/openapi/auth-service.v1.yaml"
+      - ".github/workflows/auth-service.yaml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "auth-service/**"
+      - "contracts/openapi/auth-service.v1.yaml"
+      - ".github/workflows/auth-service.yaml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Format, vet, and test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: auth-service
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: gelatoflow_auth
+          POSTGRES_USER: auth_service
+          POSTGRES_PASSWORD: auth_test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U auth_service -d gelatoflow_auth"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://auth_service:auth_test_password@localhost:5432/gelatoflow_auth?sslmode=disable
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: auth-service/go.mod
+          cache-dependency-path: auth-service/go.sum
+
+      - name: Verify dependencies
+        run: go mod verify
+
+      - name: Check formatting
+        run: test -z "$(gofmt -s -l .)"
+
+      - name: Vet packages
+        run: go vet ./...
+
+      - name: Run tests with race detector
+        run: go test -race -coverpkg=./... -coverprofile=coverage.out ./...
+
+      - name: Report coverage
+        run: go tool cover -func=coverage.out | tail -1
+
+  image:
+    name: Build container image
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Build image
+        run: docker build -t gelatoflow/auth-service:${{ github.sha }} ./auth-service

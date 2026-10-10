@@ -1,0 +1,7 @@
+.env
+.git
+coverage.out
+README.md
+tests
+demo/.local/
+demo/__pycache__/

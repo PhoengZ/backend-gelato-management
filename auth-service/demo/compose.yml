@@ -1,0 +1,53 @@
+# Auth-only local demo. No shared Gateway or business service is started here.
+name: gelatoflow-auth-demo
+
+services:
+  auth-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: auth_demo
+      POSTGRES_USER: auth_demo
+      POSTGRES_PASSWORD: ${AUTH_DEMO_DB_PASSWORD:?Run demo.py up first}
+    ports:
+      - "127.0.0.1:17433:5432"
+    volumes:
+      - auth_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U auth_demo -d auth_demo"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  auth-migrate:
+    build:
+      context: ..
+    image: gelatoflow-auth-demo:local
+    command: ["/app/migrate"]
+    environment:
+      DATABASE_URL: postgres://auth_demo:${AUTH_DEMO_DB_PASSWORD}@auth-db:5432/auth_demo?sslmode=disable
+    depends_on:
+      auth-db:
+        condition: service_healthy
+    restart: "no"
+
+  auth:
+    image: gelatoflow-auth-demo:local
+    pull_policy: never
+    environment:
+      PORT: "3001"
+      DATABASE_URL: postgres://auth_demo:${AUTH_DEMO_DB_PASSWORD}@auth-db:5432/auth_demo?sslmode=disable
+      JWT_SECRET: ${AUTH_DEMO_JWT_SECRET:?Run demo.py up first}
+      JWT_ISSUER: ${AUTH_DEMO_JWT_ISSUER:-gelatoflow-auth}
+      JWT_AUDIENCE: ${AUTH_DEMO_JWT_AUDIENCE:-gelatoflow-api}
+      JWT_TTL: 15m
+      BCRYPT_COST: "10"
+    ports:
+      - "127.0.0.1:17011:3001"
+    depends_on:
+      auth-migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+volumes:
+  auth_data:
