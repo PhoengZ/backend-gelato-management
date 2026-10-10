@@ -14,6 +14,7 @@ same Docker network.
 | `inventory-postgres` | Batch Inventory Service | 5432 | 5434 |
 | `fulfillment-postgres` | Fulfillment Service | 5432 | 5435 |
 | `fulfillment-service` | Fulfillment Service | 8080 | 8081 |
+| `notification-service` | Notification Service (stateless, no database) | 8080 | 8082 |
 | `catalog-redis` | Catalog Service | 6379 | 6380 |
 
 The default compose file references pre-built images for application services.
@@ -106,6 +107,8 @@ Current topology:
 | --- | --- | --- |
 | `inventory_service` | Publish Inventory events | `inventory` exchange |
 | `analytics_service` | Consume Order and Inventory events | `order`, `inventory`, `analytics_queue` |
+| `fulfillment_service` | Consume Order events, publish Fulfillment events | `order`, `fulfillment`, `fulfillment_queue` |
+| `notification_service` | Consume Order, Fulfillment and Inventory events | read `order`, `fulfillment`, `inventory`; own `notification_queue` |
 
 Analytics Service declares the topic exchanges and its queue at startup. Batch
 Inventory Service publishes `inventory.waste` to the `inventory` exchange. Both

@@ -1,0 +1,217 @@
+openapi: 3.1.0
+info:
+  title: GelatoFlow Notification Service API
+  version: 1.0.0
+  description: >-
+    Real-time in-app notifications over Server-Sent Events. Notification is
+    stateless: it consumes `order.placed`, `order.cancelled`,
+    `fulfillment.order_ready`, `inventory.low_stock` and `inventory.expiring`
+    from RabbitMQ and pushes a frame to the connected users it applies to. It
+    owns no business data and exposes no operation for other services to call.
+
+
+    Delivery is best effort. A notification reaches only users who are
+    connected when the event is processed, and nothing is replayed on
+    reconnect, so clients keep polling order status as a fallback.
+
+
+    Browsers' `EventSource` cannot send an `Authorization` header. Clients use
+    a fetch-based SSE reader (for example `@microsoft/fetch-event-source`).
+
+
+    Recipients: customers receive only notifications for their own orders
+    (the owner is learned from `order.placed`, so an order placed before this
+    service started, or older than its retention window, produces no
+    notification). Staff and managers receive inventory alerts.
+servers:
+  - url: /
+paths:
+  /api/v1/notifications/stream:
+    get:
+      operationId: streamNotifications
+      summary: Open the notification stream for the authenticated user
+      description: >-
+        Holds the connection open and writes one SSE frame per notification,
+        plus `: keep-alive` comment lines. Each frame has `id` (the source
+        event id), `event` (the notification `type`) and `data` (a JSON
+        `Notification`, described by the schema below). `GET /health` is also
+        served for liveness but is not part of the public contract. The gateway
+        route for this path is not yet defined.
+      tags: [Notifications]
+      security:
+        - bearerAuth: []
+      x-required-roles: [CUSTOMER, STAFF, MANAGER]
+      responses:
+        '200':
+          description: Event stream
+          content:
+            text/event-stream:
+              schema:
+                $ref: '#/components/schemas/Notification'
+              example:
+                id: 5b0c1f1e-3a52-4d8c-9a41-0d6f4f0f7a10
+                type: order.ready
+                message: Your gelato order is ready for pickup!
+                occurred_at: '2026-09-02T14:55:00Z'
+                data:
+                  order_id: 8d29d6cf-bd4d-48ca-9e4f-dcd8ec54e594
+                  queue_number: '01'
+                  pickup_slot_id: b4a2f6c8-2f0e-4c3a-8a57-6f0f6f3a9d21
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  responses:
+    Unauthorized:
+      description: Missing, malformed, expired or otherwise invalid Bearer token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+  schemas:
+    Notification:
+      type: object
+      additionalProperties: false
+      required: [id, type, message, occurred_at, data]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Id of the source event; also the SSE `id`.
+        type:
+          $ref: '#/components/schemas/NotificationType'
+        message:
+          type: string
+          description: Human-readable popup text.
+        occurred_at:
+          type: string
+          format: date-time
+          description: Time of the source event.
+        data:
+          description: Type-specific fields; the shape depends on `type`.
+          oneOf:
+            - $ref: '#/components/schemas/OrderConfirmedData'
+            - $ref: '#/components/schemas/OrderReadyData'
+            - $ref: '#/components/schemas/OrderCancelledData'
+            - $ref: '#/components/schemas/LowStockData'
+            - $ref: '#/components/schemas/ExpiringData'
+    NotificationType:
+      type: string
+      description: >-
+        `order.confirmed` (from `order.placed`), `order.ready` (from
+        `fulfillment.order_ready`) and `order.cancelled` go to the order owner.
+        `inventory.low_stock` and `inventory.expiring` go to STAFF and MANAGER.
+      enum:
+        - order.confirmed
+        - order.ready
+        - order.cancelled
+        - inventory.low_stock
+        - inventory.expiring
+    OrderConfirmedData:
+      type: object
+      description: >-
+        No queue number: Fulfillment assigns it later and it is delivered in
+        `order.ready`.
+      required: [order_id, pickup_at, total_amount_minor, currency, items]
+      properties:
+        order_id:
+          type: string
+          format: uuid
+        pickup_at:
+          type: string
+          format: date-time
+        total_amount_minor:
+          type: integer
+          format: int64
+          description: Total in minor units, for example satang.
+        currency:
+          type: string
+          example: THB
+        items:
+          type: array
+          items:
+            type: object
+            required: [flavor_id, flavor_name, portions]
+            properties:
+              flavor_id:
+                type: string
+                format: uuid
+              flavor_name:
+                type: string
+              portions:
+                type: integer
+                minimum: 1
+    OrderReadyData:
+      type: object
+      required: [order_id, queue_number, pickup_slot_id]
+      properties:
+        order_id:
+          type: string
+          format: uuid
+        queue_number:
+          type: string
+          description: Display string allocated by Fulfillment, scoped to the pickup slot.
+          example: '01'
+        pickup_slot_id:
+          type: string
+          format: uuid
+    OrderCancelledData:
+      type: object
+      required: [order_id, reason]
+      properties:
+        order_id:
+          type: string
+          format: uuid
+        reason:
+          type: string
+          description: Stable reason code owned by Order Service.
+    LowStockData:
+      type: object
+      description: >-
+        Source event has no JSON schema yet (Inventory does not publish it);
+        this shape follows docs/event-schema-spec.md.
+      required: [batch_id, flavor_id, remaining_portions, threshold_portions]
+      properties:
+        batch_id:
+          type: string
+          format: uuid
+        flavor_id:
+          type: string
+          format: uuid
+        remaining_portions:
+          type: integer
+        threshold_portions:
+          type: integer
+    ExpiringData:
+      type: object
+      description: >-
+        Source event has no JSON schema yet (Inventory does not publish it);
+        this shape follows docs/event-schema-spec.md.
+      required: [batch_id, flavor_id, expires_at]
+      properties:
+        batch_id:
+          type: string
+          format: uuid
+        flavor_id:
+          type: string
+          format: uuid
+        expires_at:
+          type: string
+          format: date-time
+    ErrorResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+          additionalProperties:
+            type: string

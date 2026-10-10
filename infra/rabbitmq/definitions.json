@@ -25,6 +25,12 @@
       "password_hash": "SqQPLl3Wnu28ThaWuHRA29gUUHpyU7PSgCZKAp39sqdZsX0c",
       "hashing_algorithm": "rabbit_password_hashing_sha256",
       "tags": []
+    },
+    {
+      "name": "notification_service",
+      "password_hash": "phVYi/YHdAl23fTJ8OtEOIJvLH4y3+FMS7VdvqoVAokonuYj",
+      "hashing_algorithm": "rabbit_password_hashing_sha256",
+      "tags": []
     }
   ],
   "vhosts": [
@@ -70,6 +76,13 @@
       "configure": "^(fulfillment|order|fulfillment_queue)$",
       "write": "^(fulfillment|fulfillment_queue)$",
       "read": "^(order|fulfillment_queue)$"
+    },
+    {
+      "user": "notification_service",
+      "vhost": "gelato_vhost",
+      "configure": "^(order|fulfillment|inventory|notification_queue)$",
+      "write": "^notification_queue$",
+      "read": "^(order|fulfillment|inventory|notification_queue)$"
     }
   ],
   "policies": [],

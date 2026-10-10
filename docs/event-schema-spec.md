@@ -109,6 +109,9 @@ items in version 1 use the same event-level currency.
 
 ### 3.2 OrderCancelled
 
+Schema: `contracts/events/order-cancelled.v1.schema.json`; example:
+`contracts/examples/order-cancelled.v1.json`.
+
 The payload contains `order_id` and a stable `reason` code. Services that need
 the paid amount or line items (such as Fulfillment or Notification) call Order
 Service directly via gRPC using `order_id` to retrieve authoritative order details.

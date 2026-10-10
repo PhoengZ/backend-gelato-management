@@ -26,6 +26,11 @@ EVENT_CONTRACTS = (
         ("cost_lost_minor",),
     ),
     (
+        "events/order-cancelled.v1.schema.json",
+        "examples/order-cancelled.v1.json",
+        (),
+    ),
+    (
         "events/order-placed.v1.schema.json",
         "examples/order-placed.v1.json",
         ("total_amount_minor",),

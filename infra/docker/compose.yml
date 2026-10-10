@@ -145,6 +145,24 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  notification-service:
+    build:
+      context: ../../notification-service
+    container_name: notification-service
+    environment:
+      PORT: "8080"
+      JWT_SECRET: ${NOTIFICATION_JWT_SECRET:?NOTIFICATION_JWT_SECRET is required}
+      JWT_ISSUER: ${JWT_ISSUER:-gelatoflow-auth}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-gelatoflow-api}
+      # Empty keeps messaging disabled; the SSE endpoint still serves but nothing is pushed.
+      RABBITMQ_URL: ${NOTIFICATION_RABBITMQ_URL:-}
+    networks:
+      - gelato_network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
 networks:
   gelato_network:
     driver: bridge
