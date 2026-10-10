@@ -1,0 +1,114 @@
+syntax = "proto3";
+
+package catalog.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/gelatoflow/backend-gelato-management/contracts/gen/go/catalog/v1;catalogv1";
+
+// Catalog owns flavor metadata, never stock. All methods use the same application
+// logic and Redis records as the public REST API. Authentication is a Bearer JWT
+// in authorization metadata; supplied invalid or duplicate credentials fail closed.
+service CatalogService {
+  // Manager only. Omitted active defaults to true. No automatic retry/idempotency key.
+  rpc CreateFlavor(CreateFlavorRequest) returns (CreateFlavorResponse);
+  // Public reads hide archived flavors. A verified Manager can read them.
+  rpc GetFlavor(GetFlavorRequest) returns (GetFlavorResponse);
+  // Explicit active=false requires Manager. No filter means all visible flavors.
+  rpc ListFlavors(ListFlavorsRequest) returns (ListFlavorsResponse);
+  // 1–100 unique UUIDs, in request order. Missing/hidden IDs fail the entire call.
+  // Reads are not an atomic snapshot and do not lock prices.
+  rpc BatchGetFlavors(BatchGetFlavorsRequest) returns (BatchGetFlavorsResponse);
+  // Manager only. Full replacement (REST PUT), not PATCH. Active is required.
+  // Omitted image_url clears the image. An identical replacement keeps updated_at.
+  rpc UpdateFlavor(UpdateFlavorRequest) returns (UpdateFlavorResponse);
+  // Manager only. Archive (active=false), retaining ID, recipe and reserved name.
+  // Repeated delete of an existing archive succeeds; unknown IDs return NOT_FOUND.
+  rpc DeleteFlavor(DeleteFlavorRequest) returns (DeleteFlavorResponse);
+}
+
+enum Allergen {
+  ALLERGEN_UNSPECIFIED = 0;
+  ALLERGEN_MILK = 1;
+  ALLERGEN_EGG = 2;
+  ALLERGEN_PEANUT = 3;
+  ALLERGEN_TREE_NUT = 4;
+  ALLERGEN_SOY = 5;
+  ALLERGEN_GLUTEN = 6;
+}
+
+message Money {
+  // Both fields must be present in write inputs. Zero amount is valid.
+  optional int64 amount_minor = 1;
+  optional string currency = 2;
+}
+
+// The wrapper distinguishes a missing collection from an explicitly empty one.
+message AllergenList {
+  repeated Allergen values = 1;
+}
+
+message FlavorInput {
+  optional string name = 1;
+  optional string description = 2;
+  Money price = 3;
+  optional string image_url = 4;
+  AllergenList allergens = 5;
+  optional string recipe = 6;
+  optional bool active = 7;
+}
+
+// Read representation deliberately excludes recipe, including Manager reads.
+message Flavor {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  Money price = 4;
+  optional string image_url = 5;
+  repeated Allergen allergens = 6;
+  bool active = 7;
+  google.protobuf.Timestamp created_at = 8;
+  google.protobuf.Timestamp updated_at = 9;
+}
+
+// Only returned by Manager-authorized writes.
+message FlavorAdmin {
+  Flavor flavor = 1;
+  string recipe = 2;
+}
+
+message CreateFlavorRequest {
+  FlavorInput flavor = 1;
+}
+message CreateFlavorResponse {
+  FlavorAdmin flavor = 1;
+}
+message GetFlavorRequest {
+  string flavor_id = 1;
+}
+message GetFlavorResponse {
+  Flavor flavor = 1;
+}
+message ListFlavorsRequest {
+  optional bool active = 1;
+}
+message ListFlavorsResponse {
+  repeated Flavor items = 1;
+}
+message BatchGetFlavorsRequest {
+  repeated string flavor_ids = 1;
+}
+message BatchGetFlavorsResponse {
+  repeated Flavor items = 1;
+}
+message UpdateFlavorRequest {
+  string flavor_id = 1;
+  FlavorInput flavor = 2;
+}
+message UpdateFlavorResponse {
+  FlavorAdmin flavor = 1;
+}
+message DeleteFlavorRequest {
+  string flavor_id = 1;
+}
+message DeleteFlavorResponse {}

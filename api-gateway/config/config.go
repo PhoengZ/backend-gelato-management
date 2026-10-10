@@ -1,11 +1,14 @@
 package config
 
 import (
+	"fmt"
 	"log"
 	"os"
 
 	"github.com/joho/godotenv"
 )
+
+const MinimumJWTSecretBytes = 32
 
 type Config struct {
 	Port                  string
@@ -16,6 +19,9 @@ type Config struct {
 	FulfillmentServiceURL string
 	AnalyticsServiceURL   string
 	PaymentServiceURL     string
+	JWTSecret             string
+	JWTIssuer             string
+	JWTAudience           string
 }
 
 func LoadConfig() Config {
@@ -33,7 +39,17 @@ func LoadConfig() Config {
 		FulfillmentServiceURL: getEnv("FULFILLMENT_SERVICE_URL", "http://localhost:3005"),
 		AnalyticsServiceURL:   getEnv("ANALYTICS_SERVICE_URL", "http://localhost:3006"),
 		PaymentServiceURL:     getEnv("PAYMENT_SERVICE_URL", "http://localhost:3007"),
+		JWTSecret:             os.Getenv("JWT_SECRET"),
+		JWTIssuer:             getEnv("JWT_ISSUER", "gelatoflow-auth"),
+		JWTAudience:           getEnv("JWT_AUDIENCE", "gelatoflow-api"),
 	}
+}
+
+func (c Config) Validate() error {
+	if len([]byte(c.JWTSecret)) < MinimumJWTSecretBytes {
+		return fmt.Errorf("JWT_SECRET must contain at least %d bytes", MinimumJWTSecretBytes)
+	}
+	return nil
 }
 
 func getEnv(key, fallback string) string {

@@ -110,12 +110,10 @@ items in version 1 use the same event-level currency.
 ### 3.2 OrderCancelled
 
 The payload contains `order_id` and a stable `reason` code. Services that need
-the paid amount or line items keep an event-fed local projection created from
-`OrderPlaced` and look up the order there. They do not call Order synchronously
-while handling the event.
-
-This is local state materialization, not full event sourcing: the Order database
-remains the operational source of truth.
+the paid amount or line items (such as Fulfillment or Notification) call Order
+Service directly via gRPC using `order_id` to retrieve authoritative order details.
+Services do not maintain replicated tables or duplicate collections of foreign
+orders in their local databases.
 
 ### 3.3 Fulfillment events
 
@@ -174,12 +172,24 @@ example `gross_sales_minor`, `average_order_value_minor`, and
 `cost_lost_minor`. Decimal display values are derived only at the API or UI
 boundary.
 
-The current Analytics prototype still consumes legacy flat `order.success` and
-`inventory.waste` payloads containing floating-point fields. It must add the
-CloudEvents envelope, event-ID deduplication, integer storage, and the
-`order.placed` binding before the canonical contracts are enabled in production.
-That consumer migration is intentionally outside the Contracts and
-Infrastructure pull request.
+Analytics must not build full replicated copies or shadow tables of operational
+orders in its MongoDB database. When Analytics requires order item breakdowns
+(such as calculating item popularity or basket composition), it calls Order
+Service using client-streaming gRPC (`StreamOrderItems`), streaming a sequence of
+`order_id`s and receiving consolidated order item details for analytical batch
+computation.
+
+When processing thin `order.cancelled` events (`com.gelatoflow.order.cancelled.v1`),
+Analytics Service calls Order Service synchronously via unary gRPC (`GetOrderDetails`)
+to obtain the authoritative order snapshot, deducting the cancelled item quantities
+and minor-unit totals from daily analytics metrics without maintaining any local
+replicated order entities.
+
+Analytics Service consumes canonical CloudEvents 1.0 routing keys (`order.placed`,
+`order.cancelled`, and `inventory.waste`) with dual-binding fallback for legacy keys.
+Incoming events are deduplicated idempotently using `event.id` stored in its
+`processed_events` collection, and all persistent aggregates remain in integer
+minor units.
 
 ## 5. Ordering and failure handling
 

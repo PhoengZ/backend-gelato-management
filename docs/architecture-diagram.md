@@ -1,3 +1,10 @@
+# Target architecture and Catalog implementation
+
+This is a system design, not a deployment inventory. Catalog has runnable REST
+and gRPC transports sharing Redis. Inventory validates flavors via Catalog gRPC.
+Dashed Catalog edges below are proposed consumer integrations; other existing design edges do not by themselves prove
+that their services have been implemented or deployed.
+
 ```mermaid
 flowchart LR
     %% Clients
@@ -35,7 +42,7 @@ flowchart LR
 
     %% Gateway to Services
     AG --> AS
-    AG --> CS
+    AG -- REST --> CS
     AG --> OS
     AG --> BIS
     AG --> PS
@@ -51,7 +58,11 @@ flowchart LR
     ANS --> AnaDB
 
     %% Inter-service & External Connections
+    OS -. "Planned gRPC: GetFlavor / BatchGetFlavors" .-> CS
+    BIS -- "gRPC: GetFlavor before creating batch" --> CS
     OS -- gRPC: Check/Reserve/Confirm/Release Portions --> BIS
+    ANS -- "gRPC: GetOrderDetails (Unary) & StreamOrderItems (Streaming)" --> OS
+    FS -- "gRPC: GetOrderDetails" --> OS
     PS -- Update Order Status --> OS 
     PS -- External API --> Stripe
     Stripe -- Webhook --> PS

@@ -6,7 +6,7 @@ This document serves as a reference for AI agents implementing services within t
 GelatoFlow utilizes an **Event-Driven Microservices Architecture**.
 * **Source of Truth:** `Batch Inventory Service` is the strict source of truth for stock/inventory.
 * **Process Controller:** `Order Service` controls the ordering lifecycle.
-* **Data Ownership:** Each service owns its respective database. Direct database access across services is strictly prohibited. Cross-service data access must occur via gRPC or Asynchronous Events.
+* **Data Ownership:** Each service owns its respective database. Direct database access across services and cross-service table replication (shadow tables or duplicate entity storage) are strictly prohibited. Services must not replicate entities owned by other services into local tables. Cross-service data retrieval occurs on demand via synchronous gRPC, while asynchronous events handle decoupled notifications.
 
 ## 2. Microservices Catalog
 
@@ -28,12 +28,23 @@ GelatoFlow utilizes an **Event-Driven Microservices Architecture**.
 Used for communication between the Front-end (Customer Web, Staff/Manager Dashboards) and the backend services via the API Gateway.
 
 ### B. gRPC (Internal Synchronous)
-Used strictly between `Order Service` and `Batch Inventory Service` requiring immediate consistency and fast response times (e.g., checking if a portion can be reserved).
-* **Key Operations:**
-  * `CheckAvailability`
-  * `ReservePortions`
-  * `ReleaseReservation`
-  * `ConfirmReservation`
+* **Catalog gRPC (implemented locally):** Unary CreateFlavor, GetFlavor,
+  ListFlavors, BatchGetFlavors, UpdateFlavor (full replacement), and DeleteFlavor
+  (archive) share the existing REST application logic and Redis data. Writes
+  require Manager JWTs. Proposed Order/Inventory callers are not connected yet;
+  see [ADR-006](architecture/adr-006-catalog-rest-and-grpc.md).
+
+Used for internal synchronous inter-service data requests and atomic operations, establishing a single source of truth without replicating tables:
+* **Order Service <-> Batch Inventory Service (Unary RPC):**
+  * `CheckAvailability`: Verify sellable portions.
+  * `ReservePortions`: Atomically reserve portions using FEFO.
+  * `ReleaseReservation`: Free reserved portions on timeout or cancellation.
+  * `ConfirmReservation`: Transition reserved portions to sold upon verified payment.
+* **Analytics Service -> Order Service:**
+  * `GetOrderDetails` (Unary RPC): Analytics Service queries this RPC synchronously upon receiving an `order.cancelled` thin event to retrieve the cancelled order line items and pricing breakdown, offsetting daily revenue and flavor sales without maintaining local shadow order tables.
+  * `StreamOrderItems` (Client-Streaming RPC): Analytics Service streams a sequence of `order_id`s over a single gRPC stream to Order Service, which returns consolidated order line items and pricing breakdowns for batch calculations and flavor popularity analysis.
+* **Cross-Service Entity Queries (Unary RPC):**
+  * When a downstream service (e.g., Fulfillment Service, Notification Service, or Analytics Service) receives a thin event containing an `order_id`, it calls Order Service via `GetOrderDetails(GetOrderDetailsRequest)` to retrieve authoritative order details (`status`, `items`, `total_amount_minor`, `pickup_at`) on demand.
 
 ### C. Message Broker - RabbitMQ (Internal Asynchronous)
 Used for decoupling services and handling asynchronous workflows. (RabbitMQ preferred over Kafka for this scope).

@@ -20,6 +20,8 @@ paths:
             type: string
             format: uuid
       responses:
+        default:
+          $ref: '#/components/responses/ServiceError'
         '200':
           description: Current sellable availability, excluding expired batches
           content:
@@ -38,6 +40,8 @@ paths:
                     format: date-time
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
   /api/v1/inventory/batches:
     get:
       operationId: listBatches
@@ -59,6 +63,8 @@ paths:
           schema:
             $ref: '#/components/schemas/BatchStatus'
       responses:
+        default:
+          $ref: '#/components/responses/ServiceError'
         '200':
           description: Batch list
           content:
@@ -72,6 +78,8 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/Batch'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -90,6 +98,8 @@ paths:
             schema:
               $ref: '#/components/schemas/CreateBatchRequest'
       responses:
+        default:
+          $ref: '#/components/responses/ServiceError'
         '201':
           description: Batch created
           content:
@@ -115,6 +125,8 @@ paths:
         - bearerAuth: []
       x-required-roles: [STAFF, MANAGER]
       responses:
+        default:
+          $ref: '#/components/responses/ServiceError'
         '200':
           description: Batch found
           content:
@@ -125,6 +137,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
   /api/v1/inventory/batches/{batch_id}/waste:
@@ -144,6 +158,8 @@ paths:
             schema:
               $ref: '#/components/schemas/RecordWasteRequest'
       responses:
+        default:
+          $ref: '#/components/responses/ServiceError'
         '201':
           description: Waste recorded
           content:
@@ -175,6 +191,12 @@ components:
         type: string
         format: uuid
   responses:
+    ServiceError:
+      description: Storage or Catalog unavailable (503), request timeout (504), cancellation (408), or unexpected server error (500)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
     BadRequest:
       description: Invalid request
       content:

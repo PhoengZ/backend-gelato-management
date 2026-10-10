@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"analytics-service/config"
+	"analytics-service/internal/client"
+	"analytics-service/internal/handler"
 	"analytics-service/internal/messaging"
 	"analytics-service/internal/repository"
 	"analytics-service/internal/router"
@@ -25,18 +27,27 @@ func main() {
 	// Connect to MongoDB
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	client, err := mongo.Connect(ctx, options.Client().ApplyURI(cfg.MongoURI))
+	mongoClient, err := mongo.Connect(ctx, options.Client().ApplyURI(cfg.MongoURI))
 	if err != nil {
 		log.Fatal("Failed to connect to MongoDB:", err)
 	}
-	defer client.Disconnect(context.Background())
+	defer mongoClient.Disconnect(context.Background())
 
-	db := client.Database("gelato_analytics")
+	db := mongoClient.Database("gelato_analytics")
 
 	// Init layers
 	repo := repository.NewAnalyticsRepository(db)
-	orderRepo := repository.NewOrderRepository(db)
-	svc := service.NewAnalyticsService(repo, orderRepo)
+	eventRepo := repository.NewEventRepository(db)
+
+	// Init Order Service gRPC client
+	orderClient, err := client.NewOrderClient(cfg.OrderServiceGRPCAddr)
+	if err != nil {
+		log.Printf("Warning: failed to initialize order gRPC client: %v", err)
+	} else {
+		defer orderClient.Close()
+	}
+
+	svc := service.NewAnalyticsService(repo, eventRepo, orderClient)
 
 	// Init RabbitMQ Consumer
 	consumer, err := messaging.NewConsumer(cfg.RabbitMQURL, svc)
@@ -50,7 +61,9 @@ func main() {
 	}
 
 	// Setup Fiber App
-	app := fiber.New()
+	app := fiber.New(fiber.Config{
+		ErrorHandler: handler.CustomErrorHandler,
+	})
 	router.SetupRoutes(app, svc)
 
 	// Start server gracefully

@@ -8,9 +8,10 @@ import (
 )
 
 type Config struct {
-	MongoURI    string
-	RabbitMQURL string
-	Port        string
+	MongoURI             string
+	RabbitMQURL          string
+	Port                 string
+	OrderServiceGRPCAddr string
 }
 
 func LoadConfig() Config {
@@ -43,9 +44,15 @@ func LoadConfig() Config {
 		port = "3000"
 	}
 
+	orderServiceGRPCAddr := os.Getenv("ORDER_SERVICE_GRPC_ADDR")
+	if orderServiceGRPCAddr == "" {
+		orderServiceGRPCAddr = "localhost:50051"
+	}
+
 	return Config{
-		MongoURI:    mongoURI,
-		RabbitMQURL: rabbitMQURL,
-		Port:        port,
+		MongoURI:             mongoURI,
+		RabbitMQURL:          rabbitMQURL,
+		Port:                 port,
+		OrderServiceGRPCAddr: orderServiceGRPCAddr,
 	}
 }

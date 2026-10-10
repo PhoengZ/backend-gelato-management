@@ -10,6 +10,7 @@ sequenceDiagram
     participant RMQ as RabbitMQ
     participant FS as Fulfillment Service
     participant NS as Notification Service
+    participant ANS as Analytics Service
 
     rect rgb(30, 30, 30)
     note right of C: 1. Check Real-time Availability
@@ -25,8 +26,9 @@ sequenceDiagram
     rect rgb(30, 30, 30)
     note right of C: 2. Order Creation & Stock Reservation (Synchronous)
     end
-    C->>AG: POST /api/v1/orders (items, timeslot)
-    AG->>OS: POST /orders
+    C->>AG: POST /api/v1/orders (Bearer JWT, Idempotency-Key)
+    AG->>AG: Verify JWT & Strip client identity headers
+    AG->>OS: POST /orders (Forward Bearer JWT)
     activate OS
     OS->>BIS: gRPC: ReservePortions(flavor_id, portions, idempotency_key)
     activate BIS
@@ -70,9 +72,45 @@ sequenceDiagram
         activate NS
         NS->>C: Send Order Confirmation with Queue Number
         deactivate NS
+    and Analytics
+        RMQ->>ANS: Consume OrderPlaced event
+        activate ANS
+        ANS->>ANS: Update sales metrics (minor units)
+        opt Detailed Breakdown Query (Batch / Popularity)
+            ANS->>OS: gRPC (Client-Streaming): StreamOrderItems(order_id stream)
+            activate OS
+            OS-->>ANS: Consolidated order line items & flavors
+            deactivate OS
+        end
+        deactivate ANS
     end
 
     C->>AG: Poll GET /api/v1/orders/{id}/status
     AG->>OS: GET order status
     OS-->>AG: Return status (e.g., PREPARING)
     AG-->>C: Return Queue Status
+
+    rect rgb(30, 30, 30)
+    note right of C: 5. Order Cancellation & Analytics Rollback
+    end
+    OS->>RMQ: Publish OrderCancelled v1 (order_id, reason)
+    par Fulfillment
+        RMQ->>FS: Consume OrderCancelled event
+        activate FS
+        FS->>FS: Cancel preparation ticket
+        deactivate FS
+    and Notification
+        RMQ->>NS: Consume OrderCancelled event
+        activate NS
+        NS->>C: Send Cancellation Notification
+        deactivate NS
+    and Analytics
+        RMQ->>ANS: Consume OrderCancelled event
+        activate ANS
+        ANS->>OS: gRPC (Unary): GetOrderDetails(order_id)
+        activate OS
+        OS-->>ANS: Authoritative order items & minor totals
+        deactivate OS
+        ANS->>ANS: Deduct revenue & sold portions (minor units)
+        deactivate ANS
+    end

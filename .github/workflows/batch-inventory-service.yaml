@@ -1,0 +1,66 @@
+name: Batch Inventory Service CI
+on:
+  push:
+    branches: [main]
+    paths: ['batch-inventory-service/**', 'catalog-service/**', 'contracts/proto/inventory/**', 'contracts/proto/catalog/**', 'contracts/openapi/batch-inventory-service.v1.yaml', 'contracts/events/inventory-waste.v1.schema.json', 'contracts/buf.yaml', '.github/workflows/batch-inventory-service.yaml']
+  pull_request:
+    branches: [main]
+    paths: ['batch-inventory-service/**', 'catalog-service/**', 'contracts/proto/inventory/**', 'contracts/proto/catalog/**', 'contracts/openapi/batch-inventory-service.v1.yaml', 'contracts/events/inventory-waste.v1.schema.json', 'contracts/buf.yaml', '.github/workflows/batch-inventory-service.yaml']
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: inventory_test
+          POSTGRES_PASSWORD: inventory_test_only
+          POSTGRES_DB: inventory_test
+        ports: ['5432:5432']
+        options: --health-cmd "pg_isready -U inventory_test -d inventory_test" --health-interval 5s --health-timeout 5s --health-retries 10
+      rabbitmq:
+        image: rabbitmq:4-alpine
+        env:
+          RABBITMQ_DEFAULT_USER: inventory_test
+          RABBITMQ_DEFAULT_PASS: inventory_test_only
+        ports: ['5672:5672']
+        options: --health-cmd "rabbitmq-diagnostics -q ping" --health-interval 5s --health-timeout 5s --health-retries 15
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://inventory_test:inventory_test_only@localhost:5432/inventory_test?sslmode=disable
+      TEST_RABBITMQ_URL: amqp://inventory_test:inventory_test_only@localhost:5672/
+      TEST_REDIS_URL: redis://localhost:6379/15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: batch-inventory-service/go.mod
+          cache-dependency-path: |
+            batch-inventory-service/go.sum
+            catalog-service/go.sum
+      - uses: bufbuild/buf-action@v1
+        with:
+          version: '1.73.0'
+          setup_only: true
+      - name: Verify contracts and generation
+        run: |
+          buf lint contracts
+          buf build contracts
+          sh batch-inventory-service/scripts/generate-proto.sh
+          git diff --exit-code -- batch-inventory-service/gen
+          test -z "$(git ls-files --others --exclude-standard -- batch-inventory-service/gen)"
+      - name: Format, dependencies and vet
+        working-directory: batch-inventory-service
+        run: |
+          test -z "$(gofmt -s -l .)"
+          go mod verify
+          go vet ./...
+      - name: Real PostgreSQL, RabbitMQ, Catalog and process tests
+        run: sh batch-inventory-service/scripts/test-integration.sh
+      - name: Build image
+        run: docker build -t gelatoflow/batch-inventory-service:${{ github.sha }} ./batch-inventory-service

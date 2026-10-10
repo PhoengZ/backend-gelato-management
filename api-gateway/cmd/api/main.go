@@ -13,6 +13,9 @@ import (
 func main() {
 	// Load configuration
 	cfg := config.LoadConfig()
+	if err := cfg.Validate(); err != nil {
+		log.Fatalf("Invalid configuration: %v", err)
+	}
 
 	// Initialize Fiber app
 	app := fiber.New(fiber.Config{
@@ -23,7 +26,7 @@ func main() {
 	app.Use(logger.New())
 	app.Use(cors.New(cors.Config{
 		AllowOrigins: "*", // In production, restrict to frontend URL
-		AllowHeaders: "Origin, Content-Type, Accept, Authorization",
+		AllowHeaders: "Origin, Content-Type, Accept, Authorization, Idempotency-Key, X-Idempotency-Key",
 		AllowMethods: "GET, POST, PUT, DELETE, PATCH, OPTIONS",
 	}))
 

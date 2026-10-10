@@ -15,23 +15,54 @@ ownership of the underlying data.
 | Auth Service | Users, password hashes, roles, account status | PostgreSQL | Orders, flavor metadata, stock |
 | Catalog Service | Flavor names, descriptions, prices, images, recipes, allergens, active status | Redis | Available portions, batches, reservations |
 | Batch Inventory Service | Batches, portion balances, reservations, waste, inventory movements | PostgreSQL | Flavor descriptions and prices, orders, payments |
+| Order Service | Orders, line items, pricing snapshots, payment status, customer references | PostgreSQL | Available portion balances, inventory batches, flavor metadata, payments |
+| Fulfillment Service | Kitchen tickets, pickup time-slots, slot queue numbers, fulfillment status | PostgreSQL | Orders, inventory batches, payment processing |
 | Analytics Service | Derived daily sales and waste aggregates in integer minor units | MongoDB | Operational source records |
 
 ## Boundary rules
 
-1. Catalog responses never contain an authoritative `available_portions` value.
-2. Batch Inventory references a flavor by `flavor_id`; it does not duplicate the
+1. Direct database access and cross-service table replication are strictly prohibited.
+   Services must not create shadow tables or duplicate collections in their own
+   database to store copies of data owned by another service. Only foreign
+   identifiers (such as `flavor_id`, `order_id`, `user_id`) may be persisted.
+2. When a service requires data owned by another service to fulfill a workflow or
+   handle an event, it must query the authoritative service synchronously via gRPC
+   instead of replicating data locally.
+3. Catalog responses never contain an authoritative `available_portions` value.
+4. Batch Inventory references a flavor by `flavor_id`; it does not duplicate the
    flavor name, price, recipe, or allergen list.
-3. Order Service uses Batch Inventory gRPC methods to check and reserve portions.
+5. Order Service uses Batch Inventory gRPC methods to check and reserve portions.
    It must not query inventory tables.
-4. Batch Inventory is the only service allowed to change available, reserved,
+6. Batch Inventory is the only service allowed to change available, reserved,
    sold, or wasted portion balances.
-5. Analytics consumes versioned events and never participates in a synchronous
-   order or inventory transaction.
-6. API Gateway may return a composed flavor view containing Catalog metadata and
+7. Analytics consumes versioned events and never participates in or blocks an
+   operational checkout or inventory transaction. When Analytics requires order
+   details to handle an `order.cancelled` thin event, it queries Order Service via
+   unary gRPC `GetOrderDetails`. When Analytics requires line items for analytical
+   reporting and aggregation, it queries Order Service via client-streaming gRPC
+   `StreamOrderItems` (streaming order IDs to retrieve item breakdowns) rather than
+   creating replicated order tables in its MongoDB database.
+8. API Gateway may return a composed flavor view containing Catalog metadata and
    Inventory availability, but that view is not a new data owner.
 
 ## Shared conventions
+
+### Catalog transport status
+
+Catalog exposes REST and `catalog.v1.CatalogService` gRPC through the same
+application service and Redis repository. Neither transport exposes authoritative
+stock. Read projections omit recipe; privileged writes and archive visibility
+follow the Catalog JWT policy in both transports.
+
+Inventory uses GetFlavor before creating a batch, without persisting Catalog
+metadata. Order using GetFlavor/BatchGetFlavors for active status and pricing is
+a planned consumer integration. Before checkout integration, the team must resolve the distinction between immutable order
+transaction facts (price at purchase) and prohibited Catalog entity replication;
+the existing blanket identifier-only rule above is not silently changed here.
+
+See [ADR-006](adr-006-catalog-rest-and-grpc.md), proposed for team review.
+
+### Interface conventions
 
 - Public REST APIs use `/api/v1`.
 - Internal protobuf packages use a versioned namespace such as `inventory.v1`.
