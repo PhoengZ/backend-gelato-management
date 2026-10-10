@@ -1,0 +1,13 @@
+{
+  "specversion": "1.0",
+  "id": "5b0c1f1e-3a52-4d8c-9a41-0d6f4f0f7a10",
+  "source": "/gelatoflow/fulfillment-service",
+  "type": "com.gelatoflow.fulfillment.order-ready.v1",
+  "time": "2026-09-02T14:55:00Z",
+  "datacontenttype": "application/json",
+  "data": {
+    "order_id": "8d29d6cf-bd4d-48ca-9e4f-dcd8ec54e594",
+    "queue_number": "01",
+    "pickup_slot_id": "b4a2f6c8-2f0e-4c3a-8a57-6f0f6f3a9d21"
+  }
+}

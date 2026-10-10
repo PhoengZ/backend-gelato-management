@@ -123,6 +123,13 @@ remains the operational source of truth.
 - `OrderPickedUp` contains `order_id` and `picked_up_at`.
 
 Both use UUIDs for resource references. Queue numbers remain display strings.
+Schemas: `contracts/events/fulfillment-order-ready.v1.schema.json` and
+`contracts/events/fulfillment-order-picked-up.v1.schema.json`. They are
+published to the `fulfillment` topic exchange.
+
+`OrderPlaced` carries `pickup_at` but no `pickup_slot_id`, so Fulfillment maps
+`pickup_at` to a pickup slot when it creates the ticket. Adding the slot ID to
+`OrderPlaced` would be a compatible change but needs Order Service review.
 
 ### 3.4 Inventory notification events
 

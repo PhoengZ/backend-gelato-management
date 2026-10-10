@@ -3,6 +3,8 @@ apis:
     root: contracts/openapi/auth-service.v1.yaml
   catalog@v1:
     root: contracts/openapi/catalog-service.v1.yaml
+  fulfillment@v1:
+    root: contracts/openapi/fulfillment-service.v1.yaml
   batch-inventory@v1:
     root: contracts/openapi/batch-inventory-service.v1.yaml
 

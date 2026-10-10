@@ -11,6 +11,16 @@ CONTRACTS_DIR = Path(__file__).resolve().parents[1]
 
 EVENT_CONTRACTS = (
     (
+        "events/fulfillment-order-picked-up.v1.schema.json",
+        "examples/fulfillment-order-picked-up.v1.json",
+        (),
+    ),
+    (
+        "events/fulfillment-order-ready.v1.schema.json",
+        "examples/fulfillment-order-ready.v1.json",
+        (),
+    ),
+    (
         "events/inventory-waste.v1.schema.json",
         "examples/inventory-waste.v1.json",
         ("cost_lost_minor",),
