@@ -15,6 +15,8 @@ ownership of the underlying data.
 | Auth Service | Users, password hashes, roles, account status | PostgreSQL | Orders, flavor metadata, stock |
 | Catalog Service | Flavor names, descriptions, prices, images, recipes, allergens, active status | Redis | Available portions, batches, reservations |
 | Batch Inventory Service | Batches, portion balances, reservations, waste, inventory movements | PostgreSQL | Flavor descriptions and prices, orders, payments |
+| Order Service | Orders, line items, pricing snapshots, payment status, customer references | PostgreSQL | Available portion balances, inventory batches, flavor metadata, payments |
+| Fulfillment Service | Kitchen tickets, pickup time-slots, slot queue numbers, fulfillment status | PostgreSQL | Orders, inventory batches, payment processing |
 | Analytics Service | Derived daily sales and waste aggregates in integer minor units | MongoDB | Operational source records |
 
 ## Boundary rules
@@ -34,10 +36,12 @@ ownership of the underlying data.
 6. Batch Inventory is the only service allowed to change available, reserved,
    sold, or wasted portion balances.
 7. Analytics consumes versioned events and never participates in or blocks an
-   operational checkout or inventory transaction. When Analytics requires line
-   items or order details for analytics reporting and aggregation, it queries
-   Order Service via client-streaming gRPC (streaming order IDs to retrieve item
-   breakdowns) rather than creating replicated order tables in its MongoDB database.
+   operational checkout or inventory transaction. When Analytics requires order
+   details to handle an `order.cancelled` thin event, it queries Order Service via
+   unary gRPC `GetOrderDetails`. When Analytics requires line items for analytical
+   reporting and aggregation, it queries Order Service via client-streaming gRPC
+   `StreamOrderItems` (streaming order IDs to retrieve item breakdowns) rather than
+   creating replicated order tables in its MongoDB database.
 8. API Gateway may return a composed flavor view containing Catalog metadata and
    Inventory availability, but that view is not a new data owner.
 
