@@ -114,6 +114,9 @@ confirms. Outbox delivery is at-least-once; consumers deduplicate CloudEvents by
 
 ## Tests
 
+For a PowerShell walkthrough and smoke test against running Order, Catalog and
+Inventory services, see [local integration testing](LOCAL_TEST.md).
+
 Run `go test ./...` and `go vet ./...` in this directory. Repository integration
 tests require `ORDER_TEST_DATABASE_URL`, a PostgreSQL URL pointing to a disposable
 test database, then `go test -race ./...`. Each repository test creates and drops
