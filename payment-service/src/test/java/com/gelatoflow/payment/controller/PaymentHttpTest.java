@@ -23,9 +23,11 @@ import org.springframework.test.web.servlet.MockMvc;
 
 @SpringBootTest(
     properties = {
+      "payment.checkout.enabled=false",
       "payment.stripe.secret-key=sk_test_fixture",
-          "payment.stripe.webhook-secret=whsec_test_fixture",
-      "payment.order.service-token=fixture", "payment.order.tls=false",
+      "payment.stripe.webhook-secret=whsec_test_fixture",
+      "payment.order.service-token=fixture",
+      "payment.order.tls=false",
       "payment.jwt.secret=test-signing-secret-at-least-32-bytes"
     })
 @AutoConfigureMockMvc

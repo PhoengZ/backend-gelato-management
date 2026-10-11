@@ -1,6 +1,5 @@
 package com.gelatoflow.payment.client.stripe;
 
-import com.gelatoflow.payment.config.PaymentProperties;
 import com.gelatoflow.payment.exception.ApiException;
 import com.stripe.StripeClient;
 import com.stripe.exception.StripeException;
@@ -14,18 +13,7 @@ import org.springframework.stereotype.Component;
 public class StripeGateway implements StripePort {
   private final StripeClient client;
 
-  @org.springframework.beans.factory.annotation.Autowired
-  public StripeGateway(PaymentProperties properties) {
-    this(
-        StripeClient.builder()
-            .setApiKey(properties.stripe().secretKey())
-            .setConnectTimeout(5000)
-            .setReadTimeout(15000)
-            .setMaxNetworkRetries(1)
-            .build());
-  }
-
-  StripeGateway(StripeClient client) {
+  public StripeGateway(StripeClient client) {
     this.client = client;
   }
 

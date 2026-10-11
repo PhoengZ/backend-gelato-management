@@ -18,6 +18,15 @@ management:
       probes:
         enabled: true
 payment:
+  checkout:
+    enabled: ${PAYMENT_CHECKOUT_ENABLED:true}
+    port: ${PAYMENT_GRPC_PORT:50057}
+    request-token: ${PAYMENT_REQUEST_TOKEN:}
+    tls: ${PAYMENT_GRPC_TLS:true}
+    certificate: ${PAYMENT_GRPC_CERTIFICATE:}
+    private-key: ${PAYMENT_GRPC_PRIVATE_KEY:}
+    success-url: ${STRIPE_CHECKOUT_SUCCESS_URL:}
+    cancel-url: ${STRIPE_CHECKOUT_CANCEL_URL:}
   stripe:
     secret-key: ${STRIPE_SECRET_KEY}
     webhook-secret: ${STRIPE_WEBHOOK_SECRET}

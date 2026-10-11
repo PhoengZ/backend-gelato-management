@@ -44,7 +44,7 @@
         <groupId>org.xolstice.maven.plugins</groupId><artifactId>protobuf-maven-plugin</artifactId><version>0.6.1</version>
         <configuration>
           <protoSourceRoot>${project.basedir}/../contracts/proto</protoSourceRoot>
-          <includes><include>order/v1/order.proto</include></includes>
+          <includes><include>order/v1/order.proto</include><include>payment/v1/payment.proto</include></includes>
           <protocArtifact>com.google.protobuf:protoc:${protobuf.version}:exe:${os.detected.classifier}</protocArtifact>
           <pluginId>grpc-java</pluginId>
           <pluginArtifact>io.grpc:protoc-gen-grpc-java:${grpc.version}:exe:${os.detected.classifier}</pluginArtifact>
@@ -53,7 +53,7 @@
       </plugin>
       <plugin>
         <groupId>com.diffplug.spotless</groupId><artifactId>spotless-maven-plugin</artifactId><version>2.44.3</version>
-        <configuration><java><googleJavaFormat><version>1.28.0</version></googleJavaFormat></java></configuration>
+        <configuration><lineEndings>UNIX</lineEndings><java><googleJavaFormat><version>1.28.0</version></googleJavaFormat></java></configuration>
       </plugin>
     </plugins>
   </build>
