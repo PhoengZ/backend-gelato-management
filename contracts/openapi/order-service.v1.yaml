@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: GelatoFlow Order Service API
-  version: 1.0.0
+  version: 1.1.0
   description: Customer order creation and lifecycle API. Requests pass through the authenticated API Gateway.
 servers:
   - url: /
@@ -9,7 +9,14 @@ paths:
   /api/v1/orders:
     post:
       operationId: createOrder
-      summary: Create an order and reserve its portions
+      summary: Create an order, reserve portions and start Stripe checkout
+      description: >-
+        Order persists the pending order before asking Payment for an idempotent
+        Checkout Session. Retry the same body and Idempotency-Key after an
+        unavailable/timeout response; no additional order or stock hold is created.
+        A pending, unexpired order returns checkout_url. Replays of terminal orders
+        return their current state without a payment URL. Payment owns Stripe and
+        verified callbacks; this response never proves that payment succeeded.
       security:
         - bearerAuth: []
       parameters:
@@ -27,17 +34,24 @@ paths:
               $ref: '#/components/schemas/CreateOrderRequest'
       responses:
         '201':
-          description: Order created with an active Inventory reservation
+          description: Checkout ready, or current order state on an idempotent replay
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Order'
+                $ref: '#/components/schemas/CheckoutResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '409':
           $ref: '#/components/responses/Conflict'
+        '502':
+          $ref: '#/components/responses/DependencyAuthenticationFailed'
         '503':
           $ref: '#/components/responses/DependencyUnavailable'
         '504':
@@ -169,6 +183,12 @@ components:
       in: header
       name: X-Payment-Service-Token
   responses:
+    DependencyAuthenticationFailed:
+      description: Upstream service rejected the configured machine identity
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
     BadRequest:
       description: Invalid request
       content:
@@ -235,9 +255,39 @@ components:
               portions:
                 type: integer
                 minimum: 1
-    Order:
+    CheckoutResponse:
       type: object
-      additionalProperties: false
+      description: >-
+        Order fields plus checkout_url for pending, unexpired checkouts only.
+        Frontend redirects to checkout_url, then reads Order status after return.
+        Success redirects are not proof of payment. GET Order omits this URL.
+      allOf:
+        - $ref: '#/components/schemas/OrderFields'
+        - type: object
+          properties:
+            checkout_url:
+              $ref: '#/components/schemas/CheckoutURL'
+      unevaluatedProperties: false
+      if:
+        required: [status]
+        properties:
+          status:
+            const: PENDING_PAYMENT
+      then:
+        required: [checkout_url]
+        properties:
+          checkout_url:
+            $ref: '#/components/schemas/CheckoutURL'
+    CheckoutURL:
+      type: string
+      format: uri
+      pattern: '^https://'
+    Order:
+      allOf:
+        - $ref: '#/components/schemas/OrderFields'
+      unevaluatedProperties: false
+    OrderFields:
+      type: object
       required: [order_id, customer_id, pickup_at, status, reservation_expires_at, total_amount_minor, currency, items, created_at, updated_at]
       properties:
         order_id:

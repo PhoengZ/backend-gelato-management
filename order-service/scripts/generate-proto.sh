@@ -7,4 +7,5 @@ test "$(buf --version)" = "1.73.0" || { echo 'Order generation requires Buf 1.73
 buf generate contracts \
   --path contracts/proto/inventory/v1/inventory.proto \
   --path contracts/proto/catalog/v1/catalog.proto \
+  --path contracts/proto/payment/v1/payment.proto \
   --template order-service/buf.gen.yaml

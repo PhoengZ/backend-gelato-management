@@ -65,13 +65,18 @@ func run() error {
 		return errors.New("connect Catalog gRPC: " + err.Error())
 	}
 	defer cat.Close()
+	pay, err := client.NewPaymentClient(cfg.PaymentGRPCURL, cfg.PaymentRequestToken, cfg.PaymentRequestTimeout)
+	if err != nil {
+		return errors.New("connect Payment gRPC: " + err.Error())
+	}
+	defer pay.Close()
 	pub, err := publisher.NewRabbitMQPublisher(cfg.RabbitMQURL)
 	if err != nil {
 		return errors.New("connect RabbitMQ: " + err.Error())
 	}
 	defer pub.Close()
 
-	svc, err := service.NewOrderService(repo, inv, cat)
+	svc, err := service.NewOrderService(repo, inv, cat, pay)
 	if err != nil {
 		return err
 	}

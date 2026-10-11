@@ -3,6 +3,9 @@ managed:
   enabled: true
   override:
     - file_option: go_package
+      path: payment/v1/payment.proto
+      value: order-service/gen/payment/v1;paymentv1
+    - file_option: go_package
       path: inventory/v1/inventory.proto
       value: order-service/gen/inventory/v1;inventoryv1
     - file_option: go_package

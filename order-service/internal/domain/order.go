@@ -29,9 +29,17 @@ type Order struct {
 	ReleaseIdempotencyKey string      `gorm:"not null;size:36" json:"-"`
 	TotalAmountMinor      int64       `gorm:"not null" json:"total_amount_minor"`
 	Currency              string      `gorm:"not null;size:3" json:"currency"`
+	CheckoutSessionID     string      `gorm:"size:255" json:"-"`
+	CheckoutURL           string      `gorm:"type:text" json:"-"`
 	Items                 []OrderItem `gorm:"foreignKey:OrderID;constraint:OnDelete:CASCADE" json:"items"`
 	CreatedAt             time.Time   `json:"created_at"`
 	UpdatedAt             time.Time   `json:"updated_at"`
+}
+
+// CheckoutResponse exposes payment navigation only on the checkout endpoint.
+type CheckoutResponse struct {
+	*Order
+	CheckoutURL string `json:"checkout_url,omitempty"`
 }
 
 type OrderItem struct {

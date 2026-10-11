@@ -23,6 +23,7 @@ changes.
 | Inventory gRPC API | Batch Inventory Service | Order Service |
 | Notification SSE API | Notification Service | Frontend (Gateway route pending) |
 | Order REST API | Order Service | API Gateway, frontend, Payment Service |
+| Payment checkout gRPC API | Payment Service (implementation pending) | Order Service |
 | `order.placed` event | Order Service | Fulfillment, Notification, Analytics |
 | `order.cancelled` event | Order Service | Fulfillment, Notification, Analytics |
 | `fulfillment.order_ready` event | Fulfillment Service | Notification Service |
@@ -91,6 +92,18 @@ for that order is ALREADY_EXISTS. Confirm/Release require a matching order ID.
 TTL defaults to 10 minutes, capped by the earliest allocated batch expiry.
 Late confirmation is FAILED_PRECONDITION; release after expiry returns EXPIRED.
 Availability exceeding the proto int32 capacity is OUT_OF_RANGE.
+
+## Order-orchestrated checkout
+
+`proto/payment/v1/payment.proto` defines the new internal Checkout Session API.
+Order calls Payment after persisting the pending order and returns `checkout_url`
+from `openapi/order-service.v1.yaml`. Payment must authenticate the Order machine
+identity and create/retrieve one session per deterministic checkout key. Payment
+owns Stripe/webhooks; Order owns immutable totals and the persisted session binding.
+The existing PaymentIntent branch needs an adapter/server change; this contract
+does not implement Payment. See [checkout architecture](../docs/architecture/order-checkout.md)
+for retry, callback and migration rules. Shared deployment requires review by
+Order, Payment, Gateway and frontend owners.
 
 ## Event compatibility
 

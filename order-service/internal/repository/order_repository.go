@@ -3,10 +3,12 @@ package repository
 import (
 	"context"
 	"errors"
+	"time"
 
 	"order-service/internal/domain"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var (
@@ -18,10 +20,35 @@ type OrderRepository interface {
 	Create(context.Context, *domain.Order) error
 	Get(context.Context, string) (*domain.Order, error)
 	GetByIdempotencyKey(context.Context, string, string) (*domain.Order, error)
+	BindCheckout(context.Context, string, string, string) (*domain.Order, error)
 	MarkPaidWithOutbox(context.Context, string, *domain.OutboxEvent) error
 	MarkCancelled(context.Context, string, *domain.OutboxEvent) error
 	PendingOutbox(context.Context, int) ([]domain.OutboxEvent, error)
 	MarkOutboxPublished(context.Context, string) error
+}
+
+// BindCheckout serializes competing responses and never exposes a payment URL
+// for an order that was cancelled, paid, or whose stock hold has expired.
+func (r *gormOrderRepository) BindCheckout(ctx context.Context, id, sessionID, checkoutURL string) (*domain.Order, error) {
+	var order domain.Order
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&order, "id = ?", id).Error; err != nil {
+			return err
+		}
+		if order.Status != domain.StatusPendingPayment || !order.ReservationExpiresAt.After(time.Now().UTC()) {
+			return ErrInvalidTransition
+		}
+		if order.CheckoutSessionID != "" && (order.CheckoutSessionID != sessionID || order.CheckoutURL != checkoutURL) {
+			return ErrInvalidTransition
+		}
+		if order.CheckoutSessionID == "" {
+			if err := tx.Model(&order).Updates(map[string]any{"checkout_session_id": sessionID, "checkout_url": checkoutURL}).Error; err != nil {
+				return err
+			}
+		}
+		return tx.Preload("Items").First(&order, "id = ?", id).Error
+	})
+	return &order, err
 }
 
 type gormOrderRepository struct{ db *gorm.DB }

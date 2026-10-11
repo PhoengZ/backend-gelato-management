@@ -45,6 +45,7 @@ func (h *OrderHandler) CreateOrder(c *fiber.Ctx) error {
 	if err != nil {
 		return writeError(c, err)
 	}
+	c.Set(fiber.HeaderCacheControl, "no-store")
 	return c.Status(fiber.StatusCreated).JSON(order)
 }
 
@@ -130,5 +131,9 @@ func writeError(c *fiber.Ctx, err error) error {
 	if !ok {
 		appErr = &service.AppError{Code: "INTERNAL_ERROR", Message: "an unexpected error occurred", HTTPStatus: 500}
 	}
-	return c.Status(appErr.HTTPStatus).JSON(fiber.Map{"code": appErr.Code, "message": appErr.Message})
+	body := fiber.Map{"code": appErr.Code, "message": appErr.Message}
+	if appErr.Details != nil {
+		body["details"] = appErr.Details
+	}
+	return c.Status(appErr.HTTPStatus).JSON(body)
 }

@@ -1,4 +1,6 @@
 apis:
+  order@v1:
+    root: contracts/openapi/order-service.v1.yaml
   auth@v1:
     root: contracts/openapi/auth-service.v1.yaml
   catalog@v1:

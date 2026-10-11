@@ -11,7 +11,7 @@ GelatoFlow preorder, queue, and batch inventory system.
 | Auth Service | Contract and PostgreSQL infrastructure defined |
 | Catalog Service | REST and gRPC CRUD with shared Redis; Inventory and Order validate flavors through gRPC |
 | Batch Inventory Service | REST, reservation gRPC, PostgreSQL transactions, expiry and waste outbox implemented; Order reservation client added, end-to-end runtime integration pending |
-| Order Service | Catalog checkout lookup, Inventory reservation lifecycle, payment confirmation, and OrderPlaced/OrderCancelled outbox implemented; Gateway auth and Analytics gRPC read integration pending |
+| Order Service | Catalog pricing, Inventory reservations, outbound Payment Checkout gRPC client, durable session binding, payment callbacks and outbox implemented; Payment Checkout server, Gateway auth and Analytics gRPC reads pending |
 | Notification Service | SSE stream and RabbitMQ consumer implemented (stateless); Gateway route, runtime verification with Order/Inventory publishers pending |
 | Other application services | Added by their owners in later pull requests |
 

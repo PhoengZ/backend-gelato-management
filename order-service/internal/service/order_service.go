@@ -8,11 +8,13 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/url"
 	"sort"
 	"time"
 
 	catalogv1 "order-service/gen/catalog/v1"
 	inventoryv1 "order-service/gen/inventory/v1"
+	paymentv1 "order-service/gen/payment/v1"
 	"order-service/internal/client"
 	"order-service/internal/domain"
 	"order-service/internal/repository"
@@ -20,12 +22,14 @@ import (
 	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 type AppError struct {
 	Code       string
 	Message    string
 	HTTPStatus int
+	Details    map[string]any
 }
 
 func (e *AppError) Error() string { return e.Message }
@@ -41,7 +45,7 @@ type OrderItemInput struct {
 }
 
 type Service interface {
-	PlaceOrder(context.Context, CreateOrderInput, string) (*domain.Order, error)
+	PlaceOrder(context.Context, CreateOrderInput, string) (*domain.CheckoutResponse, error)
 	ConfirmPayment(context.Context, string) error
 	CancelOrder(context.Context, string, string) error
 	GetOrder(context.Context, string) (*domain.Order, error)
@@ -51,16 +55,69 @@ type orderService struct {
 	repo      repository.OrderRepository
 	inventory client.Inventory
 	catalog   client.Catalog
+	payment   client.Payment
 }
 
-func NewOrderService(repo repository.OrderRepository, inv client.Inventory, cat client.Catalog) (Service, error) {
-	if repo == nil || inv == nil || cat == nil {
-		return nil, errors.New("order repository, inventory client and catalog client are required")
+func NewOrderService(repo repository.OrderRepository, inv client.Inventory, cat client.Catalog, pay client.Payment) (Service, error) {
+	if repo == nil || inv == nil || cat == nil || pay == nil {
+		return nil, errors.New("order repository, inventory, catalog and payment clients are required")
 	}
-	return &orderService{repo: repo, inventory: inv, catalog: cat}, nil
+	return &orderService{repo: repo, inventory: inv, catalog: cat, payment: pay}, nil
 }
 
-func (s *orderService) PlaceOrder(ctx context.Context, input CreateOrderInput, idemKey string) (*domain.Order, error) {
+func (s *orderService) PlaceOrder(ctx context.Context, input CreateOrderInput, idemKey string) (*domain.CheckoutResponse, error) {
+	order, err := s.placeOrder(ctx, input, idemKey)
+	if err != nil {
+		return nil, err
+	}
+	return s.startPayment(ctx, order)
+}
+
+func (s *orderService) startPayment(ctx context.Context, order *domain.Order) (*domain.CheckoutResponse, error) {
+	if order.Status != domain.StatusPendingPayment {
+		return &domain.CheckoutResponse{Order: order}, nil
+	}
+	if !order.ReservationExpiresAt.After(time.Now().UTC()) {
+		return nil, conflict("RESERVATION_EXPIRED", "stock hold expired; create a new order with a new Idempotency-Key")
+	}
+	if order.CheckoutSessionID != "" && order.CheckoutURL != "" {
+		bound, err := s.repo.BindCheckout(ctx, order.ID, order.CheckoutSessionID, order.CheckoutURL)
+		if errors.Is(err, repository.ErrInvalidTransition) {
+			return nil, conflict("CHECKOUT_STATE_CONFLICT", "order is no longer payable")
+		}
+		if err != nil {
+			return nil, dependencyError("ORDER_STORAGE_UNAVAILABLE", err)
+		}
+		return &domain.CheckoutResponse{Order: bound, CheckoutURL: bound.CheckoutURL}, nil
+	}
+	// Persist the order BEFORE this call. A failed/ambiguous payment request must
+	// leave the same order/reservation available for an idempotent checkout retry.
+	resp, err := s.payment.CreateCheckoutSession(ctx, &paymentv1.CreateCheckoutSessionRequest{
+		OrderId: order.ID, CustomerId: order.CustomerID,
+		AmountMinor: order.TotalAmountMinor, Currency: order.Currency,
+		IdempotencyKey:       uuid.NewSHA1(uuid.NameSpaceURL, []byte(order.ID+"/checkout")).String(),
+		ReservationExpiresAt: timestamppb.New(order.ReservationExpiresAt),
+	})
+	if err != nil {
+		mapped := mapGRPCError("PAYMENT", err).(*AppError)
+		mapped.Details = map[string]any{"order_id": order.ID}
+		return nil, mapped
+	}
+	checkoutURL, parseErr := url.Parse(resp.GetCheckoutUrl())
+	if resp.GetCheckoutSessionId() == "" || parseErr != nil || checkoutURL.Scheme != "https" || checkoutURL.Hostname() == "" || checkoutURL.User != nil {
+		return nil, dependencyError("PAYMENT_INVALID_RESPONSE", errors.New("payment returned no valid session and HTTPS checkout URL"))
+	}
+	bound, err := s.repo.BindCheckout(ctx, order.ID, resp.GetCheckoutSessionId(), resp.GetCheckoutUrl())
+	if errors.Is(err, repository.ErrInvalidTransition) {
+		return nil, conflict("CHECKOUT_STATE_CONFLICT", "order is no longer payable or has a different payment session")
+	}
+	if err != nil {
+		return nil, dependencyError("ORDER_STORAGE_UNAVAILABLE", err)
+	}
+	return &domain.CheckoutResponse{Order: bound, CheckoutURL: bound.CheckoutURL}, nil
+}
+
+func (s *orderService) placeOrder(ctx context.Context, input CreateOrderInput, idemKey string) (*domain.Order, error) {
 	customerID, err := uuid.Parse(input.CustomerID)
 	if err != nil {
 		return nil, badRequest("customer_id must be a UUID")
@@ -71,7 +128,7 @@ func (s *orderService) PlaceOrder(ctx context.Context, input CreateOrderInput, i
 		return nil, badRequest("Idempotency-Key must be a UUID")
 	}
 	idemKey = parsedKey.String()
-	if input.PickupAt.IsZero() || !input.PickupAt.After(time.Now().UTC()) {
+	if input.PickupAt.IsZero() {
 		return nil, badRequest("pickup_at must be a future RFC 3339 timestamp")
 	}
 	items, err := normalizeItems(input.Items)
@@ -90,6 +147,9 @@ func (s *orderService) PlaceOrder(ctx context.Context, input CreateOrderInput, i
 		return existing, nil
 	} else if !errors.Is(getErr, repository.ErrNotFound) {
 		return nil, dependencyError("ORDER_STORAGE_UNAVAILABLE", getErr)
+	}
+	if !input.PickupAt.After(time.Now().UTC()) {
+		return nil, badRequest("pickup_at must be a future RFC 3339 timestamp")
 	}
 
 	flavorIDs := make([]string, 0, len(items))
@@ -139,6 +199,9 @@ func (s *orderService) PlaceOrder(ctx context.Context, input CreateOrderInput, i
 		order.Items = append(order.Items, domain.OrderItem{FlavorID: id, FlavorName: flavor.GetName(), Portions: portions, UnitPriceMinor: money.GetAmountMinor(), SubtotalMinor: subtotal})
 		reservations = append(reservations, &inventoryv1.PortionRequest{FlavorId: id, Portions: portions})
 	}
+	if order.TotalAmountMinor < 1 || order.TotalAmountMinor > 99999999 {
+		return nil, badRequest("checkout total must be between 1 and 99999999 minor units")
+	}
 
 	reserveResp, err := s.inventory.ReservePortions(ctx, &inventoryv1.ReservePortionsRequest{OrderId: order.ID, IdempotencyKey: idemKey, Items: reservations})
 	if err != nil {
@@ -177,14 +240,9 @@ func (s *orderService) PlaceOrder(ctx context.Context, input CreateOrderInput, i
 		} else if !errors.Is(lookupErr, repository.ErrNotFound) {
 			return nil, dependencyError("ORDER_STORAGE_UNAVAILABLE", fmt.Errorf("save order: %v; reconcile idempotency key: %w", err, lookupErr))
 		}
-		// Inventory is independent of the Order database. Compensate with the same
-		// stable key; its expiry worker remains the final safety net if this fails.
-		_, releaseErr := s.inventory.ReleaseReservation(ctx, &inventoryv1.ReleaseReservationRequest{
-			ReservationId: order.ReservationID, OrderId: order.ID, IdempotencyKey: order.ReleaseIdempotencyKey, Reason: "ORDER_PERSISTENCE_FAILED",
-		})
-		if releaseErr != nil {
-			return nil, dependencyError("ORDER_SAVE_AND_RESERVATION_RELEASE_FAILED", fmt.Errorf("save order: %v; release reservation: %w", err, releaseErr))
-		}
+		// Keep the bounded hold on an ambiguous save failure. Releasing here can
+		// invalidate a concurrent successful retry, or be replayed as ACTIVE by
+		// Inventory on the next reserve call. Inventory expires abandoned holds.
 		return nil, dependencyError("ORDER_STORAGE_UNAVAILABLE", err)
 	}
 	return order, nil

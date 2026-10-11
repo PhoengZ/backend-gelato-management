@@ -15,7 +15,8 @@ ownership of the underlying data.
 | Auth Service | Users, password hashes, roles, account status | PostgreSQL | Orders, flavor metadata, stock |
 | Catalog Service | Flavor names, descriptions, prices, images, recipes, allergens, active status | Redis | Available portions, batches, reservations |
 | Batch Inventory Service | Batches, portion balances, reservations, waste, inventory movements | PostgreSQL | Flavor descriptions and prices, orders, payments |
-| Order Service | Orders, line items, pricing snapshots, payment status, customer references | PostgreSQL | Available portion balances, inventory batches, flavor metadata, payments |
+| Order Service | Orders, immutable checkout prices, reservation references, Checkout Session binding, order outbox | PostgreSQL | Current Catalog metadata, stock balances, Stripe credentials |
+| Payment Service | Stripe integration, verified provider notifications and payment reconciliation | Implementation-specific | Order totals and status, stock balances |
 | Fulfillment Service | Kitchen tickets, pickup time-slots, slot queue numbers, fulfillment status | PostgreSQL | Orders, inventory batches, payment processing |
 | Analytics Service | Derived daily sales and waste aggregates in integer minor units | MongoDB | Operational source records |
 | Notification Service | Nothing durable. Live SSE connections and, in memory only, a TTL-bounded `order_id` to `customer_id` routing map and recent event ids | None (stateless) | Orders, customer profiles, inventory batches |
@@ -59,6 +60,10 @@ once Order Service owner agrees.
    creating replicated order tables in its MongoDB database.
 8. API Gateway may return a composed flavor view containing Catalog metadata and
    Inventory availability, but that view is not a new data owner.
+9. Order orchestrates frontend checkout by calling Payment's versioned gRPC API
+   after persisting the pending order. Payment creates the provider session from
+   Order's immutable total; Order persists its binding before returning the URL.
+   Payment's Checkout implementation is pending. See [checkout architecture](order-checkout.md).
 
 ## Shared conventions
 
