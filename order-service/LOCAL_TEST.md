@@ -163,9 +163,23 @@ Auth login, Gateway header stripping/JWT enforcement, RabbitMQ publisher
 confirmation recovery, and downstream event processing are separate tests.
 
 RabbitMQ management is at http://localhost:15672. The repository provisions
-Analytics bindings, but an outbox row marked published does not prove consumer
+consumer bindings when consumers start, but an outbox row marked published does not prove consumer
 processing. Missing queue bindings can leave outbox events pending; inspect that
-separately from the stock assertions. The RabbitMQ P1 remains open.
+separately from the stock assertions.
+
+The publisher has separate real-broker routing/reconnection tests. Point
+ORDER_TEST_RABBITMQ_URL at an isolated test broker with an account allowed to
+declare and bind queues, then run from order-service:
+
+```powershell
+go test -race ./internal/publisher -run TestRabbitMQRoutingAndReconnect -v
+```
+
+The test uses an exclusive temporary queue, checks unroutable return/ACK pairs
+followed by routed delivery, and breaks only its own publisher connection before
+retrying. Without ORDER_TEST_RABBITMQ_URL it skips; it does not verify downstream
+consumer processing. No queue bindings or service credentials are changed by the
+publisher fix.
 
 ## Troubleshooting
 

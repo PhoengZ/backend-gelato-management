@@ -156,5 +156,12 @@ generic cancellation event reason with affected service and frontend owners.
 Before updating an older deployment, reconcile pending rows whose Inventory
 transition already succeeded; an old release key used with CUSTOMER_REQUEST or
 PAYMENT_FAILED cannot be replayed with ORDER_CANCELLED without conflict.
-Order's pre-existing RabbitMQ confirmation/reconnect review findings remain
-separate work. Review the shared boundary with affected owners before deployment.
+Order's RabbitMQ publisher serializes sends, matches confirmation delivery tags,
+and rejects mandatory returns even when an ACK follows. Every failed publish
+retires its connection and listeners; the next worker attempt reconnects and
+retries the pending outbox row with its original event ID. The worker marks a row
+published only after its own ACK with no return. Its one-second tick bounds retry
+frequency; network connection/setup and writes are deadline-bounded. Ambiguous
+failures can cause duplicate delivery, so consumers must deduplicate event IDs.
+Queue bindings must exist for delivery; a missing binding keeps the row pending.
+Review the shared boundary with affected owners before deployment.
