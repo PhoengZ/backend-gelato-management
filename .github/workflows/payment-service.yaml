@@ -2,10 +2,10 @@ name: Payment Service CI
 on:
   push:
     branches: [main, chelsea/payment-service]
-    paths: ["payment-service/**", "contracts/proto/order/**", ".github/workflows/payment-service.yaml"]
+    paths: ["payment-service/**", "contracts/proto/order/**", "contracts/proto/payment/**", ".github/workflows/payment-service.yaml"]
   pull_request:
     branches: [main]
-    paths: ["payment-service/**", "contracts/proto/order/**", ".github/workflows/payment-service.yaml"]
+    paths: ["payment-service/**", "contracts/proto/order/**", "contracts/proto/payment/**", ".github/workflows/payment-service.yaml"]
 permissions:
   contents: read
 jobs:
