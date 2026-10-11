@@ -173,7 +173,11 @@ stateDiagram-v2
     end note
 ```
 
-Fulfillment queue allocation, notifications and Analytics projections are
-downstream integration work. Analytics' StreamOrderItems contract exists, but
+Fulfillment's queue allocation and Notification's SSE/event consumer are
+implemented; their Gateway and broker runtime integration remains to be verified.
+Notification sends queue numbers on order.ready and keeps only a bounded,
+in-memory order-owner map from order.placed. A never-paid cancellation may have
+no owner in that map and must not be interpreted as reversal of a paid sale.
+Analytics' GetOrderDetails and StreamOrderItems contracts exist, but
 Order does not implement its server. Order accepts pickup_at, not a pickup-slot
 ID, and its response does not allocate a queue number.

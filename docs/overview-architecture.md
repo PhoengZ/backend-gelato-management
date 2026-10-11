@@ -14,8 +14,8 @@ Versioned [contracts](../contracts/README.md) are authoritative.
 | Order | Orders, purchase snapshots, pickup_at, reservation references, session binding and outbox | PostgreSQL |
 | Batch Inventory | Batches, availability, reservations, sold portions, expiry and waste | PostgreSQL |
 | Payment | Stripe APIs, verified webhooks and provider reconciliation | No database in existing PaymentIntent adapter; Checkout pending |
-| Fulfillment | Target preparation queues, pickup slots and collection | Owned PostgreSQL |
-| Notification | Target customer and operational notifications | Service-owned design |
+| Fulfillment | Implemented kitchen tickets, per-slot queue numbers and fulfillment status; Gateway/runtime integration pending | Owned PostgreSQL |
+| Notification | Implemented SSE and event consumer; Gateway/runtime integration pending | None (stateless; bounded in-memory routing and deduplication) |
 | Analytics | Derived sales and waste projections | MongoDB |
 
 Services never read another service's storage. Order line items are immutable
@@ -100,7 +100,8 @@ that perform those transitions.
 order.placed represents a paid sale after stock confirmation. Current
 order.cancelled represents cancellation of a never-paid pending order and must
 not automatically subtract a paid sale. Its schema and consumer semantics still
-need owner review. Inventory implements inventory.waste; low-stock and expiring
+need owner review. Its canonical schema and fixture are in contracts/. Inventory
+implements inventory.waste; low-stock and expiring
 notifications remain design targets. Analytics' Order gRPC dependency and consumer
 compatibility/deduplication must be verified separately.
 

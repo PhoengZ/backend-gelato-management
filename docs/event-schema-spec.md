@@ -144,8 +144,9 @@ any provider refund. A repeated cancellation does not create another domain even
 }
 ```
 
-This example reflects the current producer; it is not yet backed by a canonical
-cancellation JSON Schema. It describes an order never recorded as PAID, so consumers must not
+Canonical schema: `contracts/events/order-cancelled.v1.schema.json`; fixture:
+`contracts/examples/order-cancelled.v1.json`. This example reflects the current
+producer and describes an order never recorded as PAID, so consumers must not
 subtract sales or assume a prior order.placed exists for that order. In particular,
 the Analytics cancellation projection must be aligned with this meaning before
 shared delivery is enabled.
