@@ -121,10 +121,13 @@ See [checkout flow](architecture/order-checkout.md).
 
 ### 3.2 OrderCancelled
 
-The current producer payload contains order_id and reason, where reason is
-CUSTOMER_REQUEST or PAYMENT_FAILED. Order only cancels PENDING_PAYMENT orders,
-after Inventory release succeeds. It commits CANCELLED and the outbox record
-atomically. A repeated cancellation does not create another domain event.
+The current producer payload contains order_id and the generic reason
+ORDER_CANCELLED. Order first durably claims CANCEL_PENDING, then releases
+Inventory before committing CANCELLED and the outbox atomically. The claim
+blocks checkout and survives restart; retries use identical release facts.
+The original customer/payment-failure cause is not persisted. A definitive stock
+confirmation rejection also enters this cancellation workflow; Payment handles
+any provider refund. A repeated cancellation does not create another domain event.
 
 ```json
 {
@@ -136,16 +139,18 @@ atomically. A repeated cancellation does not create another domain event.
   "datacontenttype": "application/json",
   "data": {
     "order_id": "8d29d6cf-bd4d-48ca-9e4f-dcd8ec54e594",
-    "reason": "CUSTOMER_REQUEST"
+    "reason": "ORDER_CANCELLED"
   }
 }
 ```
 
 This example reflects the current producer; it is not yet backed by a canonical
-cancellation JSON Schema. It describes a never-paid order, so consumers must not
+cancellation JSON Schema. It describes an order never recorded as PAID, so consumers must not
 subtract sales or assume a prior order.placed exists for that order. In particular,
 the Analytics cancellation projection must be aligned with this meaning before
 shared delivery is enabled.
+The generic reason replaces CUSTOMER_REQUEST/PAYMENT_FAILED in this producer;
+review that semantic change with cancellation-event consumer owners before rollout.
 
 Downstream detail lookup is an Order gRPC integration target; its server remains
 unimplemented. Consumers must not create shadow order tables to bypass that gap.

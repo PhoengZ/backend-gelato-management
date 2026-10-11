@@ -105,6 +105,15 @@ does not implement Payment. See [checkout architecture](../docs/architecture/ord
 for retry, callback and migration rules. Shared deployment requires review by
 Order, Payment, Gateway and frontend owners.
 
+Order REST v1.2 adds `CANCEL_PENDING` and `PAYMENT_CONFIRMING` status values.
+Order durably claims either workflow before contacting Inventory, blocks checkout
+for both, and resumes unfinished work in a lifecycle worker. No database columns
+are added. Release requests and cancellation events use the constant reason
+`ORDER_CANCELLED`, so different cancellation entry points replay identical facts.
+Review the enum additions and generic cancellation reason with affected owners;
+reconcile unfinished operations from older deployments before rollout. See the
+checkout architecture for recovery and payment-refund responsibilities.
+
 ## Event compatibility
 
 Events use CloudEvents 1.0 structured JSON with domain fields nested under

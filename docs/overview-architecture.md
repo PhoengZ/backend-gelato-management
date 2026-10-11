@@ -41,8 +41,9 @@ metadata and availability without taking ownership of either.
    Checkout adapter must still be added.
 8. Order validates the HTTPS URL and atomically binds one session to a pending,
    unexpired order before returning checkout_url.
-9. Frontend redirects to Stripe. A verified Payment callback makes Order confirm
-   Inventory, then commit PAID and order.placed in one database transaction.
+9. Frontend redirects to Stripe. A verified Payment callback makes Order claim
+   PAYMENT_CONFIRMING, confirm Inventory, then commit PAID and order.placed in one
+   database transaction.
 10. The outbox worker publishes asynchronously. After browser return, frontend
     reads authenticated GET /api/v1/orders/{id} for the current state.
 
@@ -77,8 +78,10 @@ Local unit tests do not prove deployed end-to-end integration.
   result and otherwise leaves the hold to Inventory expiry. It does not release
   a reservation that a concurrent same-key request may still own.
 - Customer cancellation checks ownership; payment failure uses a trusted service
-  callback. Both release Inventory before committing CANCELLED and cancellation
-  outbox locally.
+  callback. Both first claim CANCEL_PENDING, blocking checkout and competing
+  confirmation. They release Inventory using the existing key and ORDER_CANCELLED
+  reason, then commit CANCELLED and cancellation outbox locally. A lifecycle
+  worker resumes cancellation/confirmation intents after failure or restart.
 - Release returns reserved portions to available while the batch is valid;
   expired-batch portions become waste. Stable keys prevent repeated stock changes.
 - Inventory expires abandoned reservations independently. Order has no expiry

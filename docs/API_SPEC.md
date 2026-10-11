@@ -392,13 +392,15 @@ reserves stock with Inventory. A successful new checkout returns 201 with
 
 Frontend opens `checkout_url`, then reads `GET /api/v1/orders/{order_id}` after
 returning. GET requires customer authentication/ownership and omits the checkout
-URL. Polling the payment-result page can stop on PAID or CANCELLED; a pending
+URL. Continue polling for CANCEL_PENDING or PAYMENT_CONFIRMING; neither returns
+a checkout URL. Polling the payment-result page can stop on PAID or CANCELLED; a pending
 state can outlive its Inventory reservation because Order has no expiry worker.
 Do not infer PAID from Stripe's browser redirect.
 
 For cancellation, call `POST /api/v1/orders/{order_id}/cancel` with
-`{"reason":"CUSTOMER_REQUEST"}`. Order releases Inventory before committing
-CANCELLED; valid-batch portions become available and expired-batch portions become
+`{"reason":"CUSTOMER_REQUEST"}`. Order first durably claims CANCEL_PENDING, then
+releases Inventory with ORDER_CANCELLED before committing CANCELLED. Its lifecycle
+worker resumes unfinished work after restart. Valid-batch portions become available and expired-batch portions become
 waste. Cancellation currently does not close the Stripe session. Paid orders
 cannot use this pending-order cancellation endpoint.
 
@@ -974,7 +976,7 @@ interface BackendOrderRequest {
 }
 
 type BackendOrderStatus =
-  | "PENDING_PAYMENT" | "PAID" | "CANCELLED"
+  | "PENDING_PAYMENT" | "CANCEL_PENDING" | "PAYMENT_CONFIRMING" | "PAID" | "CANCELLED"
   | "PREPARING" | "READY_FOR_PICKUP" | "COMPLETED";
 
 interface BackendOrderResponse {

@@ -49,6 +49,7 @@ type Service interface {
 	ConfirmPayment(context.Context, string) error
 	CancelOrder(context.Context, string, string) error
 	GetOrder(context.Context, string) (*domain.Order, error)
+	ResumePendingTransitions(context.Context) error
 }
 
 type orderService struct {
@@ -249,20 +250,34 @@ func (s *orderService) placeOrder(ctx context.Context, input CreateOrderInput, i
 }
 
 func (s *orderService) ConfirmPayment(ctx context.Context, orderID string) error {
-	order, err := s.repo.Get(ctx, orderID)
+	order, err := s.repo.BeginTransition(ctx, orderID, domain.StatusPaymentConfirming)
 	if err != nil {
+		if errors.Is(err, repository.ErrInvalidTransition) {
+			return conflict("ORDER_STATE_CONFLICT", "order is not awaiting payment")
+		}
 		return mapRepositoryError(err)
 	}
 	if order.Status == domain.StatusPaid {
 		return nil
 	}
-	if order.Status != domain.StatusPendingPayment {
+	if order.Status != domain.StatusPaymentConfirming {
 		return conflict("ORDER_STATE_CONFLICT", "order is not awaiting payment")
 	}
-	_, err = s.inventory.ConfirmReservation(ctx, &inventoryv1.ConfirmReservationRequest{
+	return s.finishPayment(ctx, order)
+}
+
+func (s *orderService) finishPayment(ctx context.Context, order *domain.Order) error {
+	_, err := s.inventory.ConfirmReservation(ctx, &inventoryv1.ConfirmReservationRequest{
 		ReservationId: order.ReservationID, OrderId: order.ID, IdempotencyKey: order.ConfirmIdempotencyKey,
 	})
 	if err != nil {
+		if status.Code(err) == codes.FailedPrecondition {
+			// Inventory definitively rejected confirmation (e.g. expiry). Do not
+			// keep retrying payment or reopen checkout; let cancellation settle it.
+			if saveErr := s.repo.RejectPaymentConfirmation(ctx, order.ID); saveErr != nil {
+				return dependencyError("ORDER_STORAGE_UNAVAILABLE", saveErr)
+			}
+		}
 		return mapGRPCError("INVENTORY", err)
 	}
 	eventID := uuid.NewString()
@@ -284,22 +299,33 @@ func (s *orderService) CancelOrder(ctx context.Context, orderID, reason string) 
 	if reason != "CUSTOMER_REQUEST" && reason != "PAYMENT_FAILED" {
 		return badRequest("reason must be CUSTOMER_REQUEST or PAYMENT_FAILED")
 	}
-	order, err := s.repo.Get(ctx, orderID)
+	order, err := s.repo.BeginTransition(ctx, orderID, domain.StatusCancelPending)
 	if err != nil {
+		if errors.Is(err, repository.ErrInvalidTransition) {
+			return conflict("ORDER_STATE_CONFLICT", "only pending-payment orders can be cancelled")
+		}
 		return mapRepositoryError(err)
 	}
 	if order.Status == domain.StatusCancelled {
 		return nil
 	}
-	if order.Status != domain.StatusPendingPayment {
+	if order.Status != domain.StatusCancelPending {
 		return conflict("ORDER_STATE_CONFLICT", "only pending-payment orders can be cancelled")
 	}
-	_, err = s.inventory.ReleaseReservation(ctx, &inventoryv1.ReleaseReservationRequest{ReservationId: order.ReservationID, OrderId: order.ID, IdempotencyKey: order.ReleaseIdempotencyKey, Reason: reason})
+	return s.finishCancellation(ctx, order)
+}
+
+// The durable status is sufficient to reconstruct exactly the same release
+// request after restart, regardless of which endpoint requested cancellation.
+const cancellationReason = "ORDER_CANCELLED"
+
+func (s *orderService) finishCancellation(ctx context.Context, order *domain.Order) error {
+	_, err := s.inventory.ReleaseReservation(ctx, &inventoryv1.ReleaseReservationRequest{ReservationId: order.ReservationID, OrderId: order.ID, IdempotencyKey: order.ReleaseIdempotencyKey, Reason: cancellationReason})
 	if err != nil {
 		return mapGRPCError("INVENTORY", err)
 	}
 	eventID := uuid.NewString()
-	payload, err := json.Marshal(cloudEvent{SpecVersion: "1.0", ID: eventID, Source: "/gelatoflow/order-service", Type: "com.gelatoflow.order.cancelled.v1", Time: time.Now().UTC(), DataContentType: "application/json", Data: map[string]string{"order_id": order.ID, "reason": reason}})
+	payload, err := json.Marshal(cloudEvent{SpecVersion: "1.0", ID: eventID, Source: "/gelatoflow/order-service", Type: "com.gelatoflow.order.cancelled.v1", Time: time.Now().UTC(), DataContentType: "application/json", Data: map[string]string{"order_id": order.ID, "reason": cancellationReason}})
 	if err != nil {
 		return dependencyError("ORDER_EVENT_ENCODING_FAILED", err)
 	}
@@ -310,6 +336,37 @@ func (s *orderService) CancelOrder(ctx context.Context, orderID, reason string) 
 		return dependencyError("ORDER_STORAGE_UNAVAILABLE", err)
 	}
 	return nil
+}
+
+func (s *orderService) ResumePendingTransitions(ctx context.Context) error {
+	var failures []error
+	afterID := ""
+	for {
+		orders, err := s.repo.PendingTransitions(ctx, afterID, 100)
+		if err != nil {
+			return errors.Join(append(failures, err)...)
+		}
+		for _, order := range orders {
+			callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			if order.Status == domain.StatusCancelPending {
+				err = s.CancelOrder(callCtx, order.ID, "CUSTOMER_REQUEST")
+			} else {
+				err = s.ConfirmPayment(callCtx, order.ID)
+			}
+			cancel()
+			if err != nil {
+				failures = append(failures, fmt.Errorf("resume order %s: %w", order.ID, err))
+			}
+			if ctx.Err() != nil {
+				return errors.Join(append(failures, ctx.Err())...)
+			}
+		}
+		if len(orders) < 100 {
+			break
+		}
+		afterID = orders[len(orders)-1].ID
+	}
+	return errors.Join(failures...)
 }
 
 func (s *orderService) GetOrder(ctx context.Context, id string) (*domain.Order, error) {

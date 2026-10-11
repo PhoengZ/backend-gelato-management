@@ -45,6 +45,7 @@ sequenceDiagram
     G->>P: Forward unchanged webhook bytes and signature
     Note over P: Verify provider result and correlate it to the order
     P->>O: POST /api/v1/orders/{id}/payment-succeeded with service token
+    O->>DB: Transaction: claim PAYMENT_CONFIRMING
     O->>I: gRPC ConfirmReservation with stable confirmation key
     I-->>O: CONFIRMED
     O->>DB: Transaction: PAID and order.placed outbox
@@ -112,7 +113,9 @@ sequenceDiagram
         P->>O: POST /api/v1/orders/{id}/payment-failed with service token
     end
     Note over O: Only pending orders can cancel, CANCELLED replay is a no-op
-    O->>I: ReleaseReservation with stable release key and reason
+    O->>DB: Transaction: claim CANCEL_PENDING and clear checkout URL
+    Note over O: Checkout and opposing payment claim are blocked
+    O->>I: ReleaseReservation with stable release key and ORDER_CANCELLED
     alt Allocated batch still valid
         Note over I: reserved portions become available
     else Allocated batch expired
@@ -123,8 +126,9 @@ sequenceDiagram
     Note over O: Return 204 to the caller after commit
 ```
 
-An Inventory error prevents cancellation commit. If release succeeds but Order's
-database commit fails, retry uses the same Inventory key. Order currently does
+An Inventory error prevents final cancellation commit, while CANCEL_PENDING
+remains durable. If release succeeds but Order's database commit fails, retries
+or the lifecycle worker use the same Inventory key and constant reason. Order currently does
 not expire/cancel Stripe sessions; payment through an old URL requires
 reconciliation/refund and must not revive a cancelled order.
 
@@ -152,8 +156,11 @@ sequenceDiagram
 ```mermaid
 stateDiagram-v2
     [*] --> PENDING_PAYMENT: Reservation and order persisted
-    PENDING_PAYMENT --> PAID: Verified success and Inventory confirmation
-    PENDING_PAYMENT --> CANCELLED: Release and cancellation commit
+    PENDING_PAYMENT --> PAYMENT_CONFIRMING: Verified success claims workflow
+    PAYMENT_CONFIRMING --> PAID: Inventory confirmation and local outbox commit
+    PAYMENT_CONFIRMING --> CANCEL_PENDING: Inventory definitively rejects confirmation
+    PENDING_PAYMENT --> CANCEL_PENDING: Customer cancel or verified payment failure claims workflow
+    CANCEL_PENDING --> CANCELLED: Inventory release and local outbox commit
     PAID --> PREPARING: Target fulfillment integration
     PREPARING --> READY_FOR_PICKUP: Target fulfillment integration
     READY_FOR_PICKUP --> COMPLETED: Target collection integration

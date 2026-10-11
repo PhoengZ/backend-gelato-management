@@ -101,11 +101,20 @@ Order retains its pending record for idempotent retry until the hold expires.
 
 ## Cancellation and local Order state
 
-Order checks customer ownership and requires PENDING_PAYMENT for customer cancel.
-It releases the reservation using the stable release key before committing
-CANCELLED and order.cancelled in its own database. Inventory rejection prevents
-the Order state change. If release succeeds but the Order commit fails, retry the
-same operation/reason and key; Inventory must not return portions twice.
+Order checks customer ownership and atomically claims CANCEL_PENDING from
+PENDING_PAYMENT before releasing any stock. It uses the existing status column
+and stable release key with the constant reason ORDER_CANCELLED; no new columns
+are needed. CANCEL_PENDING blocks checkout and payment confirmation. On release
+success, Order commits CANCELLED and order.cancelled together in its own database.
+If release or local finalization fails, the durable intent remains. A lifecycle
+worker resumes it after restart, replaying the same operation/reason/key;
+Inventory must not return portions twice.
+
+Payment success first claims PAYMENT_CONFIRMING from PENDING_PAYMENT under the
+same Order row lock, so cancellation and confirmation cannot both claim a pending
+order. Confirmation retries retain that intent on ambiguous failures. A definitive
+FAILED_PRECONDITION moves it to CANCEL_PENDING for release, without marking PAID
+or emitting order.placed. Payment remains responsible for refunds/reconciliation.
 
 | Condition on release | Reservation result | Portion movement |
 | --- | --- | --- |

@@ -16,12 +16,36 @@ versioned Inventory gRPC contract, and never accesses Inventory storage.
    authoritative total and a deterministic checkout key. It persists the session
    binding before returning `checkout_url`; frontend redirects to that URL.
 3. The Payment Service calls `POST /api/v1/orders/{id}/payment-succeeded` with
-   `X-Payment-Service-Token`. Order confirms the reservation and commits `PAID`
+   `X-Payment-Service-Token`. Order first claims `PAYMENT_CONFIRMING`, confirms the reservation and commits `PAID`
    plus an `OrderPlaced` CloudEvent outbox record in one PostgreSQL transaction.
 4. A verified Payment Service failure calls `POST /api/v1/orders/{id}/payment-failed`,
    while customer cancellation uses `POST /api/v1/orders/{id}/cancel`. Both release
-   the reservation before committing cancellation and its `order.cancelled` outbox
-   event, and reuse stable Inventory idempotency keys on retries.
+   stock only after durably claiming `CANCEL_PENDING`, then commit cancellation
+   and its `order.cancelled` outbox event. Inventory receives the persisted release
+   key and constant reason `ORDER_CANCELLED` from either endpoint.
+
+Both intents use the existing `status` column; no columns or tables are added.
+The first claim from `PENDING_PAYMENT` wins atomically. Checkout binding and the
+opposing workflow are blocked once either claim commits. A lifecycle worker
+resumes unfinished intents after restart, using the same Inventory keys and facts.
+It processes pages of orders, continuing past individual failures. Duplicate
+callbacks/workers replay Inventory operations and insert at most one terminal
+outbox event. `204` means finalization completed; a dependency error can leave a
+durable intent that the worker later completes.
+
+Confirmation timeout/unavailability keeps `PAYMENT_CONFIRMING`. A definitive
+Inventory `FAILED_PRECONDITION`, including expired stock, moves it to
+`CANCEL_PENDING` for release and cancellation; the callback returns a conflict
+and Payment must reconcile/refund the charge. Other unresolved dependency errors
+retain the intent and are logged for operator attention.
+
+The release request and cancellation event use the generic `ORDER_CANCELLED`
+reason; the original caller's cause is not persisted. Before rolling this out
+over an older deployment, reconcile any `PENDING_PAYMENT` rows whose Inventory
+release/confirmation already succeeded. Old release keys may have been used
+with `CUSTOMER_REQUEST` or `PAYMENT_FAILED`; replaying them with the new reason
+would conflict. Review the new status values and generic event reason with
+Gateway, frontend, Payment and cancellation-event consumer owners.
 
 The API returns structured `{ "code", "message" }` errors. Insufficient stock,
 expired reservations, invalid lifecycle transitions and idempotency conflicts
@@ -87,6 +111,16 @@ confirms. Outbox delivery is at-least-once; consumers deduplicate CloudEvents by
 - Order line items preserve flavor name and unit price as immutable transaction
   facts. This is a purchase snapshot, not a replicated current Catalog record;
   service ownership documentation should make that exception explicit.
+
+## Tests
+
+Run `go test ./...` and `go vet ./...` in this directory. Repository integration
+tests require `ORDER_TEST_DATABASE_URL`, a PostgreSQL URL pointing to a disposable
+test database, then `go test -race ./...`. Each repository test creates and drops
+its own schema; without the URL those integration tests are explicitly skipped.
+The tests cover competing lifecycle claims, checkout replay after release/save
+failure, recovery after restart, stable release facts, confirmation timeout/expiry,
+and transactional rollback when the cancellation outbox insert fails.
 
 ## Contracts
 

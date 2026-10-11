@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: GelatoFlow Order Service API
-  version: 1.1.0
+  version: 1.2.0
   description: Customer order creation and lifecycle API. Requests pass through the authenticated API Gateway.
 servers:
   - url: /
@@ -14,8 +14,9 @@ paths:
         Order persists the pending order before asking Payment for an idempotent
         Checkout Session. Retry the same body and Idempotency-Key after an
         unavailable/timeout response; no additional order or stock hold is created.
-        A pending, unexpired order returns checkout_url. Replays of terminal orders
-        return their current state without a payment URL. Payment owns Stripe and
+        A pending, unexpired order returns checkout_url. Replays of CANCEL_PENDING,
+        PAYMENT_CONFIRMING and terminal orders return their current state without
+        a payment URL. Payment owns Stripe and
         verified callbacks; this response never proves that payment succeeded.
       security:
         - bearerAuth: []
@@ -93,6 +94,11 @@ paths:
     post:
       operationId: cancelOrder
       summary: Cancel a pending order and release its reservation
+      description: >-
+        Order durably claims CANCEL_PENDING before releasing stock. A failed
+        release or local finalization leaves that intent for background recovery;
+        retries may use either cancellation endpoint. Checkout is blocked as soon
+        as the intent commits. A PAYMENT_CONFIRMING or paid order cannot be cancelled.
       security:
         - bearerAuth: []
       requestBody:
@@ -118,6 +124,10 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/DependencyUnavailable'
+        '504':
+          $ref: '#/components/responses/DependencyTimeout'
   /api/v1/orders/{order_id}/payment-succeeded:
     parameters:
       - name: order_id
@@ -129,7 +139,12 @@ paths:
     post:
       operationId: confirmOrderPayment
       summary: Confirm payment and the Inventory reservation
-      description: Internal Payment Service callback; the route must not be exposed without service authentication.
+      description: >-
+        Internal Payment Service callback; the route must not be exposed without
+        service authentication. Order claims PAYMENT_CONFIRMING before confirming
+        stock. Ambiguous failures retain the intent for recovery. A definitive
+        Inventory FAILED_PRECONDITION moves it to CANCEL_PENDING and returns 409;
+        Payment must reconcile or refund the charge.
       security:
         - paymentServiceToken: []
       responses:
@@ -278,6 +293,9 @@ components:
         properties:
           checkout_url:
             $ref: '#/components/schemas/CheckoutURL'
+      else:
+        properties:
+          checkout_url: false
     CheckoutURL:
       type: string
       format: uri
@@ -301,7 +319,11 @@ components:
           format: date-time
         status:
           type: string
-          enum: [PENDING_PAYMENT, PAID, PREPARING, READY_FOR_PICKUP, COMPLETED, CANCELLED]
+          enum: [PENDING_PAYMENT, CANCEL_PENDING, PAYMENT_CONFIRMING, PAID, PREPARING, READY_FOR_PICKUP, COMPLETED, CANCELLED]
+          description: >-
+            CANCEL_PENDING and PAYMENT_CONFIRMING are durable workflow intents.
+            Neither permits checkout navigation. Poll GET Order while either is
+            present; background recovery completes the Inventory transition.
         reservation_expires_at:
           type: string
           format: date-time

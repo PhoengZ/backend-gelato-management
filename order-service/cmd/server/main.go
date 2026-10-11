@@ -88,6 +88,7 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go service.RunOutboxWorker(ctx, repo, pub)
+	go service.RunLifecycleWorker(ctx, svc)
 
 	app := fiber.New(fiber.Config{DisableStartupMessage: true})
 	app.Use(logger.New(), recover.New())

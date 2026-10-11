@@ -42,6 +42,7 @@ sequenceDiagram
     Frontend->>Stripe: Redirect to checkout_url
     Stripe->>Payment: Signed webhook
     Payment->>Order: Authenticated payment-succeeded callback
+    Note over Order: Transaction: claim PAYMENT_CONFIRMING
     Order->>Inventory: ConfirmReservation
     Note over Order: Transaction: PAID and order.placed outbox
 ```
@@ -66,13 +67,15 @@ pending. A browser success redirect never marks an order paid.
   mutation; replay uses the same deterministic checkout key.
 - A failed/ambiguous session binding exposes no URL. A retry asks Payment for
   the same session, then retries the atomic binding. A different session, a
-  cancelled/paid order or an expired hold is rejected under the row lock.
+  cancellation/confirmation intent, cancelled/paid order or an expired hold is
+  rejected under the row lock.
 - A failed order insert no longer compensates by immediately releasing a shared
   reservation. Another same-key request might still commit, and Inventory replay
   returns its original ACTIVE result even after release. Keep the bounded hold
   for retry; Inventory's expiry worker cleans up abandoned reservations.
 - New checkout totals must be positive and at most 99,999,999 minor units.
-  Idempotent replays of terminal orders return current state without checkout_url.
+  Idempotent replays of workflow intents and terminal orders return current state
+  without checkout_url.
 - Stripe's session expiry may differ from Inventory's stock deadline. Payment
   must handle expired-session UX and reconcile/refund a charge whose stock can
   no longer be confirmed. Order's ConfirmReservation still rejects expired stock.
@@ -82,19 +85,39 @@ pending. A browser success redirect never marks an order paid.
 Customer calls POST /api/v1/orders/{id}/cancel with reason CUSTOMER_REQUEST through
 Gateway. Order verifies ownership and permits only pending-payment cancellation.
 Payment's verified payment-failed callback uses its machine token and the reason
-PAYMENT_FAILED. Both paths call Inventory ReleaseReservation with the persisted
-reservation/order IDs and deterministic release key before committing CANCELLED
-and order.cancelled in one local transaction.
+PAYMENT_FAILED. Both paths first commit CANCEL_PENDING in the existing status
+column, clearing the stored checkout URL. A short row lock serializes this claim
+with checkout binding and the payment-success claim of PAYMENT_CONFIRMING. The
+first workflow to claim PENDING_PAYMENT wins; the other receives a conflict.
+Neither a transaction nor row lock spans an Inventory network call.
+
+After the claim, both cancellation paths call Inventory ReleaseReservation with
+the persisted reservation/order IDs, existing deterministic release key, and
+constant reason ORDER_CANCELLED. The original caller's reason is not persisted;
+no columns or tables are added. On success, Order commits CANCELLED and
+order.cancelled together, using the same generic reason in the event.
 
 Inventory returns RELEASED or EXPIRED. Each allocation returns to available if
 its batch is still valid; expired-batch portions become waste. If release succeeds
-and the Order commit fails, retry the same endpoint/reason/key. An already
-cancelled order is a no-op, and a paid order cannot use this cancellation endpoint.
+and the Order commit fails, CANCEL_PENDING still blocks checkout. Retry either
+endpoint, or let the lifecycle worker resume after restart with identical request
+facts. An already cancelled order is a no-op; PAYMENT_CONFIRMING and paid orders
+cannot use this cancellation endpoint. A dependency error can leave a durable
+intent even though the request did not return 204.
+
+The lifecycle worker also resumes PAYMENT_CONFIRMING after ambiguous confirmation
+or local PAID/outbox failures. It uses the persisted confirmation key and never
+reopens checkout. An authoritative Inventory FAILED_PRECONDITION moves that
+intent to CANCEL_PENDING; the callback returns 409 and Payment must durably
+reconcile/refund the charge. Other dependency errors retain the intent for retry
+and operator attention. Recovery pages by order ID and continues past failed
+orders, so a failed page does not starve later work.
 
 ```mermaid
 flowchart TD
     Request["Customer cancel or verified payment failure"] --> Check["Verify caller and pending order"]
-    Check --> Release["Inventory ReleaseReservation with stable key"]
+    Check --> Claim["Order transaction: CANCEL_PENDING; block checkout"]
+    Claim --> Release["Inventory ReleaseReservation with stable key and ORDER_CANCELLED"]
     Release --> Valid{"Allocated batch valid?"}
     Valid -->|"Yes"| Available["reserved becomes available"]
     Valid -->|"No"| Waste["reserved becomes wasted"]
@@ -105,8 +128,9 @@ flowchart TD
 
 There is no Order-to-Payment cancel-session RPC in the current contract or code.
 The existing URL can remain payable after stock release, and a browser cancel
-redirect is not automatically an Order cancellation. A late success for CANCELLED
-is rejected; a late success after Inventory expiry cannot confirm stock. Payment
+redirect is not automatically an Order cancellation. A late success for
+CANCEL_PENDING or CANCELLED is rejected; a late success after Inventory expiry
+cannot confirm stock. Payment
 must durably reconcile/refund such charges. Inventory expires holds independently,
 but Order has no worker that automatically changes its pending status.
 
@@ -126,5 +150,11 @@ checkout_url instead of calling the old public PaymentIntent endpoint.
 
 This change does not claim a working Stripe end-to-end integration, refund
 automation, Order gRPC reads for Analytics, or Payment's implementation.
+REST clients must handle CANCEL_PENDING and PAYMENT_CONFIRMING without checkout
+navigation and poll until finalization. Review these enum additions and the
+generic cancellation event reason with affected service and frontend owners.
+Before updating an older deployment, reconcile pending rows whose Inventory
+transition already succeeded; an old release key used with CUSTOMER_REQUEST or
+PAYMENT_FAILED cannot be replayed with ORDER_CANCELLED without conflict.
 Order's pre-existing RabbitMQ confirmation/reconnect review findings remain
 separate work. Review the shared boundary with affected owners before deployment.
