@@ -1,0 +1,378 @@
+openapi: 3.1.0
+info:
+  title: GelatoFlow Order Service API
+  version: 1.2.0
+  description: Customer order creation and lifecycle API. Requests pass through the authenticated API Gateway.
+servers:
+  - url: /
+paths:
+  /api/v1/orders:
+    post:
+      operationId: createOrder
+      summary: Create an order, reserve portions and start Stripe checkout
+      description: >-
+        Order persists the pending order before asking Payment for an idempotent
+        Checkout Session. Retry the same body and Idempotency-Key after an
+        unavailable/timeout response; no additional order or stock hold is created.
+        A pending, unexpired order returns checkout_url. Replays of CANCEL_PENDING,
+        PAYMENT_CONFIRMING and terminal orders return their current state without
+        a payment URL. Payment owns Stripe and
+        verified callbacks; this response never proves that payment succeeded.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOrderRequest'
+      responses:
+        '201':
+          description: Checkout ready, or current order state on an idempotent replay
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckoutResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '502':
+          $ref: '#/components/responses/DependencyAuthenticationFailed'
+        '503':
+          $ref: '#/components/responses/DependencyUnavailable'
+        '504':
+          $ref: '#/components/responses/DependencyTimeout'
+  /api/v1/orders/{order_id}:
+    parameters:
+      - name: order_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: getOrder
+      summary: Get the authenticated customer's order
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Order details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/orders/{order_id}/cancel:
+    parameters:
+      - name: order_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      operationId: cancelOrder
+      summary: Cancel a pending order and release its reservation
+      description: >-
+        Order durably claims CANCEL_PENDING before releasing stock. A failed
+        release or local finalization leaves that intent for background recovery;
+        retries may use either cancellation endpoint. Checkout is blocked as soon
+        as the intent commits. A PAYMENT_CONFIRMING or paid order cannot be cancelled.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  const: CUSTOMER_REQUEST
+      responses:
+        '204':
+          description: Order cancelled
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/DependencyUnavailable'
+        '504':
+          $ref: '#/components/responses/DependencyTimeout'
+  /api/v1/orders/{order_id}/payment-succeeded:
+    parameters:
+      - name: order_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      operationId: confirmOrderPayment
+      summary: Confirm payment and the Inventory reservation
+      description: >-
+        Internal Payment Service callback; the route must not be exposed without
+        service authentication. Order claims PAYMENT_CONFIRMING before confirming
+        stock. Ambiguous failures retain the intent for recovery. A definitive
+        Inventory FAILED_PRECONDITION moves it to CANCEL_PENDING and returns 409;
+        Payment must reconcile or refund the charge.
+      security:
+        - paymentServiceToken: []
+      responses:
+        '204':
+          description: Reservation confirmed and order marked paid
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/DependencyUnavailable'
+        '504':
+          $ref: '#/components/responses/DependencyTimeout'
+  /api/v1/orders/{order_id}/payment-failed:
+    parameters:
+      - name: order_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      operationId: releaseFailedPaymentOrder
+      summary: Release the reservation after a verified payment failure
+      description: Internal Payment Service callback; the route must not be exposed without service authentication.
+      security:
+        - paymentServiceToken: []
+      responses:
+        '204':
+          description: Reservation released and order cancelled
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '503':
+          $ref: '#/components/responses/DependencyUnavailable'
+        '504':
+          $ref: '#/components/responses/DependencyTimeout'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    paymentServiceToken:
+      type: apiKey
+      in: header
+      name: X-Payment-Service-Token
+  responses:
+    DependencyAuthenticationFailed:
+      description: Upstream service rejected the configured machine identity
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: Authentication required
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: The order belongs to another customer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Order not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: Insufficient stock, expired reservation, invalid state, or idempotency conflict
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    DependencyUnavailable:
+      description: A required service is unavailable
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    DependencyTimeout:
+      description: A required service timed out
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+  schemas:
+    CreateOrderRequest:
+      type: object
+      additionalProperties: false
+      required: [pickup_at, items]
+      properties:
+        pickup_at:
+          type: string
+          format: date-time
+        items:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            type: object
+            additionalProperties: false
+            required: [flavor_id, portions]
+            properties:
+              flavor_id:
+                type: string
+                format: uuid
+              portions:
+                type: integer
+                minimum: 1
+    CheckoutResponse:
+      type: object
+      description: >-
+        Order fields plus checkout_url for pending, unexpired checkouts only.
+        Frontend redirects to checkout_url, then reads Order status after return.
+        Success redirects are not proof of payment. GET Order omits this URL.
+      allOf:
+        - $ref: '#/components/schemas/OrderFields'
+        - type: object
+          properties:
+            checkout_url:
+              $ref: '#/components/schemas/CheckoutURL'
+      unevaluatedProperties: false
+      if:
+        required: [status]
+        properties:
+          status:
+            const: PENDING_PAYMENT
+      then:
+        required: [checkout_url]
+        properties:
+          checkout_url:
+            $ref: '#/components/schemas/CheckoutURL'
+      else:
+        properties:
+          checkout_url: false
+    CheckoutURL:
+      type: string
+      format: uri
+      pattern: '^https://'
+    Order:
+      allOf:
+        - $ref: '#/components/schemas/OrderFields'
+      unevaluatedProperties: false
+    OrderFields:
+      type: object
+      required: [order_id, customer_id, pickup_at, status, reservation_expires_at, total_amount_minor, currency, items, created_at, updated_at]
+      properties:
+        order_id:
+          type: string
+          format: uuid
+        customer_id:
+          type: string
+          format: uuid
+        pickup_at:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [PENDING_PAYMENT, CANCEL_PENDING, PAYMENT_CONFIRMING, PAID, PREPARING, READY_FOR_PICKUP, COMPLETED, CANCELLED]
+          description: >-
+            CANCEL_PENDING and PAYMENT_CONFIRMING are durable workflow intents.
+            Neither permits checkout navigation. Poll GET Order while either is
+            present; background recovery completes the Inventory transition.
+        reservation_expires_at:
+          type: string
+          format: date-time
+        total_amount_minor:
+          type: integer
+          format: int64
+          minimum: 0
+        currency:
+          type: string
+          const: THB
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        items:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            additionalProperties: false
+            required: [flavor_id, flavor_name, portions, unit_price_minor, subtotal_minor]
+            properties:
+              flavor_id:
+                type: string
+                format: uuid
+              flavor_name:
+                type: string
+              portions:
+                type: integer
+                minimum: 1
+              unit_price_minor:
+                type: integer
+                format: int64
+                minimum: 0
+              subtotal_minor:
+                type: integer
+                format: int64
+                minimum: 0
+    Error:
+      type: object
+      additionalProperties: false
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+          additionalProperties: true

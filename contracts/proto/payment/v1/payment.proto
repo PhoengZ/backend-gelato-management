@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package payment.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/gelatoflow/backend-gelato-management/contracts/gen/go/payment/v1;paymentv1";
+option java_package = "com.gelatoflow.contracts.payment.v1";
+option java_multiple_files = true;
+
+// Internal Order-to-Payment API. Authenticate a dedicated Order machine identity.
+service PaymentService {
+  // Create or retrieve the same Stripe Checkout Session for this checkout key.
+  // Reusing a key with different immutable order facts must return ALREADY_EXISTS.
+  // Payment owns Stripe credentials, session creation, webhook verification and
+  // reconciliation. Order persists the session before exposing its URL.
+  rpc CreateCheckoutSession(CreateCheckoutSessionRequest) returns (CreateCheckoutSessionResponse);
+}
+
+message CreateCheckoutSessionRequest {
+  string order_id = 1;
+  string customer_id = 2;
+  int64 amount_minor = 3;
+  string currency = 4;
+  string idempotency_key = 5;
+  // Stock hold deadline, which may differ from Stripe's session expiry.
+  google.protobuf.Timestamp reservation_expires_at = 6;
+}
+
+message CreateCheckoutSessionResponse {
+  string checkout_session_id = 1;
+  string checkout_url = 2;
+}

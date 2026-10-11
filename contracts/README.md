@@ -17,11 +17,13 @@ changes.
 | --- | --- | --- |
 | Auth REST API | Auth Service | API Gateway, frontend |
 | Catalog REST API | Catalog Service | API Gateway, frontend |
-| Catalog gRPC API | Catalog Service | Direct clients, Inventory batch validation; planned Order integration |
+| Catalog gRPC API | Catalog Service | Direct clients, Inventory batch validation, Order checkout |
 | Inventory REST API | Batch Inventory Service | API Gateway, staff and manager UI |
 | Fulfillment REST API | Fulfillment Service | API Gateway, staff UI |
 | Inventory gRPC API | Batch Inventory Service | Order Service |
 | Notification SSE API | Notification Service | Frontend (Gateway route pending) |
+| Order REST API | Order Service | API Gateway, frontend, Payment Service |
+| Payment checkout gRPC API | Payment Service (implementation pending) | Order Service |
 | `order.placed` event | Order Service | Fulfillment, Notification, Analytics |
 | `order.cancelled` event | Order Service | Fulfillment, Notification, Analytics |
 | `fulfillment.order_ready` event | Fulfillment Service | Notification Service |
@@ -32,8 +34,9 @@ changes.
 
 `proto/catalog/v1/catalog.proto` is the canonical `catalog.v1.CatalogService`
 interface. The implementation uses the same application service and Redis as
-Catalog REST. Inventory now calls GetFlavor before creating a batch; Order
-integration remains planned.
+Catalog REST. Inventory calls GetFlavor before creating a batch, and Order uses
+BatchGetFlavors before reserving stock to validate active flavors and snapshot
+the agreed purchase price.
 
 - Unary methods: CreateFlavor, GetFlavor, ListFlavors, BatchGetFlavors,
   UpdateFlavor, DeleteFlavor.
@@ -89,6 +92,27 @@ for that order is ALREADY_EXISTS. Confirm/Release require a matching order ID.
 TTL defaults to 10 minutes, capped by the earliest allocated batch expiry.
 Late confirmation is FAILED_PRECONDITION; release after expiry returns EXPIRED.
 Availability exceeding the proto int32 capacity is OUT_OF_RANGE.
+
+## Order-orchestrated checkout
+
+`proto/payment/v1/payment.proto` defines the new internal Checkout Session API.
+Order calls Payment after persisting the pending order and returns `checkout_url`
+from `openapi/order-service.v1.yaml`. Payment must authenticate the Order machine
+identity and create/retrieve one session per deterministic checkout key. Payment
+owns Stripe/webhooks; Order owns immutable totals and the persisted session binding.
+The existing PaymentIntent branch needs an adapter/server change; this contract
+does not implement Payment. See [checkout architecture](../docs/architecture/order-checkout.md)
+for retry, callback and migration rules. Shared deployment requires review by
+Order, Payment, Gateway and frontend owners.
+
+Order REST v1.2 adds `CANCEL_PENDING` and `PAYMENT_CONFIRMING` status values.
+Order durably claims either workflow before contacting Inventory, blocks checkout
+for both, and resumes unfinished work in a lifecycle worker. No database columns
+are added. Release requests and cancellation events use the constant reason
+`ORDER_CANCELLED`, so different cancellation entry points replay identical facts.
+Review the enum additions and generic cancellation reason with affected owners;
+reconcile unfinished operations from older deployments before rollout. See the
+checkout architecture for recovery and payment-refund responsibilities.
 
 ## Event compatibility
 

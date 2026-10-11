@@ -6,7 +6,9 @@
       "name": "admin",
       "password_hash": "G7pMe8NeRjPU5OZCBPup8XBDJR9giurhaf12xMPfa3K6avxr",
       "hashing_algorithm": "rabbit_password_hashing_sha256",
-      "tags": ["administrator"]
+      "tags": [
+        "administrator"
+      ]
     },
     {
       "name": "analytics_service",
@@ -29,6 +31,12 @@
     {
       "name": "notification_service",
       "password_hash": "phVYi/YHdAl23fTJ8OtEOIJvLH4y3+FMS7VdvqoVAokonuYj",
+      "hashing_algorithm": "rabbit_password_hashing_sha256",
+      "tags": []
+    },
+    {
+      "name": "order_service",
+      "password_hash": "xaZtou061bnEs68ac3M3B+uDJvll5JzCyMCP5zodVfxLRHiM",
       "hashing_algorithm": "rabbit_password_hashing_sha256",
       "tags": []
     }
@@ -83,6 +91,13 @@
       "configure": "^(order|fulfillment|inventory|notification_queue)$",
       "write": "^notification_queue$",
       "read": "^(order|fulfillment|inventory|notification_queue)$"
+    },
+    {
+      "user": "order_service",
+      "vhost": "gelato_vhost",
+      "configure": "^order$",
+      "write": "^order$",
+      "read": "^$"
     }
   ],
   "policies": [],
