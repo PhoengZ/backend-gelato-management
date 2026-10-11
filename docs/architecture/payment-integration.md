@@ -1,5 +1,28 @@
 # Payment integration (proposed boundary for owner review)
 
+## Incremental Checkout Session migration
+
+Payment now implements the existing `payment.v1.PaymentService/CreateCheckoutSession`
+contract for Order-to-Payment calls. It listens on port 50057, authenticates the
+dedicated `PAYMENT_REQUEST_TOKEN`, validates immutable Order facts and creates
+Stripe Checkout Sessions. Order retains ownership of its totals, durable session
+binding and Inventory workflow. No shared proto fields or REST shapes change.
+See [Payment gRPC guide](../../payment-service/GRPC.md) for configuration,
+validation, provider replay limits and verification.
+
+Only the inbound RPC is migrated in this increment. The existing REST/webhook
+code below still depends on PaymentIntent-era Order RPCs; Order's new HTTP result
+callbacks, retryable failure semantics, durable late-charge reconciliation/refunds
+and frontend migration remain pending. The new RPC does not access Inventory or
+emit operational events. This is not end-to-end Stripe integration.
+
+Checkout currently remains stateless and relies on provider idempotency retention.
+Permanent checkout-key deduplication after provider key pruning requires a later
+durable reconciliation design. Stripe Session expiry is distinct from Inventory
+expiry, so late charges still need compensation before shared deployment.
+
+## Legacy PaymentIntent boundary
+
 Payment is a stateless Java 21 / Spring Boot Stripe adapter. It has no database,
 Inventory client, or RabbitMQ publisher. Order owns authoritative totals, payment
 status, the provider intent binding and the workflow that confirms/releases stock.
@@ -85,9 +108,11 @@ Use `{order_id: <UUID>}` and snake_case response fields with integer minor units
 THB 250.00 is 25,000 minor units. No compatibility alias accepts client totals.
 
 Payment has application source, SDK/gRPC adapters, security, tests, a Dockerfile
-and CI. Order's directory is currently empty: GetOrderDetails, durable binding,
-result deduplication, Inventory orchestration and outbox must be implemented by
-its owner. Full Stripe-to-Inventory checkout remains an integration dependency.
+and CI. Order implements the new checkout orchestration, but the legacy
+GetOrderDetails, BindPaymentIntent and ReportPaymentResult RPCs used by this
+PaymentIntent adapter are not implemented in its runtime. Full Stripe-to-Inventory
+checkout remains an integration dependency until callbacks and reconciliation
+are connected.
 
 References: [Stripe idempotency](https://docs.stripe.com/api/idempotent_requests),
 [Stripe signature verification](https://docs.stripe.com/webhooks/signature),

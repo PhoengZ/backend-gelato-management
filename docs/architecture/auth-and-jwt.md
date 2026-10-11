@@ -45,7 +45,7 @@ verified. Order forwards the original Bearer token to Catalog when present.
 | Direction | Credential | Purpose |
 | --- | --- | --- |
 | Order -> Inventory gRPC | ORDER_SERVICE_TOKEN in authorization Bearer metadata | Reserve/confirm/release stock |
-| Order -> Payment gRPC | PAYMENT_REQUEST_TOKEN in authorization Bearer metadata | CreateCheckoutSession; Payment server pending |
+| Order -> Payment gRPC | PAYMENT_REQUEST_TOKEN in authorization Bearer metadata | CreateCheckoutSession; authenticated Payment server implemented |
 | Payment -> Order HTTP | PAYMENT_SERVICE_TOKEN in X-Payment-Service-Token | Verified success/failure callback |
 
 The Order-to-Payment token is distinct from both the Inventory token and the
@@ -61,6 +61,10 @@ Order. Browser return pages only read customer-authorized Order status.
 
 The configured opaque tokens and plaintext gRPC are isolated-development
 mechanisms. Agreed TLS and machine identities are required for deployment.
+Payment's inbound gRPC server defaults to TLS and requires certificate/key
+configuration. Order's current client uses plaintext; local integration must
+explicitly disable Payment TLS, and deployment needs a matching TLS client.
+See the [Payment gRPC guide](../../payment-service/GRPC.md) for configuration.
 See [checkout integration](order-checkout.md).
 
 The frontend demo may continue using its mock session cookie until integration.

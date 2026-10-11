@@ -1,7 +1,8 @@
 # Payment Service
 
-Stateless Java 21 / Spring Boot adapter for Stripe card payments. It reads
-checkout totals and reports verified payment outcomes through Order v1 gRPC.
+Java 21 / Spring Boot adapter for Stripe card payments. The inbound Order-to-Payment
+`CreateCheckoutSession` gRPC API is implemented; see [its guide](GRPC.md).
+The legacy REST adapter reads checkout totals and reports verified payment outcomes through Order v1 gRPC.
 It owns no database and does not access Inventory or publish business events.
 
 See the [canonical REST contract](../contracts/openapi/payment-service.v1.yaml)
@@ -37,7 +38,7 @@ From `payment-service/`, with Java 21:
 ```
 
 Windows PowerShell uses `./mvnw.cmd`. Maven generates Java gRPC sources directly
-from `../contracts/proto/order/v1/order.proto`; build from this repository, not
+from the canonical Order and Payment v1 protos; build from this repository, not
 an isolated copy of this directory. Generated sources and reports are ignored.
 Tests use signed JWT/webhook fixtures, an in-process Order server and a local
 HTTP Stripe stub; they require neither Stripe credentials nor Docker.
@@ -116,7 +117,9 @@ No Payment image is assumed to have been published to the team's registry.
 
 ## Integration dependency
 
-Order has no implementation in this checkout. Its owner must implement the
+The new inbound Checkout RPC can be called by Order. Its HTTP result callbacks
+and Payment reconciliation/refunds are not yet connected; follow [GRPC.md](GRPC.md).
+The legacy PaymentIntent flow still requires its owner to implement the
 canonical GetOrderDetails, BindPaymentIntent and ReportPaymentResult RPCs,
 machine authentication, durable deduplication, Inventory orchestration and
 outbox. Late-payment compensation/refunds also require an Order decision.
