@@ -24,6 +24,32 @@ There is no arbitrary stock PATCH or hard DELETE in the canonical Inventory API.
 Release changes reservation state; it is not deletion. Catalog remains the full
 REST/gRPC CRUD demonstration.
 
+## Batch production codes
+
+This branch adds an optional `batch_code` production-container label. The UUID
+`id` remains the resource identifier; REST paths, reservation allocations and
+waste events continue to use the same UUID as `batch_id`.
+
+- Manager can supply a code when creating a batch; trim surrounding whitespace
+  and uppercase ASCII letters. The normalized code is 1–64 characters matching
+  `[A-Z0-9][A-Z0-9_-]{0,63}` and must be unique across all batches.
+- Omitting the field generates and persists `BATCH-<UPPERCASE_BATCH_UUID>`.
+  Existing create requests may continue omitting the field.
+- Blank, null or invalid codes return HTTP 400. Duplicate normalized codes return
+  HTTP 409 with `BATCH_CODE_CONFLICT`; failed creates do not add stock/movements.
+- Get/List batch responses include the persisted code. Clients that strictly
+  validate the old REST response schema must adopt the updated Batch contract.
+
+Migration `002_batch_code.sql` adds/backfills the label while preserving existing
+UUIDs, stock balances and timestamps. Stop old Inventory writers, run the updated
+migrator, then start the updated Inventory binary: old binaries cannot create
+batches after the new NOT NULL column is installed. Existing demo/production
+storage is not migrated by checking out this branch.
+
+See [batch code design and upgrade notes](BATCH_CODE.md) for requests, compatibility
+boundaries and validation. This feature does not change teammate services,
+shared Compose, gRPC contracts or event payloads.
+
 ## Local setup
 
 Use the existing Inventory PostgreSQL on host port 5434, and run Catalog with

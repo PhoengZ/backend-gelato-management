@@ -26,6 +26,8 @@ func classify(err error) (int, codes.Code, string, string) {
 		return 404, codes.NotFound, "NOT_FOUND", "Resource not found"
 	case errors.Is(err, inventory.ErrConflict):
 		return 409, codes.AlreadyExists, "IDEMPOTENCY_CONFLICT", "Key or order already used with another request"
+	case errors.Is(err, inventory.ErrBatchCodeConflict):
+		return 409, codes.AlreadyExists, "BATCH_CODE_CONFLICT", "Batch code already exists"
 	case errors.Is(err, inventory.ErrStock):
 		return 409, codes.FailedPrecondition, "INSUFFICIENT_STOCK", "Insufficient available portions"
 	case errors.Is(err, inventory.ErrState):

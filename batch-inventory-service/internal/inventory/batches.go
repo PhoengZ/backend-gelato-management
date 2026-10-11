@@ -2,8 +2,11 @@ package inventory
 
 import (
 	"context"
+	"errors"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"math"
+	"strings"
 	"time"
 )
 
@@ -13,6 +16,11 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (Batch, error) {
 	in.FlavorID, err = ID(in.FlavorID)
 	if err != nil {
 		return b, wrapInvalid("flavor_id")
+	}
+	batchID := uuid.NewString()
+	code, err := batchCode(in.BatchCode, batchID)
+	if err != nil {
+		return b, err
 	}
 	date, err := time.Parse("2006-01-02", in.ProductionDate)
 	if err != nil || in.ExpiresAt.IsZero() || in.ExpiresAt.Before(date) || in.Initial < 1 || in.Initial > MaxPortions || in.UnitCost == nil || *in.UnitCost < 0 || *in.UnitCost > math.MaxInt64/in.Initial || in.Currency != "THB" {
@@ -39,15 +47,38 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (Batch, error) {
 	if !in.ExpiresAt.After(t) {
 		return b, wrapInvalid("expires_at")
 	}
-	b = Batch{ID: uuid.NewString(), FlavorID: in.FlavorID, ProductionDate: in.ProductionDate, ExpiresAt: in.ExpiresAt.UTC(), Initial: in.Initial, Available: in.Initial, UnitCost: *in.UnitCost, Currency: "THB", Status: "ACTIVE", CreatedAt: t, UpdatedAt: t}
-	_, err = tx.Exec(ctx, `INSERT INTO batches(id,flavor_id,production_date,expires_at,initial_portions,available_portions,unit_cost_minor,currency,status,created_at,updated_at) VALUES($1,$2,$3::text::date,$4,$5,$5,$6,'THB','ACTIVE',$7,$7)`, b.ID, b.FlavorID, b.ProductionDate, b.ExpiresAt, b.Initial, b.UnitCost, t)
+	b = Batch{ID: batchID, BatchCode: code, FlavorID: in.FlavorID, ProductionDate: in.ProductionDate, ExpiresAt: in.ExpiresAt.UTC(), Initial: in.Initial, Available: in.Initial, UnitCost: *in.UnitCost, Currency: "THB", Status: "ACTIVE", CreatedAt: t, UpdatedAt: t}
+	_, err = tx.Exec(ctx, `INSERT INTO batches(id,batch_code,flavor_id,production_date,expires_at,initial_portions,available_portions,unit_cost_minor,currency,status,created_at,updated_at) VALUES($1,$2,$3,$4::text::date,$5,$6,$6,$7,'THB','ACTIVE',$8,$8)`, b.ID, b.BatchCode, b.FlavorID, b.ProductionDate, b.ExpiresAt, b.Initial, b.UnitCost, t)
 	if err != nil {
+		var pe *pgconn.PgError
+		if errors.As(err, &pe) && pe.Code == "23505" && pe.ConstraintName == "batches_batch_code_key" {
+			return Batch{}, ErrBatchCodeConflict
+		}
 		return Batch{}, err
 	}
 	if err = movement(ctx, tx, b.ID, "", "PRODUCED", b.Initial, t); err != nil {
 		return Batch{}, err
 	}
 	return b, tx.Commit(ctx)
+}
+
+// Codes label production containers; UUIDs remain the resource identifiers.
+// Omission keeps legacy callers compatible without assigning an empty label.
+func batchCode(raw *string, batchID string) (string, error) {
+	if raw == nil {
+		return "BATCH-" + strings.ToUpper(batchID), nil
+	}
+	code := strings.TrimSpace(*raw)
+	if len(code) == 0 || len(code) > 64 {
+		return "", wrapInvalid("batch_code")
+	}
+	for i, c := range []byte(code) {
+		alnum := c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9'
+		if !alnum && (i == 0 || c != '_' && c != '-') {
+			return "", wrapInvalid("batch_code")
+		}
+	}
+	return strings.ToUpper(code), nil
 }
 func (s *Service) Get(ctx context.Context, id string) (Batch, error) {
 	id, err := ID(id)

@@ -9,18 +9,20 @@ import (
 )
 
 var (
-	ErrInvalid    = errors.New("invalid input")
-	ErrNotFound   = errors.New("resource not found")
-	ErrConflict   = errors.New("idempotency or order conflict")
-	ErrStock      = errors.New("insufficient available stock")
-	ErrState      = errors.New("invalid or expired reservation state")
-	ErrDependency = errors.New("dependency unavailable")
+	ErrInvalid           = errors.New("invalid input")
+	ErrNotFound          = errors.New("resource not found")
+	ErrConflict          = errors.New("idempotency or order conflict")
+	ErrBatchCodeConflict = errors.New("batch code already exists")
+	ErrStock             = errors.New("insufficient available stock")
+	ErrState             = errors.New("invalid or expired reservation state")
+	ErrDependency        = errors.New("dependency unavailable")
 )
 
 const MaxPortions int64 = math.MaxInt32
 
 type Batch struct {
 	ID             string    `json:"id"`
+	BatchCode      string    `json:"batch_code"`
 	FlavorID       string    `json:"flavor_id"`
 	ProductionDate string    `json:"production_date"`
 	ExpiresAt      time.Time `json:"expires_at"`
@@ -36,6 +38,7 @@ type Batch struct {
 	UpdatedAt      time.Time `json:"updated_at"`
 }
 type CreateInput struct {
+	BatchCode      *string   `json:"batch_code,omitempty"`
 	FlavorID       string    `json:"flavor_id"`
 	ProductionDate string    `json:"production_date"`
 	ExpiresAt      time.Time `json:"expires_at"`
