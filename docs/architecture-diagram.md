@@ -1,79 +1,79 @@
-# Target architecture and Catalog implementation
+# GelatoFlow architecture and checkout boundaries
 
-This is a system design, not a deployment inventory. Catalog has runnable REST
-and gRPC transports sharing Redis. Inventory validates flavors via Catalog gRPC.
-Dashed Catalog edges below are proposed consumer integrations; other existing design edges do not by themselves prove
-that their services have been implemented or deployed.
+This view follows the current Order implementation and canonical contracts.
+Solid edges describe implemented interfaces; dashed edges describe integration
+targets or boundaries whose counterpart is pending. Neither a contract nor a
+diagram proves a deployed, verified end-to-end connection.
+
+## System view
 
 ```mermaid
 flowchart LR
-    %% Clients
-    CW[Customer Web]
-    SD[Staff Dashboard]
-    MD[Manager Dashboard]
+    Customer["Customer Web"] --> Gateway["API Gateway"]
+    Staff["Staff / Manager Dashboard"] --> Gateway
+    Gateway --> Auth["Auth Service"]
+    Gateway --> Catalog["Catalog Service"]
+    Gateway --> Order["Order Service"]
+    Gateway --> Inventory["Batch Inventory Service"]
+    Gateway -. "Target: fulfillment API" .-> Fulfillment["Fulfillment Service"]
+    Gateway --> Analytics["Analytics Service"]
 
-    %% API Gateway
-    AG[API Gateway]
+    Auth --> AuthDB[("Auth PostgreSQL")]
+    Catalog --> CatalogDB[("Catalog Redis")]
+    Order --> OrderDB[("Order PostgreSQL: orders, items, session binding, outbox")]
+    Inventory --> InventoryDB[("Inventory PostgreSQL")]
+    Fulfillment -. "Target storage" .-> FulfillmentDB[("Fulfillment PostgreSQL")]
+    Analytics --> AnalyticsDB[("Analytics MongoDB projections")]
 
-    %% Services
-    AS[Auth Service]
-    CS[Catalog Service]
-    OS[Order Service]
-    BIS[Batch Inventory Service]
-    PS[Payment Service]
-    FS[Fulfillment Service]
-    NS[Notification Service]
-    ANS[Analytics Service]
+    Order -->|"gRPC: BatchGetFlavors"| Catalog
+    Inventory -->|"gRPC: GetFlavor before batch creation"| Catalog
+    Order -->|"gRPC: Reserve / Confirm / Release"| Inventory
+    Order -. "CreateCheckoutSession: client implemented, server pending" .-> Payment["Payment Service"]
+    Payment -. "Target: Stripe Checkout Session" .-> Stripe["Stripe"]
+    Customer -. "Target: redirect to checkout_url" .-> Stripe
+    Stripe -. "Signed webhook through Gateway" .-> Gateway
+    Gateway -. "Provider webhook route" .-> Payment
+    Payment -. "Checkout adapter pending: authenticated HTTP callbacks" .-> Order
 
-    %% Databases & Infrastructure
-    AuthDB[(PostgreSQL Auth DB)]
-    CatDB[(Redis Catalog DB)]
-    OrdDB[(PostgreSQL Order DB)]
-    InvDB[(PostgreSQL Inventory DB)]
-    FulDB[(PostgreSQL Fulfillment DB)]
-    AnaDB[(MongoDB Analytics DB)]
-    RMQ(((RabbitMQ Message Broker)))
-    Stripe((Stripe API))
-
-    %% Client Connections
-    CW --> AG
-    SD --> AG
-    MD --> AG
-
-    %% Gateway to Services
-    AG --> AS
-    AG -- REST --> CS
-    AG --> OS
-    AG --> BIS
-    AG --> PS
-    AG --> FS
-    AG --> ANS
-
-    %% Service to Database Connections
-    AS --> AuthDB
-    CS --> CatDB
-    OS --> OrdDB
-    BIS --> InvDB
-    FS --> FulDB
-    ANS --> AnaDB
-
-    %% Inter-service & External Connections
-    OS -. "Planned gRPC: GetFlavor / BatchGetFlavors" .-> CS
-    BIS -- "gRPC: GetFlavor before creating batch" --> CS
-    OS -- gRPC: Check/Reserve/Confirm/Release Portions --> BIS
-    ANS -- "gRPC: GetOrderDetails (Unary) & StreamOrderItems (Streaming)" --> OS
-    FS -- "gRPC: GetOrderDetails" --> OS
-    PS -- Update Order Status --> OS 
-    PS -- External API --> Stripe
-    Stripe -- Webhook --> PS
-
-    %% Message Broker Connections (Publishers)
-    OS -- Publish: OrderPlaced / OrderCancelled --> RMQ
-    BIS -- Publish: BatchLowStock / BatchExpiring --> RMQ
-    FS -- Publish: OrderReady / PickedUp --> RMQ
-
-    %% Message Broker Connections (Consumers)
-    RMQ -- Consume --> FS
-    RMQ -- Consume --> NS
-    RMQ -- Consume --> ANS
+    Order -->|"Outbox: order.placed / order.cancelled"| Rabbit["RabbitMQ"]
+    Inventory -->|"Outbox: inventory.waste, publishing configurable"| Rabbit
+    Rabbit -. "Consumer integration" .-> Fulfillment
+    Rabbit -. "Consumer integration" .-> Notification["Notification Service"]
+    Rabbit -. "Consumer compatibility and deduplication verification" .-> Analytics
+    Analytics -. "StreamOrderItems: Order server pending" .-> Order
+    Fulfillment -. "GetOrderDetails: Order server pending" .-> Order
 ```
+
+The selected frontend checkout calls Order only. The public PaymentIntent API
+on `chelsea/payment-service` is a separate implementation to migrate; it is not
+a second frontend call in this Checkout Session flow. Payment must implement the
+new gRPC API and connect verified webhook results to Order callbacks first.
+
+## Order internals
+
+```mermaid
+flowchart TD
+    HTTP["Fiber HTTP: /api/v1/orders"] --> Handler["Handler: input, customer ownership, callback token"]
+    Handler --> Logic["Application service: checkout and lifecycle"]
+    Logic --> CatalogClient["Catalog gRPC client"]
+    Logic --> InventoryClient["Inventory gRPC client"]
+    Logic --> PaymentClient["Payment gRPC client: deadline and machine token"]
+    Logic --> Repository["GORM repository"]
+    Repository --> DB[("Owned PostgreSQL")]
+    DB --> Worker["Outbox worker"]
+    Worker --> Publisher["RabbitMQ publisher"]
+    Publisher --> Exchange["order topic exchange"]
+```
+
+Order snapshots names and integer minor-unit prices at checkout. It owns no live
+Catalog records or Inventory stock balances and never reads their stores. Gateway
+must verify JWTs and replace untrusted identity headers before setting X-User-ID.
+
+Order exposes HTTP only; its Analytics gRPC read contract is not yet a running
+server. Pickup-slot allocation, queue numbers, later fulfillment transitions,
+low-stock/expiring events and notifications remain integration/design work.
+Order publisher acknowledgement matching and reconnect findings remain open.
+
+See [sequence diagrams](sequence-diagram.md), [overview](overview-architecture.md),
+[checkout boundary](architecture/order-checkout.md) and
+[data ownership](architecture/service-data-ownership.md).

@@ -20,6 +20,10 @@ Key migration differences include:
 | Prefixed IDs and camelCase | UUID IDs and `snake_case` JSON |
 | Decimal or ambiguous money | Integer `*_minor` plus `currency` |
 | Cookie session inside the demo | Gateway validates Auth Service bearer JWT; an edge layer may store it in an `httpOnly` cookie |
+| Frontend creates a PaymentIntent separately | Frontend calls Order; Order calls Payment CreateCheckoutSession and returns checkout_url |
+| X-Idempotency-Key / body idempotencyKey | UUID Idempotency-Key header; reuse it with the exact request on retry |
+| POST Order immediately returns PAID and queueNumber | Returns PENDING_PAYMENT and checkout_url after session binding; queue allocation is separate |
+| Public GET /orders/{id}/status | Authenticated GET /api/v1/orders/{id}; Order currently supplies no queue number |
 
 The API handles authentication, order management, inventory tracking, sales
 analytics, and payment processing for the demo UI.
@@ -334,7 +338,78 @@ Delete a flavor (Manager only).
 
 ## Orders
 
-### POST /api/v1/orders
+### Current backend checkout migration
+
+The selected workflow is Frontend -> Gateway -> Order -> Payment -> Stripe.
+Order's current contract is [Order OpenAPI v1.1](../contracts/openapi/order-service.v1.yaml).
+The outbound Payment client exists, but the Payment Checkout Session server and
+webhook adapter are pending. Do not treat the legacy examples below as compatible
+backend requests or claim the complete Stripe workflow is running.
+
+Send an Auth JWT to Gateway and a UUID `Idempotency-Key`. Gateway must derive
+`X-User-ID` from verified claims; browser-supplied identity headers are not trusted.
+The body uses UUID flavor IDs, `pickup_at` and `snake_case`:
+
+```json
+{
+  "pickup_at": "2026-10-11T12:00:00Z",
+  "items": [
+    {
+      "flavor_id": "0f3bca11-1eb2-4a86-908a-e60d7656c79b",
+      "portions": 2
+    }
+  ]
+}
+```
+
+Use a future pickup time at runtime. Order obtains the price from Catalog and
+reserves stock with Inventory. A successful new checkout returns 201 with
+`Cache-Control: no-store` and all order fields, including:
+
+```json
+{
+  "order_id": "8d29d6cf-bd4d-48ca-9e4f-dcd8ec54e594",
+  "customer_id": "8dc81c31-a354-4774-b835-36ea0411bc54",
+  "pickup_at": "2026-10-11T12:00:00Z",
+  "status": "PENDING_PAYMENT",
+  "reservation_expires_at": "2026-10-11T11:10:00Z",
+  "total_amount_minor": 15000,
+  "currency": "THB",
+  "items": [
+    {
+      "flavor_id": "0f3bca11-1eb2-4a86-908a-e60d7656c79b",
+      "flavor_name": "Vanilla",
+      "portions": 2,
+      "unit_price_minor": 7500,
+      "subtotal_minor": 15000
+    }
+  ],
+  "created_at": "2026-10-11T11:00:00Z",
+  "updated_at": "2026-10-11T11:00:01Z",
+  "checkout_url": "https://checkout.stripe.com/..."
+}
+```
+
+Frontend opens `checkout_url`, then reads `GET /api/v1/orders/{order_id}` after
+returning. GET requires customer authentication/ownership and omits the checkout
+URL. Polling the payment-result page can stop on PAID or CANCELLED; a pending
+state can outlive its Inventory reservation because Order has no expiry worker.
+Do not infer PAID from Stripe's browser redirect.
+
+For cancellation, call `POST /api/v1/orders/{order_id}/cancel` with
+`{"reason":"CUSTOMER_REQUEST"}`. Order releases Inventory before committing
+CANCELLED; valid-batch portions become available and expired-batch portions become
+waste. Cancellation currently does not close the Stripe session. Paid orders
+cannot use this pending-order cancellation endpoint.
+
+On Payment 503/504, keep the exact request and original key, then retry. The error
+includes `details.order_id`. Same key with changed data, or an expired hold, returns
+409. A terminal-order replay returns current order fields without a checkout URL.
+
+See [checkout architecture](architecture/order-checkout.md) and
+[sequence diagrams](sequence-diagram.md) for full failure/callback behavior.
+
+### Legacy demo: POST /api/v1/orders
 
 Create a new order.
 
@@ -382,7 +457,7 @@ Create a new order.
 
 ---
 
-### GET /api/v1/orders/[orderId]/status
+### Legacy demo: GET /api/v1/orders/[orderId]/status
 
 Get order status and queue information.
 
@@ -756,7 +831,17 @@ Get sales and production analytics (Manager only).
 
 ## Payment (Stripe)
 
-### POST /api/v1/payments/create-payment-intent
+The selected backend checkout returns a Stripe Checkout URL through Order.
+Frontend does not call Payment separately or submit its own amount. Payment
+must add the new [internal checkout gRPC API](../contracts/proto/payment/v1/payment.proto).
+Its existing PaymentIntent implementation on `chelsea/payment-service` instead
+accepts `order_id`, verifies customer ownership through Order, and returns
+`client_secret`. That implementation also needs migration to the selected flow.
+
+The amount/clientSecret examples below are preserved legacy demo shapes; neither
+the current Order checkout nor the Payment branch accepts client-selected totals.
+
+### Legacy demo: POST /api/v1/payments/create-payment-intent
 
 Create a Stripe payment intent for checkout (Customer only).
 
@@ -800,6 +885,13 @@ Stripe webhook endpoint for payment events (Server-to-server).
 **Access**: Public (Stripe-signed)
 
 **Webhook Events Handled**:
+
+The list below describes the legacy PaymentIntent flow. The Checkout adapter must
+verify signed provider results, correlate session/order metadata, handle supported
+payment methods and report success only once payment is confirmed. The Order
+branch supplies authenticated HTTP success/failure callbacks; it does not verify
+Stripe webhooks itself. Browser return URLs must never call these callbacks.
+
 - `payment_intent.succeeded` - Payment completed
 - `payment_intent.payment_failed` - Payment failed
 
@@ -871,6 +963,47 @@ interface Flavor {
 ```
 
 ### Order
+
+Current backend request and response types follow Order OpenAPI. Monetary values
+are integer THB minor units; keep the Idempotency-Key in the header, not the body.
+
+```typescript
+interface BackendOrderRequest {
+  pickup_at: string;
+  items: { flavor_id: string; portions: number }[];
+}
+
+type BackendOrderStatus =
+  | "PENDING_PAYMENT" | "PAID" | "CANCELLED"
+  | "PREPARING" | "READY_FOR_PICKUP" | "COMPLETED";
+
+interface BackendOrderResponse {
+  order_id: string;
+  customer_id: string;
+  pickup_at: string;
+  status: BackendOrderStatus;
+  reservation_expires_at: string;
+  total_amount_minor: number;
+  currency: "THB";
+  items: {
+    flavor_id: string;
+    flavor_name: string;
+    portions: number;
+    unit_price_minor: number;
+    subtotal_minor: number;
+  }[];
+  created_at: string;
+  updated_at: string;
+}
+
+interface BackendCheckoutResponse extends BackendOrderResponse {
+  checkout_url?: string; // Present for a payable pending checkout; omitted by GET.
+}
+```
+
+The following types describe the legacy demo and require migration. The later
+fulfillment states above exist in the current model but have no Order transition
+handlers yet; queue and staff types below describe demo/target integration only.
 
 ```typescript
 interface OrderRequest {
@@ -1056,9 +1189,13 @@ Default cache configuration (configured in `components/providers.tsx`):
 
 ### Endpoint-Specific Polling
 
+The legacy demo rows below are retained for migration. The backend payment-result
+row uses the current authenticated Order route; it does not supply queue data.
+
 | Endpoint | Interval | Condition |
 |----------|----------|-----------|
 | `/api/v1/orders/[orderId]/status` | 3 seconds | Stop when status = `PICKED_UP` |
+| `/api/v1/orders/{order_id}` (backend payment-result page) | Suggested 3 seconds | Authenticated; stop on PAID/CANCELLED or show expired-hold recovery |
 | `/api/v1/fulfillments` | 2 seconds | Continuous |
 
 ---
@@ -1067,17 +1204,43 @@ Default cache configuration (configured in `components/providers.tsx`):
 
 ### Idempotency
 
-Order creation uses an idempotency key to prevent duplicate orders:
+Backend checkout uses a UUID `Idempotency-Key` header. Generate a key once for a
+new checkout and retain it with the original request across timeout retries:
+
+```typescript
+const checkoutKey = crypto.randomUUID(); // Retain for retries of this checkout.
+const response = await fetch("/api/v1/orders", {
+  method: "POST",
+  headers: {
+    "Authorization": `Bearer ${accessToken}`,
+    "Content-Type": "application/json",
+    "Idempotency-Key": checkoutKey
+  },
+  body: JSON.stringify(checkoutRequest) // BackendOrderRequest; no client total.
+});
+if (!response.ok) {
+  throw await response.json(); // Keep the same request/key for recoverable retries.
+}
+const checkout: BackendCheckoutResponse = await response.json();
+if (checkout.checkout_url) window.location.assign(checkout.checkout_url);
+```
+
+`accessToken` and `checkoutRequest` are supplied by the authenticated UI. The key
+must not be regenerated on each retry. Order derives stable reservation/order and
+checkout keys; Payment must implement same-key session retrieval. Expired or
+cancelled checkouts require a new order/key, not a new charge on the old order.
+
+Legacy demo idempotency uses a different header and body shape:
 
 ```typescript
 headers: { "X-Idempotency-Key": order.idempotencyKey }
 ```
 
-Generate a unique key per checkout attempt to safely retry failed requests.
+These legacy fields are not compatibility aliases accepted by the backend.
 
 ### Mock Database
 
-All endpoints use a mock database (`lib/mock-db.ts`) for demonstration:
+The legacy frontend demo endpoints use a mock database (`lib/mock-db.ts`):
 - No real persistence
 - Demo user credentials: `demo@example.com / password`
 - Mock data resets on server restart
@@ -1089,7 +1252,8 @@ All endpoints use a mock database (`lib/mock-db.ts`) for demonstration:
 | Version | Date | Changes |
 |---------|------|---------|
 | 1.0.0 | 2026-09-02 | Initial API specification |
+| Migration notes | 2026-10-11 | Order-orchestrated Checkout Session flow, snake_case examples, retry/cancel behavior; legacy demo retained |
 
 ---
 
-**Last Updated**: September 2, 2026
+**Last Updated**: October 11, 2026

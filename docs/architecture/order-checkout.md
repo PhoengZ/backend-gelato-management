@@ -77,6 +77,42 @@ pending. A browser success redirect never marks an order paid.
   must handle expired-session UX and reconcile/refund a charge whose stock can
   no longer be confirmed. Order's ConfirmReservation still rejects expired stock.
 
+## Cancellation, stock release and provider session
+
+Customer calls POST /api/v1/orders/{id}/cancel with reason CUSTOMER_REQUEST through
+Gateway. Order verifies ownership and permits only pending-payment cancellation.
+Payment's verified payment-failed callback uses its machine token and the reason
+PAYMENT_FAILED. Both paths call Inventory ReleaseReservation with the persisted
+reservation/order IDs and deterministic release key before committing CANCELLED
+and order.cancelled in one local transaction.
+
+Inventory returns RELEASED or EXPIRED. Each allocation returns to available if
+its batch is still valid; expired-batch portions become waste. If release succeeds
+and the Order commit fails, retry the same endpoint/reason/key. An already
+cancelled order is a no-op, and a paid order cannot use this cancellation endpoint.
+
+```mermaid
+flowchart TD
+    Request["Customer cancel or verified payment failure"] --> Check["Verify caller and pending order"]
+    Check --> Release["Inventory ReleaseReservation with stable key"]
+    Release --> Valid{"Allocated batch valid?"}
+    Valid -->|"Yes"| Available["reserved becomes available"]
+    Valid -->|"No"| Waste["reserved becomes wasted"]
+    Available --> Commit["Order transaction: CANCELLED and cancellation outbox"]
+    Waste --> Commit
+    Commit --> Done["204 to caller"]
+```
+
+There is no Order-to-Payment cancel-session RPC in the current contract or code.
+The existing URL can remain payable after stock release, and a browser cancel
+redirect is not automatically an Order cancellation. A late success for CANCELLED
+is rejected; a late success after Inventory expiry cannot confirm stock. Payment
+must durably reconcile/refund such charges. Inventory expires holds independently,
+but Order has no worker that automatically changes its pending status.
+
+See [detailed sequence and state diagrams](../sequence-diagram.md) and
+[Inventory lifecycle](inventory-reservation.md).
+
 ## Integration status and migration
 
 Order's outbound client, binding, REST response and retry handling are implemented.

@@ -69,6 +69,13 @@ Only the owning service publishes its domain events. RabbitMQ credentials should
 limit Order, Fulfillment, and Batch Inventory to their own exchanges. A consumer
 must not publish a replacement event using another service's event type.
 
+Implementation status: Order currently produces order.placed/order.cancelled,
+and Inventory produces inventory.waste through outboxes. Canonical schemas and
+validated fixtures exist for OrderPlaced and WasteRecorded. OrderCancelled still
+needs its schema/fixture and consumer-owner agreement; fulfillment, low-stock and
+expiring events in this catalog describe integration/design targets. The catalog
+alone is not evidence that producers and consumers are connected end to end.
+
 ### 3.1 OrderPlaced
 
 `OrderPlaced` is emitted only after payment succeeds and the Inventory
@@ -107,16 +114,43 @@ Catalog fields.
 The sum of item `subtotal_minor` values must equal `total_amount_minor`. All
 items in version 1 use the same event-level currency.
 
+Checkout Session creation is not an OrderPlaced trigger. Order first persists
+PENDING_PAYMENT and its session binding; only a trusted payment-success callback
+followed by Inventory confirmation permits the PAID/outbox transaction.
+See [checkout flow](architecture/order-checkout.md).
+
 ### 3.2 OrderCancelled
 
-Schema: `contracts/events/order-cancelled.v1.schema.json`; example:
-`contracts/examples/order-cancelled.v1.json`.
+The current producer payload contains order_id and reason, where reason is
+CUSTOMER_REQUEST or PAYMENT_FAILED. Order only cancels PENDING_PAYMENT orders,
+after Inventory release succeeds. It commits CANCELLED and the outbox record
+atomically. A repeated cancellation does not create another domain event.
 
-The payload contains `order_id` and a stable `reason` code. Services that need
-the paid amount or line items (such as Fulfillment or Notification) call Order
-Service directly via gRPC using `order_id` to retrieve authoritative order details.
-Services do not maintain replicated tables or duplicate collections of foreign
-orders in their local databases.
+```json
+{
+  "specversion": "1.0",
+  "id": "4c7c1cef-d704-4b6c-a544-bc42d6e8bdd6",
+  "source": "/gelatoflow/order-service",
+  "type": "com.gelatoflow.order.cancelled.v1",
+  "time": "2026-10-11T11:05:00Z",
+  "datacontenttype": "application/json",
+  "data": {
+    "order_id": "8d29d6cf-bd4d-48ca-9e4f-dcd8ec54e594",
+    "reason": "CUSTOMER_REQUEST"
+  }
+}
+```
+
+This example reflects the current producer; it is not yet backed by a canonical
+cancellation JSON Schema. It describes a never-paid order, so consumers must not
+subtract sales or assume a prior order.placed exists for that order. In particular,
+the Analytics cancellation projection must be aligned with this meaning before
+shared delivery is enabled.
+
+Downstream detail lookup is an Order gRPC integration target; its server remains
+unimplemented. Consumers must not create shadow order tables to bypass that gap.
+Cancellation releases Inventory stock but does not cancel the Stripe session or
+represent a successful refund; a later charge needs provider reconciliation.
 
 ### 3.3 Fulfillment events
 
@@ -182,23 +216,25 @@ Service using client-streaming gRPC (`StreamOrderItems`), streaming a sequence o
 `order_id`s and receiving consolidated order item details for analytical batch
 computation.
 
-When processing thin `order.cancelled` events (`com.gelatoflow.order.cancelled.v1`),
-Analytics Service calls Order Service synchronously via unary gRPC (`GetOrderDetails`)
-to obtain the authoritative order snapshot, deducting the cancelled item quantities
-and minor-unit totals from daily analytics metrics without maintaining any local
-replicated order entities.
-
-Analytics Service consumes canonical CloudEvents 1.0 routing keys (`order.placed`,
-`order.cancelled`, and `inventory.waste`) with dual-binding fallback for legacy keys.
-Incoming events are deduplicated idempotently using `event.id` stored in its
-`processed_events` collection, and all persistent aggregates remain in integer
-minor units.
+The current Analytics source binds order.placed, order.cancelled and
+inventory.waste and uses minor-unit aggregate fields. Those bindings do not prove
+successful canonical delivery or atomic event deduplication. Its Order gRPC read
+dependency is not implemented by this Order branch, and its cancellation sales
+projection needs agreement with the never-paid cancellation semantics above.
+Validate compatibility, duplicate handling and projection behavior with its owner
+before enabling the shared operational producer.
 
 ## 5. Ordering and failure handling
 
 - Consumers cannot assume cross-exchange global ordering.
 - A consumer that receives a thin follow-up before its corresponding fat event
   should retry with bounded backoff or park the message in a dead-letter queue.
+  Current order.cancelled is a standalone pending-checkout cancellation; it must
+  not be retried indefinitely waiting for an order.placed that will never exist.
 - Poison messages are rejected without infinite requeue loops.
 - Processed event IDs are retained long enough to cover the broker's redelivery
   and retry window.
+
+Order's local status/outbox write is transactional. Its existing RabbitMQ
+publisher still has acknowledgement matching and reconnect findings from review;
+this document does not claim those delivery defects have been repaired.
