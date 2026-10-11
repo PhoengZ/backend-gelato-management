@@ -66,7 +66,7 @@ func (h *OrderHandler) GetOrder(c *fiber.Ctx) error {
 
 func (h *OrderHandler) PaymentSucceeded(c *fiber.Ctx) error {
 	if err := h.authorizePaymentService(c); err != nil {
-		return err
+		return writeError(c, err)
 	}
 	if err := h.svc.ConfirmPayment(c.UserContext(), c.Params("id")); err != nil {
 		return writeError(c, err)
@@ -76,7 +76,7 @@ func (h *OrderHandler) PaymentSucceeded(c *fiber.Ctx) error {
 
 func (h *OrderHandler) PaymentFailed(c *fiber.Ctx) error {
 	if err := h.authorizePaymentService(c); err != nil {
-		return err
+		return writeError(c, err)
 	}
 	if err := h.svc.CancelOrder(c.UserContext(), c.Params("id"), "PAYMENT_FAILED"); err != nil {
 		return writeError(c, err)
@@ -87,7 +87,7 @@ func (h *OrderHandler) PaymentFailed(c *fiber.Ctx) error {
 func (h *OrderHandler) authorizePaymentService(c *fiber.Ctx) error {
 	provided := c.Get("X-Payment-Service-Token")
 	if len(provided) != len(h.paymentToken) || subtle.ConstantTimeCompare([]byte(provided), []byte(h.paymentToken)) != 1 {
-		return writeError(c, &service.AppError{Code: "UNAUTHENTICATED", Message: "payment service authentication required", HTTPStatus: 401})
+		return &service.AppError{Code: "UNAUTHENTICATED", Message: "payment service authentication required", HTTPStatus: 401}
 	}
 	return nil
 }
