@@ -20,7 +20,10 @@ to create the session. Order must bind the returned session before exposing its 
 Redirects require HTTPS. With development plaintext transport, loopback HTTP
 redirects are also accepted. Empty tokens, missing TLS paths and invalid redirect
 URLs fail startup. Supply the existing Stripe/JWT/legacy Order settings as well;
-the REST endpoints still start in the same process. These variables are separate
+the REST endpoints still start in the same process. Checkout webhook callbacks
+also require `ORDER_HTTP_BASE_URL`, `PAYMENT_SERVICE_TOKEN` and, for isolated HTTP
+development, `PAYMENT_CALLBACK_ALLOW_PLAINTEXT=true`; see [the webhook guide](WEBHOOK.md).
+These variables are separate
 from the legacy `ORDER_SERVICE_TOKEN` and Order's reverse HTTP
 `PAYMENT_SERVICE_TOKEN`. Production also requires a TLS-capable Order caller;
 the current Order client uses plaintext for development.
@@ -55,7 +58,7 @@ the standard protobuf JSON names `checkoutSessionId` and `checkoutUrl`.
 - A valid, future protobuf reservation timestamp is mandatory. An expired hold
   is rejected before any provider mutation, and checked again after creation.
 - Stripe receives one line item for the exact immutable Order total, card-only
-  payment, trusted redirects and order/customer/integration/checkout-key/deadline
+  payment, trusted redirects and order/customer/original-amount/currency/integration/checkout-key/deadline
   metadata on both the Session and its PaymentIntent. The RPC has no item list.
 - Provider key is `gelatoflow-checkout-v1-<idempotency_key>`. All request facts,
   including deadline, are stable Stripe parameters. Same-key replays reuse the
@@ -86,10 +89,18 @@ provider key as a permanent application idempotency store.
 
 The Session uses Stripe's default expiry; the ten-minute stock deadline is
 metadata, because Stripe cannot directly use such a short `expires_at`.
-Cancellation/stock expiry can therefore leave a payable URL. The new HTTP
-payment callbacks, failure-lifecycle changes and durable refunds remain separate
-integration work. The existing webhook still reports through the legacy Order
-gRPC API. Creating a Session alone is not an end-to-end payment implementation.
+Cancellation/stock expiry can therefore leave a payable URL. Checkout webhooks
+now report verified results through Order's existing HTTP callbacks; retryable
+Checkout card failures do not cancel an order. Permanent event deduplication,
+Order's private binding validation and durable refunds remain shared follow-up
+work. The retained PaymentIntent webhook path still uses the legacy Order gRPC
+API. See [WEBHOOK.md](WEBHOOK.md) for demo configuration and delivery semantics;
+deployed Stripe-to-Order integration has not been verified here.
+
+The Checkout webhook increment adds original amount/currency metadata to the
+creation parameters. Use fresh Orders/checkout keys for demo migration; older
+provider keys can conflict with changed parameters and older Sessions need
+explicit reconciliation as described in WEBHOOK.md.
 
 ## Verification
 

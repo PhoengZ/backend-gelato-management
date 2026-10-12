@@ -2,7 +2,9 @@
 
 Java 21 / Spring Boot adapter for Stripe card payments. The inbound Order-to-Payment
 `CreateCheckoutSession` gRPC API is implemented; see [its guide](GRPC.md).
-The legacy REST adapter reads checkout totals and reports verified payment outcomes through Order v1 gRPC.
+Verified Checkout webhooks now report results through Order's existing HTTP
+callbacks; see [the webhook guide](WEBHOOK.md). The retained legacy REST adapter
+reads checkout totals and reports PaymentIntent outcomes through Order v1 gRPC.
 It owns no database and does not access Inventory or publish business events.
 
 See the [canonical REST contract](../contracts/openapi/payment-service.v1.yaml)
@@ -15,10 +17,10 @@ Java packages under `src/main/java/com/gelatoflow/payment/` are grouped by respo
 
 ```text
 PaymentApplication.java   Spring Boot entry point
-config/                   Application settings, JWT security and Order gRPC channel
+config/                   Application settings, JWT security and Order transports
 controller/               REST endpoints
 service/                  Checkout and webhook workflows
-client/order/             Order gRPC adapter and port
+client/order/             Checkout HTTP callbacks and legacy Order gRPC adapter
 client/stripe/            Stripe SDK adapter and port
 dto/                      REST request and response records
 exception/                Application errors and REST exception handling
@@ -47,8 +49,12 @@ HTTP Stripe stub; they require neither Stripe credentials nor Docker.
 
 Supply `.env.example` values as environment variables. Spring does not load
 `.env` automatically. Set real Stripe test keys, Auth's signing secret and a
-dedicated Payment-to-Order token; no usable secrets are committed. TLS defaults
-to enabled; set `ORDER_GRPC_TLS=false` only for a local plaintext Order server.
+dedicated `PAYMENT_SERVICE_TOKEN` matching Order; no usable secrets are committed.
+Set `ORDER_HTTP_BASE_URL=http://localhost:3003` and
+`PAYMENT_CALLBACK_ALLOW_PLAINTEXT=true` for isolated local development. Keep
+`PAYMENT_REQUEST_TOKEN` separate for inbound gRPC. See `.env.example` for the
+retained legacy gRPC/JWT settings; `ORDER_GRPC_TLS=false` applies only to that
+local legacy channel, not the new HTTP callbacks.
 
 ```bash
 ./mvnw spring-boot:run
@@ -59,7 +65,29 @@ Liveness/readiness are exposed at `/actuator/health/liveness` and
 `/actuator/health/readiness`. Health indicates process health; it does not assert
 Order or Stripe availability. Dependency failures are handled per request.
 
-## Checkout and webhook
+## Selected Checkout and webhook flow
+
+Frontend creates an Order and navigates to its `checkout_url`. It does not call
+the legacy PaymentIntent endpoint. Payment verifies signed Checkout Session
+events and current Stripe state, then calls Order's `payment-succeeded` or
+terminal `payment-failed` HTTP callback. Only Order's 204 acknowledges the result.
+Duplicates replay; provider/callback failures request Stripe redelivery. A card
+decline keeps the Session open and never releases stock through this flow.
+See [WEBHOOK.md](WEBHOOK.md) for validation and remaining boundary limitations.
+
+For local Stripe forwarding:
+
+```bash
+stripe listen \
+  --events checkout.session.completed,checkout.session.async_payment_succeeded,checkout.session.async_payment_failed,checkout.session.expired \
+  --forward-to http://localhost:3007/api/v1/payments/webhook
+```
+
+Use its printed `whsec_...` as `STRIPE_WEBHOOK_SECRET` and restart Payment.
+Complete the actual Order-created Session with a Stripe test card. Generic CLI
+fixtures lack the required metadata. A browser success URL never marks Order paid.
+
+## Legacy PaymentIntent endpoint
 
 ```bash
 curl -X POST http://localhost:3007/api/v1/payments/create-payment-intent \
@@ -89,7 +117,8 @@ signed notifications are reconciled through a fresh provider retrieval.
 
 HTTP 400 rejects invalid signatures; 502/503 requests redelivery on provider or
 Order failure. Signed unsupported events and superseded failures return 200.
-Deduplication is durable in Order by provider event ID, never in Payment memory.
+Durable event deduplication is a requirement of that proposed legacy Order RPC
+contract; it is not implemented by Order's current HTTP callback boundary.
 
 ## Docker
 
@@ -109,16 +138,23 @@ secrets in your shell before running from the repository root:
 ```bash
 docker compose --env-file infra/.env.example \
   -f infra/docker/compose.yml -f infra/docker/compose.dev.yml \
-  -f infra/docker/compose.payment.yml up --build payment-service
+  -f infra/docker/compose.payment.yml -f payment-service/compose.checkout.yml \
+  up --build payment-service
 ```
 
-The override uses the shared network and binds port 3007 only on localhost.
+For host-based Order, set `ORDER_HTTP_BASE_URL=http://host.docker.internal:3003`
+in the Docker environment. The overrides use the shared network and bind Payment
+HTTP and gRPC ports only on localhost. The Payment-owned override supplies the
+new callback settings without modifying shared infrastructure files.
 No Payment image is assumed to have been published to the team's registry.
 
 ## Integration dependency
 
-The new inbound Checkout RPC can be called by Order. Its HTTP result callbacks
-and Payment reconciliation/refunds are not yet connected; follow [GRPC.md](GRPC.md).
+Order can call the inbound Checkout RPC and receive verified results through
+its existing HTTP callbacks. Only Payment code/configuration changes in this
+increment. The current Order boundary has no provider event ID or exposed bound
+Session ID; durable event deduplication, richer binding verification and late
+payment reconciliation/refunds remain pending. Follow [WEBHOOK.md](WEBHOOK.md).
 The legacy PaymentIntent flow still requires its owner to implement the
 canonical GetOrderDetails, BindPaymentIntent and ReportPaymentResult RPCs,
 machine authentication, durable deduplication, Inventory orchestration and

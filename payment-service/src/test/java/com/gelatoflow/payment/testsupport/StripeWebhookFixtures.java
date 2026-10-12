@@ -25,4 +25,10 @@ public final class StripeWebhookFixtures {
         + HexFormat.of()
             .formatHex(mac.doFinal((timestamp + "." + payload).getBytes(StandardCharsets.UTF_8)));
   }
+
+  public static String checkoutPayload(String type) {
+    return "{\"id\":\"evt_checkout\",\"object\":\"event\",\"created\":1700000000,\"livemode\":false,\"type\":\""
+        + type
+        + "\",\"data\":{\"object\":{\"id\":\"cs_test_fixture\",\"object\":\"checkout.session\"}}}";
+  }
 }

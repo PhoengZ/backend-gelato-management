@@ -21,18 +21,21 @@ public class WebhookService {
   private final StripePort stripe;
   private final OrderPort orders;
   private final PaymentService payments;
+  private final CheckoutWebhookService checkout;
 
   public WebhookService(
       PaymentProperties properties,
       ObjectMapper mapper,
       StripePort stripe,
       OrderPort orders,
-      PaymentService payments) {
+      PaymentService payments,
+      CheckoutWebhookService checkout) {
     this.properties = properties;
     this.mapper = mapper;
     this.stripe = stripe;
     this.orders = orders;
     this.payments = payments;
+    this.checkout = checkout;
   }
 
   public void receive(String payload, String signature) {
@@ -54,6 +57,18 @@ public class WebhookService {
         || !Boolean.valueOf(properties.stripe().liveMode()).equals(event.getLivemode()))
       throw invalidWebhook();
     var type = event.getType();
+    if (type != null && checkout.supports(type)) {
+      try {
+        var object = mapper.readTree(payload).path("data").path("object");
+        var sessionId = object.path("id").asText();
+        if (!"checkout.session".equals(object.path("object").asText())
+            || !sessionId.matches("cs_[A-Za-z0-9_]+")) throw invalidWebhook();
+        checkout.receive(type, sessionId);
+        return;
+      } catch (java.io.IOException e) {
+        throw invalidWebhook();
+      }
+    }
     if (!"payment_intent.succeeded".equals(type) && !"payment_intent.payment_failed".equals(type))
       return;
 
@@ -72,6 +87,9 @@ public class WebhookService {
     var intent = stripe.retrieve(intentId);
     payments.validateIntent(intent);
     if (!intentId.equals(intent.getId())) throw invalidWebhook();
+    // Checkout's PaymentIntent events are duplicates of the Session workflow.
+    // In particular, a declined card attempt must not release its stock hold.
+    if (intent.getMetadata().containsKey("checkout_key")) return;
     var outcome =
         "payment_intent.succeeded".equals(type)
             ? PaymentOutcome.PAYMENT_OUTCOME_SUCCEEDED

@@ -29,7 +29,9 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
       "payment.checkout.tls=false",
       "payment.checkout.request-token=" + TOKEN,
       "payment.checkout.success-url=http://localhost:3000/success?session_id={CHECKOUT_SESSION_ID}",
-      "payment.checkout.cancel-url=http://localhost:3000/cancel"
+      "payment.checkout.cancel-url=http://localhost:3000/cancel",
+      "payment.order-callback.service-token=payment-to-order-test-token-at-least-32-bytes",
+      "payment.order-callback.allow-plaintext=true"
     })
 class CheckoutGrpcTest {
   @Autowired CheckoutGrpcServer server;

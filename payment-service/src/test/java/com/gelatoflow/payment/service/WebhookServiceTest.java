@@ -24,7 +24,8 @@ class WebhookServiceTest {
           new ObjectMapper(),
           stripe,
           orders,
-          new PaymentService(orders, stripe, properties()));
+          new PaymentService(orders, stripe, properties()),
+          mock(CheckoutWebhookService.class));
 
   @Test
   void signedSuccessReportsVerifiedTotalAndStableEventIdOnEveryDelivery() throws Exception {

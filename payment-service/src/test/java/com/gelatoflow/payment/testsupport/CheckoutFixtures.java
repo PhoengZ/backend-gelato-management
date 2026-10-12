@@ -54,4 +54,14 @@ public final class CheckoutFixtures {
         "http://localhost:3000/success?session_id={CHECKOUT_SESSION_ID}",
         "http://localhost:3000/cancel");
   }
+
+  public static Session paidSession() {
+    var session = session(request());
+    session.setStatus("complete");
+    session.setPaymentStatus("paid");
+    var payment = intent("succeeded");
+    payment.setMetadata(new java.util.HashMap<>(session.getMetadata()));
+    session.setPaymentIntentObject(payment);
+    return session;
+  }
 }

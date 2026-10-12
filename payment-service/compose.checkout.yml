@@ -1,0 +1,9 @@
+# Add after infra/docker/compose.payment.yml to configure Payment's HTTP callbacks.
+services:
+  payment-service:
+    environment:
+      PAYMENT_HTTP_CALLBACK_ENABLED: ${PAYMENT_HTTP_CALLBACK_ENABLED:-true}
+      ORDER_HTTP_BASE_URL: ${ORDER_HTTP_BASE_URL:-http://host.docker.internal:3003}
+      PAYMENT_SERVICE_TOKEN: ${PAYMENT_SERVICE_TOKEN:?PAYMENT_SERVICE_TOKEN is required}
+      PAYMENT_CALLBACK_ALLOW_PLAINTEXT: ${PAYMENT_CALLBACK_ALLOW_PLAINTEXT:-false}
+      ORDER_HTTP_CALLBACK_TIMEOUT_MS: ${ORDER_HTTP_CALLBACK_TIMEOUT_MS:-5000}

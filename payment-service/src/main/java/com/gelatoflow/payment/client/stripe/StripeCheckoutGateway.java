@@ -35,6 +35,8 @@ public class StripeCheckoutGateway implements CheckoutPort {
         "integration", "gelatoflow-v1",
         "order_id", request.getOrderId(),
         "customer_id", request.getCustomerId(),
+        "amount_minor", Long.toString(request.getAmountMinor()),
+        "currency", request.getCurrency(),
         "checkout_key", request.getIdempotencyKey(),
         "reservation_expires_at",
             Instant.ofEpochSecond(expiry.getSeconds(), expiry.getNanos()).toString());

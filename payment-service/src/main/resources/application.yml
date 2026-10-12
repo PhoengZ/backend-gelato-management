@@ -31,6 +31,12 @@ payment:
     secret-key: ${STRIPE_SECRET_KEY}
     webhook-secret: ${STRIPE_WEBHOOK_SECRET}
     live-mode: ${STRIPE_LIVE_MODE:false}
+  order-callback:
+    enabled: ${PAYMENT_HTTP_CALLBACK_ENABLED:${payment.checkout.enabled:true}}
+    base-url: ${ORDER_HTTP_BASE_URL:http://localhost:3003}
+    service-token: ${PAYMENT_SERVICE_TOKEN:}
+    allow-plaintext: ${PAYMENT_CALLBACK_ALLOW_PLAINTEXT:false}
+    timeout-ms: ${ORDER_HTTP_CALLBACK_TIMEOUT_MS:5000}
   order:
     target: ${ORDER_GRPC_TARGET:localhost:50054}
     service-token: ${ORDER_SERVICE_TOKEN}
