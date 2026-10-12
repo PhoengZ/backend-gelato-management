@@ -1,7 +1,7 @@
 # Batch code design and upgrade notes
 
-Proposed feature branch: `batch-code`, based on fetched main `eba37e07` on
-11 October 2026 (Asia/Bangkok). The feature is separate from the UUID-only owned
+Proposed feature branch: `batch-code`, synchronized with fetched main `ae36f4e4`
+on 12 October 2026 (Asia/Bangkok). The feature is separate from the UUID-only owned
 demo. Opening this branch for review does not upgrade any existing team/demo database.
 
 ## Resource identity and labels
@@ -45,6 +45,9 @@ letters, embedded spaces and other characters return HTTP 400. Duplicate codes
 across flavors return HTTP 409 `BATCH_CODE_CONFLICT` after normalization, including
 concurrent creates. Stock and audit movements commit only for a successful create.
 Get/List include the stable persisted label. No code-update endpoint is added.
+The HTTP decoder rejects explicit JSON null before decoding CreateInput; only an
+omitted field reaches the generated-label fallback. A blank optional form field
+must therefore be omitted by the client adapter rather than sent as an empty string.
 
 ## Upgrade sequence
 
@@ -74,6 +77,11 @@ No existing team/demo database is upgraded automatically by this local branch.
 - Frontend's mock uses camelCase `batchCode`; its owner still needs a real API
   adapter for snake_case fields and must continue sending UUID `batch_id` for waste.
 - No shared broker bindings, Gateway route, JWT policy or service token is changed.
+
+The current main already includes Order and Payment. Order uses the unchanged
+Inventory gRPC interface. Both owners' local demo scripts create batches without
+the new field and read the returned UUID `id` and stock fields, so they do not need
+code changes for this feature.
 
 Affected REST consumers should review the response addition and upgrade sequence
 before merge or deployment. This document does not mark shared ADR decisions as
