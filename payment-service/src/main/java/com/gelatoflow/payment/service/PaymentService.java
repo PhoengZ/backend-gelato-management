@@ -49,6 +49,12 @@ public class PaymentService {
             .anyMatch(c -> c.getCurrencyCode().equals(currency))) {
       throw invalidOrder();
     }
+    if (!"THB".equals(currency)) {
+      throw new ApiException(
+          HttpStatus.CONFLICT,
+          "PAYMENT_CURRENCY_UNSUPPORTED",
+          "PromptPay payments require THB currency");
+    }
     var intent =
         order.getPaymentIntentId().isBlank()
             ? stripe.create(

@@ -24,7 +24,8 @@ public class StripeGateway implements StripePort {
         PaymentIntentCreateParams.builder()
             .setAmount(amountMinor)
             .setCurrency(currency.toLowerCase(java.util.Locale.ROOT))
-            .addAllowedPaymentMethodType(PaymentIntentCreateParams.AllowedPaymentMethodType.CARD)
+            .addAllowedPaymentMethodType(
+                PaymentIntentCreateParams.AllowedPaymentMethodType.PROMPTPAY)
             .putMetadata("order_id", orderId)
             .putMetadata("customer_id", customerId)
             .putMetadata("integration", "gelatoflow-v1")

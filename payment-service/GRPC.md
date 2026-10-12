@@ -54,10 +54,11 @@ the standard protobuf JSON names `checkoutSessionId` and `checkoutUrl`.
 ## Validation, replay and provider behavior
 
 - IDs and checkout key are non-nil UUIDs, normalized before provider calls.
-- Amount is 1–99,999,999 integer minor units; currency is an uppercase ISO code.
+- Amount is 1–99,999,999 integer minor units; currency must be `THB` for PromptPay.
+  Other ISO currencies are rejected before Stripe is called.
 - A valid, future protobuf reservation timestamp is mandatory. An expired hold
   is rejected before any provider mutation, and checked again after creation.
-- Stripe receives one line item for the exact immutable Order total, card-only
+- Stripe receives one line item for the exact immutable Order total, PromptPay-only
   payment, trusted redirects and order/customer/original-amount/currency/integration/checkout-key/deadline
   metadata on both the Session and its PaymentIntent. The RPC has no item list.
 - Provider key is `gelatoflow-checkout-v1-<idempotency_key>`. All request facts,
@@ -66,7 +67,10 @@ the standard protobuf JSON names `checkoutSessionId` and `checkoutUrl`.
   Keep redirect configuration stable while checkout requests may be replayed.
 - Every create/replay also retrieves the Session's current state, because Stripe's
   idempotent create response is a snapshot. Only an open Session with matching
-  identifiers, metadata, amount, currency, mode and a Stripe HTTPS URL is returned.
+  identifiers, metadata, amount, currency, mode, only `promptpay` in its payment
+  methods and a Stripe HTTPS URL is returned. Enable PromptPay in the Thai
+  business account's Sandbox [Payment methods settings](https://dashboard.stripe.com/settings/payment_methods).
+  The allowed-method filter does not enable a disabled or ineligible method.
 - Each provider call has a 1-second connect timeout, 4-second read timeout and no
   automatic mutation retries. An ambiguous RPC timeout must be replayed with the
   exact same request/key. Creation may still have succeeded when the caller timed out.
@@ -91,7 +95,7 @@ The Session uses Stripe's default expiry; the ten-minute stock deadline is
 metadata, because Stripe cannot directly use such a short `expires_at`.
 Cancellation/stock expiry can therefore leave a payable URL. Checkout webhooks
 now report verified results through Order's existing HTTP callbacks; retryable
-Checkout card failures do not cancel an order. Permanent event deduplication,
+Retryable Checkout payment failures do not cancel an order. Permanent event deduplication,
 Order's private binding validation and durable refunds remain shared follow-up
 work. The retained PaymentIntent webhook path still uses the legacy Order gRPC
 API. See [WEBHOOK.md](WEBHOOK.md) for demo configuration and delivery semantics;
@@ -101,6 +105,12 @@ The Checkout webhook increment adds original amount/currency metadata to the
 creation parameters. Use fresh Orders/checkout keys for demo migration; older
 provider keys can conflict with changed parameters and older Sessions need
 explicit reconciliation as described in WEBHOOK.md.
+
+The PromptPay-only migration also changes the provider creation parameters.
+Restart Payment and use a fresh Order/checkout key. Existing card Sessions cannot
+be converted in place; webhook reconciliation continues to accept their verified
+payment results. Never change the provider key to create a second Session for an
+already-bound Order. See [LOCAL_TEST.md](LOCAL_TEST.md) for the Sandbox QR test.
 
 ## Verification
 

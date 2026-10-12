@@ -11,6 +11,7 @@ import java.net.URI;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.Currency;
+import java.util.List;
 import java.util.UUID;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
@@ -53,6 +54,11 @@ public class CheckoutService {
           .withDescription("A positive minor-unit amount and ISO currency are required")
           .asRuntimeException();
     }
+    if (!"THB".equals(request.getCurrency())) {
+      throw Status.INVALID_ARGUMENT
+          .withDescription("PromptPay checkout requires THB currency")
+          .asRuntimeException();
+    }
     var expiry = request.getReservationExpiresAt();
     if (!request.hasReservationExpiresAt()
         || expiry.getSeconds() < -62135596800L
@@ -93,6 +99,11 @@ public class CheckoutService {
     if (!"payment".equals(session.getMode())) {
       throw Status.UNAVAILABLE
           .withDescription("Stripe returned an unexpected checkout mode")
+          .asRuntimeException();
+    }
+    if (!List.of("promptpay").equals(session.getPaymentMethodTypes())) {
+      throw Status.UNAVAILABLE
+          .withDescription("Stripe returned unexpected checkout payment methods")
           .asRuntimeException();
     }
     if (!"open".equals(session.getStatus()) || !"unpaid".equals(session.getPaymentStatus())) {

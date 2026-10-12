@@ -48,7 +48,7 @@ public class StripeCheckoutGateway implements CheckoutPort {
     var params =
         SessionCreateParams.builder()
             .setMode(SessionCreateParams.Mode.PAYMENT)
-            .addAllowedPaymentMethodType(SessionCreateParams.AllowedPaymentMethodType.CARD)
+            .addAllowedPaymentMethodType(SessionCreateParams.AllowedPaymentMethodType.PROMPTPAY)
             .setClientReferenceId(request.getOrderId())
             .setSuccessUrl(properties.successUrl())
             .setCancelUrl(properties.cancelUrl())

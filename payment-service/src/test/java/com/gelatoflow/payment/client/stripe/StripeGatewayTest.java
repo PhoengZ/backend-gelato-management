@@ -51,7 +51,8 @@ class StripeGatewayTest {
               "metadata[order_id]=" + ORDER,
               "metadata[customer_id]=" + CUSTOMER,
               "metadata[integration]=gelatoflow-v1",
-              "allowed_payment_method_types[0]=card");
+              "allowed_payment_method_types[0]=promptpay")
+          .doesNotContain("=card", "allowed_payment_method_types[1]");
       gateway.create(ORDER, CUSTOMER, 25000, "THB");
       assertThat(key.get()).isEqualTo("gelatoflow-payment-v1-" + ORDER);
     } finally {

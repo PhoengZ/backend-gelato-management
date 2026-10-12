@@ -7,6 +7,11 @@ never authorize payment confirmation.
 
 ## Selected Checkout Session flow
 
+New payments use PromptPay only in THB. A generated QR or a pending authorization
+is not proof of payment: only verified provider success triggers Order's callback.
+The webhook also settles already-created card Sessions with matching metadata;
+changing the methods offered for new payments does not discard older results.
+
 1. Order calls Payment's `CreateCheckoutSession` gRPC API with its immutable
    checkout facts and binds the returned Session before exposing the URL.
 2. Stripe sends `checkout.session.completed` or an asynchronous result.

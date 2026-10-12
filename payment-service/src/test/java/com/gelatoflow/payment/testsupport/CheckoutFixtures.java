@@ -34,6 +34,7 @@ public final class CheckoutFixtures {
     session.setUrl(URL);
     session.setStatus("open");
     session.setMode("payment");
+    session.setPaymentMethodTypes(java.util.List.of("promptpay"));
     session.setPaymentStatus("unpaid");
     session.setLivemode(false);
     session.setAmountTotal(request.getAmountMinor());

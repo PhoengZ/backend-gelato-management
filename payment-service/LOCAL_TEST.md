@@ -23,6 +23,14 @@ keys page, copy the standard secret key beginning `sk_test_`. `pk_test_` is not
 the backend secret key. Keep it in your local Payment environment, not Git/chat.
 Hosted Checkout does not require a publishable key in this smoke script.
 
+Payment now offers **PromptPay only** with `THB`. In the same sandbox, enable
+PromptPay under [Settings > Payment methods](https://dashboard.stripe.com/settings/payment_methods).
+Stripe's PromptPay Checkout supports Thai business accounts. The allowed-method
+filter cannot enable a disabled or ineligible method and never falls back to cards.
+No extra Payment environment variable or new Stripe key is needed for this switch.
+Restart Payment and create a fresh Order/key; existing card Sessions cannot be
+converted in place and replaying old creation parameters can conflict at Stripe.
+
 Install the CLI using its official installation instructions. The current Stripe
 docs support npm installation:
 
@@ -216,9 +224,13 @@ Expected sequence:
 
 1. Order returns `PENDING_PAYMENT`, total 15000 THB minor units (150 THB) and a
    Stripe HTTPS Checkout URL; stock becomes available=8, reserved=2, sold=0.
-2. The script opens that actual Checkout in your browser. Pay with test card
-   **4242 4242 4242 4242**, any future expiry and any three-digit CVC. Use only
-   test card values in the sandbox. [Stripe testing](https://docs.stripe.com/testing).
+2. The script opens that actual Checkout in your browser. Enter an email and click
+   **Generate QR code** for PromptPay. Scan it with a QR reader (for example, your
+   phone camera) to open Stripe's hosted test page, then authorize the test payment.
+   You can also choose failure there to test the failed path, but this smoke script
+   expects success. Sandbox QR payloads contain a test URL; banking apps are for
+   live PromptPay payments. No real money is transferred in Sandbox.
+   [Stripe PromptPay testing](https://docs.stripe.com/payments/promptpay/accept-a-payment?payment-ui=checkout).
 3. The CLI forwards `checkout.session.completed` and shows Payment's response.
    Payment verifies it and calls Order using the dedicated callback token.
 4. The script polls Order for up to three minutes, expects `PAID` and stock

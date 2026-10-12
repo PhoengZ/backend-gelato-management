@@ -57,6 +57,29 @@ class CheckoutWebhookServiceTest {
   }
 
   @Test
+  void promptPayWaitsForAuthorizationAndExistingCardSessionsStillSettle() throws Exception {
+    var pending = paidSession();
+    pending.setPaymentMethodTypes(List.of("promptpay"));
+    pending.getPaymentIntentObject().setPaymentMethodTypes(List.of("promptpay"));
+    pending.setPaymentStatus("unpaid");
+    pending.getPaymentIntentObject().setStatus("requires_action");
+    pending.getPaymentIntentObject().setAmountReceived(0L);
+    when(stripe.retrieve("cs_test_fixture")).thenReturn(pending);
+    receive("checkout.session.completed");
+    verifyNoInteractions(callbacks);
+
+    for (var method : List.of("promptpay", "card")) {
+      var paid = paidSession();
+      paid.setPaymentMethodTypes(List.of(method));
+      paid.getPaymentIntentObject().setPaymentMethodTypes(List.of(method));
+      when(stripe.retrieve("cs_test_fixture")).thenReturn(paid);
+      receive("checkout.session.completed");
+    }
+    verify(callbacks, times(2)).succeeded(ORDER);
+    verifyNoInteractions(legacyOrders, legacyStripe);
+  }
+
+  @Test
   void rawBodySignatureAndEventModeAreVerifiedBeforeRetrievingOrCallingOrder() throws Exception {
     var body = checkoutPayload("checkout.session.completed");
     var signature = sign(body, Instant.now().getEpochSecond());

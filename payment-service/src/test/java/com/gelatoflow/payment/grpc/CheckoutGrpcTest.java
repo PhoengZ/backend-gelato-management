@@ -98,6 +98,7 @@ class CheckoutGrpcTest {
           request.toBuilder().setAmountMinor(100000000).build(),
           request.toBuilder().setCurrency("thb").build(),
           request.toBuilder().setCurrency("ZZZ").build(),
+          request.toBuilder().setCurrency("USD").build(),
           request.toBuilder().clearReservationExpiresAt().build(),
           request.toBuilder().setReservationExpiresAt(Timestamp.newBuilder().setNanos(-1)).build()
         }) {
@@ -137,6 +138,22 @@ class CheckoutGrpcTest {
     wrong.setLivemode(true);
     assertCode(
         Status.Code.UNAVAILABLE, () -> client("Bearer " + TOKEN).createCheckoutSession(request));
+  }
+
+  @Test
+  void checkoutWithCardsOrMissingPromptPayIsNeverExposed() {
+    for (var methods :
+        java.util.List.of(
+            java.util.List.of("card"),
+            java.util.List.of("promptpay", "card"),
+            java.util.List.<String>of())) {
+      var wrong = session(request());
+      wrong.setPaymentMethodTypes(methods);
+      doReturn(wrong).when(stripe).create(any());
+      assertCode(
+          Status.Code.UNAVAILABLE,
+          () -> client("Bearer " + TOKEN).createCheckoutSession(request()));
+    }
   }
 
   @Test

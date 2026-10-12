@@ -70,6 +70,20 @@ class PaymentServiceTest {
   }
 
   @Test
+  void nonThbOrderCannotCreateOrBindAPromptPayPayment() {
+    when(orders.get(ORDER)).thenReturn(order().toBuilder().setCurrency("USD").build());
+    assertThatThrownBy(() -> service.create(ORDER, CUSTOMER))
+        .isInstanceOfSatisfying(
+            ApiException.class,
+            e -> {
+              assertThat(e.status()).isEqualTo(HttpStatus.CONFLICT);
+              assertThat(e.code()).isEqualTo("PAYMENT_CURRENCY_UNSUPPORTED");
+            });
+    verifyNoInteractions(stripe);
+    verify(orders, never()).bind(any());
+  }
+
+  @Test
   void existingBindingIsRetrievedWithoutCreatingNewPayment() {
     when(orders.get(ORDER))
         .thenReturn(order().toBuilder().setPaymentIntentId("pi_fixture").build());

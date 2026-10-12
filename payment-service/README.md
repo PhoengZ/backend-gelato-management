@@ -1,6 +1,6 @@
 # Payment Service
 
-Java 21 / Spring Boot adapter for Stripe card payments. The inbound Order-to-Payment
+Java 21 / Spring Boot adapter for Stripe PromptPay payments in THB. The inbound Order-to-Payment
 `CreateCheckoutSession` gRPC API is implemented; see [its guide](GRPC.md).
 Verified Checkout webhooks now report results through Order's existing HTTP
 callbacks; see [the webhook guide](WEBHOOK.md). The retained legacy REST adapter
@@ -75,8 +75,8 @@ Frontend creates an Order and navigates to its `checkout_url`. It does not call
 the legacy PaymentIntent endpoint. Payment verifies signed Checkout Session
 events and current Stripe state, then calls Order's `payment-succeeded` or
 terminal `payment-failed` HTTP callback. Only Order's 204 acknowledges the result.
-Duplicates replay; provider/callback failures request Stripe redelivery. A card
-decline keeps the Session open and never releases stock through this flow.
+Duplicates replay; provider/callback failures request Stripe redelivery. Pending
+QR authorization never confirms payment or releases stock through this flow.
 See [WEBHOOK.md](WEBHOOK.md) for validation and remaining boundary limitations.
 
 For local Stripe forwarding:
@@ -88,8 +88,17 @@ stripe listen \
 ```
 
 Use its printed `whsec_...` as `STRIPE_WEBHOOK_SECRET` and restart Payment.
-Complete the actual Order-created Session with a Stripe test card. Generic CLI
-fixtures lack the required metadata. A browser success URL never marks Order paid.
+Enable PromptPay in your sandbox's [Payment methods settings](https://dashboard.stripe.com/settings/payment_methods).
+Stripe's PromptPay Checkout requires a Thai business account and THB. New Sessions
+allow only `promptpay`; there is no card fallback. Restart Payment and create a
+fresh Order/key after changing payment methods: existing Sessions and their
+idempotency parameters cannot be replaced by this change.
+Complete the actual Order-created Session with **Generate QR code**. In Sandbox,
+scan with a QR reader to open Stripe's test page, then authorize the test payment;
+use a banking app only for live payments. See the [PromptPay Checkout guide](https://docs.stripe.com/payments/promptpay/accept-a-payment?payment-ui=checkout)
+and [local walkthrough](LOCAL_TEST.md). Generic CLI fixtures lack the required
+metadata. A browser success URL never marks Order paid. Already-created card
+Sessions still receive verified webhook settlement.
 
 ## Legacy PaymentIntent endpoint
 
@@ -102,7 +111,9 @@ curl -X POST http://localhost:3007/api/v1/payments/create-payment-intent \
 
 The 201 response includes `payment_intent_id`, `client_secret`, `amount_minor`
 and uppercase `currency`, with `Cache-Control: no-store`. Send `client_secret`
-to Stripe.js to collect card details; never send card data to this service.
+to Stripe.js to confirm PromptPay with the customer's email and display its QR.
+New intents accept only PromptPay in THB. Previously bound intents retain their
+original methods; this adapter does not replace an existing payment binding.
 Repeated checkout returns the bound intent. Requesting a completed or processing
 intent returns 409. No client-supplied amount or currency is accepted.
 

@@ -129,7 +129,8 @@ try {
     Assert-Balances 8 2 0
     Write-Output "PASS: Order $orderId PENDING_PAYMENT; available=8 reserved=2 sold=0."
     Write-Output "Customer UUID for later Order inspection: $customerId"
-    Write-Output 'Use a Stripe test card only: 4242 4242 4242 4242, future expiry, any three-digit CVC.'
+    Write-Output 'PromptPay Sandbox: enter an email and click Generate QR code. Scan with a QR reader to open the Stripe test page and authorize the test payment.'
+    Write-Output 'Sandbox QR codes contain a test URL; use a QR reader, not a banking app. No real funds are transferred.'
     if ($NoOpenBrowser) {
         Write-Output 'Open checkout_url from this Order create response in your browser; treat it as sensitive.'
         # Explicitly requested only in this mode; never write the URL into a file.

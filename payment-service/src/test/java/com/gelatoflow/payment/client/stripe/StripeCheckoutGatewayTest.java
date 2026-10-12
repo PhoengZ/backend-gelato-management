@@ -76,6 +76,7 @@ class StripeCheckoutGatewayTest {
     var metadata = StripeCheckoutGateway.metadata(request);
     var json = new java.util.LinkedHashMap<String, Object>();
     json.put("mode", "payment");
+    json.put("payment_method_types", List.of("promptpay"));
     json.put("payment_status", "unpaid");
     json.putAll(
         Map.of(
@@ -126,9 +127,9 @@ class StripeCheckoutGatewayTest {
             "metadata[order_id]=" + request.getOrderId(),
             "metadata[checkout_key]=" + KEY,
             "payment_intent_data[metadata][customer_id]=" + request.getCustomerId(),
-            "allowed_payment_method_types[0]=card",
+            "allowed_payment_method_types[0]=promptpay",
             "success_url=" + checkoutProperties().successUrl());
-    assertThat(body).doesNotContain("expires_at=");
+    assertThat(body).doesNotContain("expires_at=", "=card", "allowed_payment_method_types[1]");
     assertThat(bodies).hasSize(1);
   }
 
@@ -156,14 +157,13 @@ class StripeCheckoutGatewayTest {
   }
 
   @Test
-  void sameKeyWithChangedAmountCustomerOrderCurrencyOrDeadlineIsAlreadyExists() {
+  void sameKeyWithChangedAmountCustomerOrderOrDeadlineIsAlreadyExists() {
     service().create(request);
     for (var changed :
         new CreateCheckoutSessionRequest[] {
           request.toBuilder().setAmountMinor(25001).build(),
           request.toBuilder().setCustomerId(Fixtures.OTHER).build(),
           request.toBuilder().setOrderId(Fixtures.OTHER).build(),
-          request.toBuilder().setCurrency("USD").build(),
           request.toBuilder()
               .setReservationExpiresAt(
                   request.getReservationExpiresAt().toBuilder()
