@@ -1,7 +1,9 @@
 # Order-orchestrated Stripe checkout
 
-Status: Order implementation; new Payment boundary proposed for Order, Payment,
-Gateway and frontend owner review before shared deployment.
+Status: Order checkout and Payment's inbound Checkout Session gRPC/Stripe adapter
+implemented; Checkout webhook reporting, reconciliation/refunds and deployed
+end-to-end verification pending. The boundary requires Order, Payment, Gateway
+and frontend owner review before shared deployment.
 
 ## Ownership and transport
 
@@ -59,6 +61,9 @@ pending. A browser success redirect never marks an order paid.
 - Payment must create/retrieve exactly the same session for a checkout key and
   reject changed immutable facts with ALREADY_EXISTS. Use provider idempotency
   and durable reconciliation as needed. Order's persisted session survives restarts.
+  The current stateless Payment adapter relies on provider key retention and
+  rejects expired stock holds; permanent deduplication after key pruning requires
+  later durable reconciliation. See the [Payment gRPC guide](../../payment-service/GRPC.md).
 - Order stores the order before calling Payment and binds the session before
   exposing a URL. No PostgreSQL transaction or row lock spans a network call.
 - A Payment timeout/unavailable response keeps the existing pending order and
@@ -140,16 +145,17 @@ See [detailed sequence and state diagrams](../sequence-diagram.md) and
 ## Integration status and migration
 
 Order's outbound client, binding, REST response and retry handling are implemented.
-The existing `chelsea/payment-service` branch implements PaymentIntent creation,
-returning `client_secret`, and Payment-to-Order gRPC binding/reporting. It does not
-implement this Checkout Session API and cannot be connected unchanged. Payment
-must add the new gRPC server and Checkout adapter, and connect verified provider
-results to Order's existing authenticated HTTP callbacks (or jointly migrate
-callbacks to the proposed result-reporting gRPC contract). Frontend uses the new
-checkout_url instead of calling the old public PaymentIntent endpoint.
+Payment implements the new authenticated gRPC server and Stripe Checkout adapter.
+Its retained PaymentIntent REST/webhook code still uses `client_secret` and
+Payment-to-Order gRPC binding/reporting; Order does not implement those RPCs.
+Payment must connect verified Checkout provider results to Order's existing
+authenticated HTTP callbacks (or jointly migrate callbacks to the proposed
+result-reporting gRPC contract). Frontend uses the new checkout_url instead of
+calling the old public PaymentIntent endpoint. See
+[Payment integration](payment-integration.md) for the incremental migration.
 
 This change does not claim a working Stripe end-to-end integration, refund
-automation, Order gRPC reads for Analytics, or Payment's implementation.
+automation or Order gRPC reads for Analytics.
 REST clients must handle CANCEL_PENDING and PAYMENT_CONFIRMING without checkout
 navigation and poll until finalization. Review these enum additions and the
 generic cancellation event reason with affected service and frontend owners.

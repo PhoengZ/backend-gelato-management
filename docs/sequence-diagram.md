@@ -1,8 +1,9 @@
 # Order checkout and reservation sequence diagrams
 
-Order handlers and outbound clients are implemented. Payment's
-CreateCheckoutSession server and Checkout webhook adapter are pending; their
-steps below describe the selected integration target, not a runtime claim.
+Order handlers and outbound clients and Payment's authenticated
+CreateCheckoutSession server/Stripe adapter are implemented. Payment's Checkout
+webhook adapter is pending; webhook/callback steps below describe the selected
+integration target. Deployed end-to-end integration remains unverified.
 Contracts under ../contracts/ remain authoritative.
 
 ## Checkout and successful payment
@@ -31,7 +32,7 @@ sequenceDiagram
     O->>I: gRPC ReservePortions with stable order ID and key
     I-->>O: Reservation ID and expires_at
     O->>DB: Transaction: PENDING_PAYMENT order and items
-    Note over P,S: New Checkout Session integration pending
+    Note over P,S: Checkout Session gRPC and Stripe adapter implemented
     O->>P: gRPC CreateCheckoutSession with total and stable checkout key
     P->>S: Create or retrieve Checkout Session
     S-->>P: Session ID and HTTPS checkout URL
@@ -43,6 +44,7 @@ sequenceDiagram
 
     S->>G: Signed webhook, raw body and Stripe-Signature
     G->>P: Forward unchanged webhook bytes and signature
+    Note over P,O: Checkout webhook reporting to Order still pending
     Note over P: Verify provider result and correlate it to the order
     P->>O: POST /api/v1/orders/{id}/payment-succeeded with service token
     O->>DB: Transaction: claim PAYMENT_CONFIRMING
@@ -62,9 +64,16 @@ sequenceDiagram
     G-->>C: Poll while payment is pending
 ```
 
-Session creation and a success redirect never mark an order paid. The outbox
-diagram shows the intended acknowledgement path; publisher acknowledgement
-matching and reconnect defects remain open.
+Session creation and a success redirect never mark an order paid. Order's
+publisher matches confirmations to the current delivery tag, rejects mandatory
+returns and reconnects after failures. Broker runtime integration remains
+unverified; ambiguous failures can deliver duplicate events.
+
+The legacy PaymentIntent flow uses a separate frontend Payment REST call,
+`client_secret`, and Payment-to-Order `GetOrderDetails`, `BindPaymentIntent` and
+`ReportPaymentResult` RPCs. Order does not implement that gRPC server, so it is
+not part of the selected Checkout Session sequence. See
+[Payment integration](architecture/payment-integration.md) for migration details.
 
 ## Retry after Payment timeout or unavailable response
 

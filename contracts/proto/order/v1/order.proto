@@ -3,6 +3,8 @@ syntax = "proto3";
 package order.v1;
 
 option go_package = "github.com/gelatoflow/backend-gelato-management/contracts/gen/go/order/v1;orderv1";
+option java_package = "com.gelatoflow.contracts.order.v1";
+option java_multiple_files = true;
 
 service OrderService {
   // StreamOrderItems is a client-streaming RPC where the client streams OrderItemRequests
@@ -11,6 +13,14 @@ service OrderService {
 
   // GetOrderDetails is a unary RPC to fetch details of a single order.
   rpc GetOrderDetails(GetOrderDetailsRequest) returns (GetOrderDetailsResponse);
+
+  // Payment machine identity only. Atomically bind one intent to a payable order.
+  // Identical replay succeeds; a different intent or changed total is rejected.
+  rpc BindPaymentIntent(BindPaymentIntentRequest) returns (BindPaymentIntentResponse);
+
+  // Payment machine identity only. Durably deduplicate by provider_event_id,
+  // validate the bound intent and total, then orchestrate Inventory and outbox.
+  rpc ReportPaymentResult(ReportPaymentResultRequest) returns (ReportPaymentResultResponse);
 }
 
 message StreamOrderItemsRequest {
@@ -41,4 +51,36 @@ message GetOrderDetailsResponse {
   int64 total_amount_minor = 5;
   string currency = 6;
   repeated OrderItem items = 7;
+  // Stripe provider identifier; durable binding and payment status belong to Order.
+  string payment_intent_id = 8;
 }
+
+message BindPaymentIntentRequest {
+  string order_id = 1;
+  string payment_intent_id = 2;
+  int64 amount_minor = 3;
+  string currency = 4;
+}
+
+message BindPaymentIntentResponse {
+  string payment_intent_id = 1;
+}
+
+enum PaymentOutcome {
+  PAYMENT_OUTCOME_UNSPECIFIED = 0;
+  PAYMENT_OUTCOME_SUCCEEDED = 1;
+  PAYMENT_OUTCOME_FAILED = 2;
+}
+
+message ReportPaymentResultRequest {
+  string order_id = 1;
+  string payment_intent_id = 2;
+  string provider_event_id = 3;
+  PaymentOutcome outcome = 4;
+  int64 amount_minor = 5;
+  string currency = 6;
+  // RFC 3339 UTC provider event creation time, not HTTP delivery time.
+  string occurred_at = 7;
+}
+
+message ReportPaymentResultResponse {}

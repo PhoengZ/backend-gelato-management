@@ -1,0 +1,28 @@
+name: Payment Service CI
+on:
+  push:
+    branches: [main, chelsea/payment-service]
+    paths: ["payment-service/**", "contracts/proto/order/**", "contracts/proto/payment/**", ".github/workflows/payment-service.yaml"]
+  pull_request:
+    branches: [main]
+    paths: ["payment-service/**", "contracts/proto/order/**", "contracts/proto/payment/**", ".github/workflows/payment-service.yaml"]
+permissions:
+  contents: read
+jobs:
+  payment:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+          cache-dependency-path: payment-service/pom.xml
+      - name: Format, test and package
+        working-directory: payment-service
+        run: |
+          chmod +x mvnw
+          ./mvnw -B spotless:check verify
+      - name: Build and test container image
+        run: docker build -f payment-service/Dockerfile -t gelatoflow/payment-service:ci .

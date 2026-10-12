@@ -23,7 +23,9 @@ changes.
 | Inventory gRPC API | Batch Inventory Service | Order Service |
 | Notification SSE API | Notification Service | Frontend (Gateway route pending) |
 | Order REST API | Order Service | API Gateway, frontend, Payment Service |
-| Payment checkout gRPC API | Payment Service (implementation pending) | Order Service |
+| Payment checkout gRPC API | Payment Service | Order Service |
+| Payment REST API (legacy PaymentIntent path) | Payment Service | API Gateway, customer frontend, Stripe webhooks |
+| Order payment gRPC methods (proposed; Order server pending) | Order Service | Legacy PaymentIntent adapter |
 | `order.placed` event | Order Service | Fulfillment, Notification, Analytics |
 | `order.cancelled` event | Order Service | Fulfillment, Notification, Analytics |
 | `fulfillment.order_ready` event | Fulfillment Service | Notification Service |
@@ -97,13 +99,16 @@ Availability exceeding the proto int32 capacity is OUT_OF_RANGE.
 
 `proto/payment/v1/payment.proto` defines the new internal Checkout Session API.
 Order calls Payment after persisting the pending order and returns `checkout_url`
-from `openapi/order-service.v1.yaml`. Payment must authenticate the Order machine
-identity and create/retrieve one session per deterministic checkout key. Payment
-owns Stripe/webhooks; Order owns immutable totals and the persisted session binding.
-The existing PaymentIntent branch needs an adapter/server change; this contract
-does not implement Payment. See [checkout architecture](../docs/architecture/order-checkout.md)
-for retry, callback and migration rules. Shared deployment requires review by
-Order, Payment, Gateway and frontend owners.
+from `openapi/order-service.v1.yaml`. Payment's gRPC server authenticates the Order
+machine identity, validates immutable request facts and creates/retrieves a Stripe
+Checkout Session using provider idempotency. Order owns immutable totals and the
+persisted session binding. The stateless adapter's replay protection is bounded
+by provider retention; permanent deduplication requires durable reconciliation.
+Checkout webhook reporting to Order's HTTP callbacks and reconciliation/refunds
+remain pending. See [checkout architecture](../docs/architecture/order-checkout.md)
+and the [Payment gRPC guide](../payment-service/GRPC.md) for configuration, retry
+and migration rules. Shared deployment requires review by Order, Payment, Gateway
+and frontend owners and end-to-end verification.
 
 Order REST v1.2 adds `CANCEL_PENDING` and `PAYMENT_CONFIRMING` status values.
 Order durably claims either workflow before contacting Inventory, blocks checkout
@@ -113,6 +118,21 @@ are added. Release requests and cancellation events use the constant reason
 Review the enum additions and generic cancellation reason with affected owners;
 reconcile unfinished operations from older deployments before rollout. See the
 checkout architecture for recovery and payment-refund responsibilities.
+
+## Legacy PaymentIntent integration
+
+`openapi/payment-service.v1.yaml` defines the legacy order-based PaymentIntent
+endpoint and signed Stripe webhooks. Client totals are never accepted. Responses
+use snake_case and integer minor units. The frontend demo's amount/clientSecret shape requires explicit
+migration; see [Payment integration](../docs/architecture/payment-integration.md).
+
+`proto/order/v1/order.proto` adds `payment_intent_id` to GetOrderDetails and the
+Payment-only BindPaymentIntent and ReportPaymentResult RPCs. Order must atomically
+bind one intent, verify totals, durably deduplicate provider event IDs and own
+Inventory confirmation/release and outbox. These additions are proposed for
+Order/Gateway owner review; Order does not implement these RPCs. Its selected
+Checkout Session flow instead uses Order-to-Payment gRPC and reverse HTTP result
+callbacks. The legacy REST/webhook adapter cannot complete that flow unchanged.
 
 ## Event compatibility
 

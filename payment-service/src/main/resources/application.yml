@@ -1,0 +1,48 @@
+server:
+  port: ${PORT:3007}
+  shutdown: graceful
+spring:
+  application:
+    name: payment-service
+  jackson:
+    deserialization:
+      fail-on-unknown-properties: true
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never
+      probes:
+        enabled: true
+payment:
+  checkout:
+    enabled: ${PAYMENT_CHECKOUT_ENABLED:true}
+    port: ${PAYMENT_GRPC_PORT:50057}
+    request-token: ${PAYMENT_REQUEST_TOKEN:}
+    tls: ${PAYMENT_GRPC_TLS:true}
+    certificate: ${PAYMENT_GRPC_CERTIFICATE:}
+    private-key: ${PAYMENT_GRPC_PRIVATE_KEY:}
+    success-url: ${STRIPE_CHECKOUT_SUCCESS_URL:}
+    cancel-url: ${STRIPE_CHECKOUT_CANCEL_URL:}
+  stripe:
+    secret-key: ${STRIPE_SECRET_KEY}
+    webhook-secret: ${STRIPE_WEBHOOK_SECRET}
+    live-mode: ${STRIPE_LIVE_MODE:false}
+  order-callback:
+    enabled: ${PAYMENT_HTTP_CALLBACK_ENABLED:${payment.checkout.enabled:true}}
+    base-url: ${ORDER_HTTP_BASE_URL:http://localhost:3003}
+    service-token: ${PAYMENT_SERVICE_TOKEN:}
+    allow-plaintext: ${PAYMENT_CALLBACK_ALLOW_PLAINTEXT:false}
+    timeout-ms: ${ORDER_HTTP_CALLBACK_TIMEOUT_MS:5000}
+  order:
+    target: ${ORDER_GRPC_TARGET:localhost:50054}
+    service-token: ${ORDER_SERVICE_TOKEN}
+    tls: ${ORDER_GRPC_TLS:true}
+    deadline-ms: ${ORDER_GRPC_DEADLINE_MS:5000}
+  jwt:
+    secret: ${JWT_SECRET}
+    issuer: ${JWT_ISSUER:gelatoflow-auth}
+    audience: ${JWT_AUDIENCE:gelatoflow-api}

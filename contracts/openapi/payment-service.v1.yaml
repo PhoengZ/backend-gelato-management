@@ -1,0 +1,208 @@
+openapi: 3.1.0
+info:
+  title: GelatoFlow Payment Service API
+  version: 1.0.0
+  description: Stateless Stripe integration. Order owns totals, intent bindings and payment status.
+servers:
+  - url: /
+tags:
+  - name: Payments
+    description: Customer checkout and signed provider notifications
+security:
+  - bearerAuth: []
+paths:
+  /api/v1/payments/create-payment-intent:
+    post:
+      operationId: createPaymentIntent
+      summary: Create or retrieve the authenticated customer's order payment intent
+      description: >-
+        CUSTOMER only. Order supplies the amount and currency. The exact Stripe
+        intent must be durably bound by Order before its secret is returned.
+        Same-order retries retrieve the bound intent; client-supplied amounts
+        and legacy camelCase fields are rejected.
+      tags: [Payments]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [order_id]
+              properties:
+                order_id:
+                  type: string
+                  format: uuid
+                  description: Non-nil UUID of a PENDING_PAYMENT order owned by this customer
+            example:
+              order_id: c19b830e-a733-41de-bf26-aeb123926e36
+      responses:
+        '201':
+          description: Intent created or retrieved; sensitive response must not be cached
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentIntent'
+              example:
+                payment_intent_id: pi_example
+                client_secret: pi_example_secret_example
+                amount_minor: 25000
+                currency: THB
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '502':
+          $ref: '#/components/responses/BadGateway'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /api/v1/payments/webhook:
+    post:
+      operationId: receiveStripeWebhook
+      summary: Verify and report Stripe payment results to Order
+      description: >-
+        Public endpoint authenticated exclusively by Stripe's HMAC signature
+        over the raw body with a 300-second delivery timestamp tolerance.
+        Handles payment_intent.succeeded and payment_intent.payment_failed.
+        Supported events are acknowledged only after reconciliation and durable
+        acceptance by Order. Stale failure and unsupported signed events are
+        acknowledged without changing Order. Maximum payload is 256 KiB.
+      tags: [Payments]
+      security: []
+      parameters:
+        - in: header
+          name: Stripe-Signature
+          required: true
+          schema:
+            type: string
+          description: Stripe timestamp and v1 signature header
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Unmodified Stripe Event JSON; provider schema is externally owned
+              additionalProperties: true
+      responses:
+        '200':
+          description: Event accepted or intentionally ignored
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [received]
+                properties:
+                  received:
+                    type: boolean
+                    const: true
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '413':
+          $ref: '#/components/responses/TooLarge'
+        '502':
+          $ref: '#/components/responses/BadGateway'
+        '503':
+          $ref: '#/components/responses/Unavailable'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    PaymentIntent:
+      type: object
+      additionalProperties: false
+      required: [payment_intent_id, client_secret, amount_minor, currency]
+      properties:
+        payment_intent_id:
+          type: string
+          pattern: '^pi_[A-Za-z0-9]+$'
+          description: External Stripe identifier, not a GelatoFlow resource UUID
+        client_secret:
+          type: string
+          minLength: 1
+          description: Sensitive Stripe.js credential; never log or persist in browser storage
+        amount_minor:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 99999999
+        currency:
+          type: string
+          pattern: '^[A-Z]{3}$'
+          description: ISO 4217 currency supplied by Order
+    ErrorResponse:
+      type: object
+      additionalProperties: false
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+          additionalProperties: true
+  responses:
+    BadRequest:
+      description: Invalid request, signature, timestamp or Stripe mode
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Unauthorized:
+      description: Missing or invalid customer JWT
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Forbidden:
+      description: CUSTOMER role required
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFound:
+      description: Order does not exist or belongs to another customer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Conflict:
+      description: Order or intent is no longer payable, or the payment binding conflicts
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    TooLarge:
+      description: Webhook body exceeds 256 KiB
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    BadGateway:
+      description: Provider failure or invalid upstream checkout details; retry webhook delivery
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Unavailable:
+      description: Order or payment reconciliation unavailable; retry webhook delivery
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'

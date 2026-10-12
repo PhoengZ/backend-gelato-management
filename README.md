@@ -11,7 +11,8 @@ GelatoFlow preorder, queue, and batch inventory system.
 | Auth Service | Contract and PostgreSQL infrastructure defined |
 | Catalog Service | REST and gRPC CRUD with shared Redis; Inventory and Order validate flavors through gRPC |
 | Batch Inventory Service | REST, reservation gRPC, PostgreSQL transactions, expiry and waste outbox implemented; Order reservation client added, end-to-end runtime integration pending |
-| Order Service | Catalog pricing, Inventory reservations, outbound Payment Checkout gRPC client, durable session binding, payment callbacks and outbox implemented; Payment Checkout server, Gateway auth and Analytics gRPC reads pending |
+| Order Service | Catalog pricing, Inventory reservations, outbound Payment Checkout gRPC client, durable session binding, payment callbacks and outbox implemented; Gateway auth, Analytics gRPC reads and end-to-end checkout verification pending |
+| Payment Service | Authenticated Checkout Session gRPC server and Stripe adapter implemented; legacy PaymentIntent REST/signed webhook code retained; Checkout result callbacks, reconciliation/refunds and end-to-end integration pending |
 | Notification Service | SSE stream and RabbitMQ consumer implemented (stateless); Gateway route, runtime verification with Order/Inventory publishers pending |
 | Other application services | Added by their owners in later pull requests |
 
@@ -23,6 +24,7 @@ requests.
 
 ```text
 analytics-service/   Existing analytics implementation
+payment-service/     Java 21 / Spring Boot Stripe adapter
 contracts/           Versioned REST, gRPC, and event interfaces
 docs/architecture/   Service boundaries and architecture decisions
 infra/               Docker Compose and RabbitMQ definitions
@@ -37,6 +39,9 @@ infra/               Docker Compose and RabbitMQ definitions
 - Order calls Inventory through gRPC and never reads Inventory tables.
 - Analytics receives asynchronous events and does not join operational
   transactions.
+- Payment is stateless; Order owns totals, Checkout Session bindings and payment
+  status. The legacy PaymentIntent path requires Order RPCs that are not implemented.
+  See `docs/architecture/payment-integration.md` and `payment-service/README.md`.
 - API Gateway or a frontend adapter may compose Catalog metadata with Inventory
   availability for the demo UI.
 
