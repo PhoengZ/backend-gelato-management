@@ -1,0 +1,33 @@
+# Optional local build override; no image is assumed to be published.
+# Supply real test secrets through the shell or a private --env-file.
+services:
+  payment-service:
+    build:
+      context: ../..
+      dockerfile: payment-service/Dockerfile
+    environment:
+      PORT: 3007
+      PAYMENT_CHECKOUT_ENABLED: ${PAYMENT_CHECKOUT_ENABLED:-true}
+      PAYMENT_GRPC_PORT: 50057
+      PAYMENT_REQUEST_TOKEN: ${PAYMENT_REQUEST_TOKEN:?PAYMENT_REQUEST_TOKEN is required}
+      PAYMENT_GRPC_TLS: ${PAYMENT_GRPC_TLS:-true}
+      PAYMENT_GRPC_CERTIFICATE: ${PAYMENT_GRPC_CERTIFICATE:-}
+      PAYMENT_GRPC_PRIVATE_KEY: ${PAYMENT_GRPC_PRIVATE_KEY:-}
+      STRIPE_CHECKOUT_SUCCESS_URL: ${STRIPE_CHECKOUT_SUCCESS_URL:?STRIPE_CHECKOUT_SUCCESS_URL is required}
+      STRIPE_CHECKOUT_CANCEL_URL: ${STRIPE_CHECKOUT_CANCEL_URL:?STRIPE_CHECKOUT_CANCEL_URL is required}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:?STRIPE_SECRET_KEY is required}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:?STRIPE_WEBHOOK_SECRET is required}
+      STRIPE_LIVE_MODE: ${STRIPE_LIVE_MODE:-false}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      JWT_ISSUER: ${JWT_ISSUER:-gelatoflow-auth}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-gelatoflow-api}
+      ORDER_GRPC_TARGET: ${ORDER_GRPC_TARGET:-host.docker.internal:50054}
+      ORDER_SERVICE_TOKEN: ${ORDER_SERVICE_TOKEN:?ORDER_SERVICE_TOKEN is required}
+      ORDER_GRPC_TLS: ${ORDER_GRPC_TLS:-true}
+      ORDER_GRPC_DEADLINE_MS: ${ORDER_GRPC_DEADLINE_MS:-5000}
+    ports:
+      - "127.0.0.1:3007:3007"
+      - "127.0.0.1:50057:50057"
+    networks:
+      - gelato_network
+    restart: unless-stopped

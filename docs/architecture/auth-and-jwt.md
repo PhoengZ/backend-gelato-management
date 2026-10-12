@@ -33,6 +33,40 @@ distinct configured Order service token for isolated development, not forwarded
 user headers or Manager credentials. The machine-identity deployment decision is
 proposed in [ADR-007](adr-007-inventory-transactions-and-callers.md).
 
+Order implementation clarification: HTTP customer handlers read X-User-ID; they
+do not verify JWT signatures locally. Gateway must validate signature, issuer,
+audience and expiry, strip untrusted identity headers, and set the canonical user
+UUID from sub. Customer GET/cancel enforce order ownership. Direct public access
+to this trusted-header interface must be blocked until Gateway integration is
+verified. Order forwards the original Bearer token to Catalog when present.
+
+## Checkout machine authentication
+
+| Direction | Credential | Purpose |
+| --- | --- | --- |
+| Order -> Inventory gRPC | ORDER_SERVICE_TOKEN in authorization Bearer metadata | Reserve/confirm/release stock |
+| Order -> Payment gRPC | PAYMENT_REQUEST_TOKEN in authorization Bearer metadata | CreateCheckoutSession; authenticated Payment server implemented |
+| Payment -> Order HTTP | PAYMENT_SERVICE_TOKEN in X-Payment-Service-Token | Verified success/failure callback |
+
+The Order-to-Payment token is distinct from both the Inventory token and the
+reverse callback token, contains at least 32 bytes and has no whitespace. These
+credentials are never browser credentials. A customer request cannot authorize
+payment-succeeded/payment-failed by providing its user JWT.
+
+Stripe signatures are verified by Payment over the original webhook bytes, not
+by Order or frontend. Gateway must preserve the body/signature and allow that
+provider endpoint without a customer JWT. Payment's Checkout adapter must first
+verify payment and associate the session with the correct order before calling
+Order. Browser return pages only read customer-authorized Order status.
+
+The configured opaque tokens and plaintext gRPC are isolated-development
+mechanisms. Agreed TLS and machine identities are required for deployment.
+Payment's inbound gRPC server defaults to TLS and requires certificate/key
+configuration. Order's current client uses plaintext; local integration must
+explicitly disable Payment TLS, and deployment needs a matching TLS client.
+See the [Payment gRPC guide](../../payment-service/GRPC.md) for configuration.
+See [checkout integration](order-checkout.md).
+
 The frontend demo may continue using its mock session cookie until integration.
 The backend bearer-token contract remains canonical.
 

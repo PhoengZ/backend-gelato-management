@@ -15,7 +15,8 @@ ownership of the underlying data.
 | Auth Service | Users, password hashes, roles, account status | PostgreSQL | Orders, flavor metadata, stock |
 | Catalog Service | Flavor names, descriptions, prices, images, recipes, allergens, active status | Redis | Available portions, batches, reservations |
 | Batch Inventory Service | Batches, portion balances, reservations, waste, inventory movements | PostgreSQL | Flavor descriptions and prices, orders, payments |
-| Order Service | Orders, line items, pricing snapshots, payment status, customer references | PostgreSQL | Available portion balances, inventory batches, flavor metadata, payments |
+| Order Service | Orders, immutable checkout prices, reservation references, Checkout Session binding, order outbox | PostgreSQL | Current Catalog metadata, stock balances, Stripe credentials |
+| Payment Service | Stripe integration and signature verification; Checkout result reporting and durable reconciliation/refunds pending | None (stateless Checkout and legacy PaymentIntent adapters) | Order totals and status, stock balances |
 | Fulfillment Service | Kitchen tickets, pickup time-slots, slot queue numbers, fulfillment status | PostgreSQL | Orders, inventory batches, payment processing |
 | Analytics Service | Derived daily sales and waste aggregates in integer minor units | MongoDB | Operational source records |
 | Notification Service | Nothing durable. Live SSE connections and, in memory only, a TTL-bounded `order_id` to `customer_id` routing map and recent event ids | None (stateless) | Orders, customer profiles, inventory batches |
@@ -35,8 +36,11 @@ once Order Service owner agrees.
 
 1. Direct database access and cross-service table replication are strictly prohibited.
    Services must not create shadow tables or duplicate collections in their own
-   database to store copies of data owned by another service. Only foreign
-   identifiers (such as `flavor_id`, `order_id`, `user_id`) may be persisted.
+   database to store current entities owned by another service. Services may
+   persist the minimum immutable facts required to represent a completed business
+   transaction. Order line items are such a snapshot: `flavor_id`, `flavor_name`,
+   `unit_price_minor`, `subtotal_minor`, and currency as agreed at checkout. They
+   do not replace or mirror the current Catalog flavor record.
 2. When a service requires data owned by another service to fulfill a workflow or
    handle an event, it must query the authoritative service synchronously via gRPC
    instead of replicating data locally.
@@ -54,10 +58,31 @@ once Order Service owner agrees.
    reporting and aggregation, it queries Order Service via client-streaming gRPC
    `StreamOrderItems` (streaming order IDs to retrieve item breakdowns) rather than
    creating replicated order tables in its MongoDB database.
+   These are contracted integration targets; Order does not yet implement
+   either gRPC read method.
 8. API Gateway may return a composed flavor view containing Catalog metadata and
    Inventory availability, but that view is not a new data owner.
+9. Order orchestrates frontend checkout by calling Payment's versioned gRPC API
+   after persisting the pending order. Payment creates the provider session from
+   Order's immutable total; Order persists its binding before returning the URL.
+   Payment's inbound Checkout gRPC and Stripe adapter are implemented; verified
+   Checkout result reporting to Order remains pending. See [checkout architecture](order-checkout.md).
+10. Cancellation releases stock through Inventory and changes Order state locally.
+    It does not currently close the Stripe session. Payment reconciliation/refund
+    and later fulfillment transitions remain separate integration responsibilities.
 
 ## Shared conventions
+
+In the selected flow, Order sends its immutable checkout facts to Payment's gRPC
+server and durably binds the returned Checkout Session before exposing its URL.
+Verified provider results must go back to Order's authenticated HTTP callbacks;
+Payment's Checkout webhook adapter is still pending. Order owns payment state,
+Inventory orchestration and outbox publication.
+
+The retained PaymentIntent REST/webhook path instead retrieves Order details,
+binds a provider intent and reports results through proposed Order gRPC methods.
+Order does not implement those RPCs. See [Payment integration](payment-integration.md)
+for the legacy dependency, migration and durable reconciliation work.
 
 ### Catalog transport status
 
@@ -67,10 +92,9 @@ stock. Read projections omit recipe; privileged writes and archive visibility
 follow the Catalog JWT policy in both transports.
 
 Inventory uses GetFlavor before creating a batch, without persisting Catalog
-metadata. Order using GetFlavor/BatchGetFlavors for active status and pricing is
-a planned consumer integration. Before checkout integration, the team must resolve the distinction between immutable order
-transaction facts (price at purchase) and prohibited Catalog entity replication;
-the existing blanket identifier-only rule above is not silently changed here.
+metadata. Order uses BatchGetFlavors to verify active status and obtain the
+checkout price. It persists flavor name and integer minor-unit price as immutable
+order transaction facts; this is not a copy of the mutable Catalog entity.
 
 See [ADR-006](adr-006-catalog-rest-and-grpc.md), proposed for team review.
 

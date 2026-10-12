@@ -1,118 +1,127 @@
-# GelatoFlow System Architecture Reference
+# GelatoFlow architecture reference
 
-This document serves as a reference for AI agents implementing services within the GelatoFlow system. It outlines the architectural design, microservices, communication protocols, and critical business logic (especially regarding inventory consistency).
+This reference separates current Order behavior from system integration targets.
+Versioned [contracts](../contracts/README.md) are authoritative.
+[API_SPEC.md](API_SPEC.md) retains legacy demo examples and migration notes.
 
-## 1. Architectural Overview
-GelatoFlow utilizes an **Event-Driven Microservices Architecture**.
-* **Source of Truth:** `Batch Inventory Service` is the strict source of truth for stock/inventory.
-* **Process Controller:** `Order Service` controls the ordering lifecycle.
-* **Data Ownership:** Each service owns its respective database. Direct database access across services and cross-service table replication (shadow tables or duplicate entity storage) are strictly prohibited. Services must not replicate entities owned by other services into local tables. Cross-service data retrieval occurs on demand via synchronous gRPC, while asynchronous events handle decoupled notifications.
+## Service responsibilities
 
-## 2. Microservices Catalog
+| Service | Owned responsibility | Storage |
+| --- | --- | --- |
+| API Gateway | Routing, external JWT enforcement and rate limiting | None |
+| Auth | Identity, credentials, roles and JWT issuance | PostgreSQL |
+| Catalog | Metadata, prices, active status, recipes and allergens | Redis |
+| Order | Orders, purchase snapshots, pickup_at, reservation references, session binding and outbox | PostgreSQL |
+| Batch Inventory | Batches, availability, reservations, sold portions, expiry and waste | PostgreSQL |
+| Payment | Stripe APIs and signature verification; Checkout result reporting and durable reconciliation/refunds pending | None (stateless Checkout and legacy PaymentIntent adapters) |
+| Fulfillment | Implemented kitchen tickets, per-slot queue numbers and fulfillment status; Gateway/runtime integration pending | Owned PostgreSQL |
+| Notification | Implemented SSE and event consumer; Gateway/runtime integration pending | None (stateless; bounded in-memory routing and deduplication) |
+| Analytics | Derived sales and waste projections | MongoDB |
 
-| Service | Responsibility | Database |
-| :--- | :--- | :--- |
-| **API Gateway** | Routing, Authentication, Rate limiting. | *None* |
-| **Auth Service** | User management, Roles, JWT issuance. | PostgreSQL |
-| **Catalog Service** | Flavors, Prices, Recipes, Allergens. | Redis *(Note: Updated from MongoDB)* |
-| **Order Service** | Orders, Customizations, selected pickup-slot reference, Payment status. | PostgreSQL |
-| **Batch Inventory Service** | Batches, Remaining portions, Reservations, Waste, Expiry dates. | PostgreSQL |
-| **Fulfillment Service** | Preparation queues, Pickup time-slot management, QR Pickup. | PostgreSQL |
-| **Notification Service** | Notifications for ready orders & expiring batches. | MongoDB (or Stateless) |
-| **Analytics Service** | Sales summaries, Waste reports, Best-selling flavors (MVP Add-on). | MongoDB |
-| **Payment Service** | Payment processing integration (Stripe API) and Webhook handling. | *None* |
+Services never read another service's storage. Order line items are immutable
+purchase facts, not replicas of live Catalog records. Gateway can compose
+metadata and availability without taking ownership of either.
 
-## 3. Communication Patterns
+## Current Order checkout
 
-### A. REST API (External / Client-to-System)
-Used for communication between the Front-end (Customer Web, Staff/Manager Dashboards) and the backend services via the API Gateway.
+1. Frontend submits POST /api/v1/orders through Gateway with an Auth JWT, UUID
+   Idempotency-Key, future pickup_at and unique flavor/portion items.
+2. Gateway must validate JWTs and replace caller-supplied identity headers.
+   Order trusts X-User-ID from that protected boundary.
+3. Order checks customer/key and request hash. A matching retry resumes the
+   existing order; changed data with the same key returns 409.
+4. Order calls Catalog BatchGetFlavors, checks active flavors and THB prices,
+   calculates minor-unit totals and snapshots names/prices.
+5. Order calls Inventory ReservePortions. Inventory atomically allocates FEFO
+   stock; insufficient portions reject the whole reservation.
+6. Order persists the reservation ID, deadline, order and items in its own
+   database as PENDING_PAYMENT before contacting Payment.
+7. Order calls Payment CreateCheckoutSession with authoritative totals and a
+   deterministic key. Order's client and Payment's authenticated gRPC server and
+   Stripe Checkout adapter are implemented.
+8. Order validates the HTTPS URL and atomically binds one session to a pending,
+   unexpired order before returning checkout_url.
+9. Frontend redirects to Stripe. A verified Payment callback makes Order claim
+   PAYMENT_CONFIRMING, confirm Inventory, then commit PAID and order.placed in one
+   database transaction. Order's handlers are implemented; Payment's Checkout
+   webhook reporting to these callbacks remains pending.
+10. The outbox worker publishes asynchronously. After browser return, frontend
+    reads authenticated GET /api/v1/orders/{id} for the current state.
 
-### B. gRPC (Internal Synchronous)
-* **Catalog gRPC (implemented locally):** Unary CreateFlavor, GetFlavor,
-  ListFlavors, BatchGetFlavors, UpdateFlavor (full replacement), and DeleteFlavor
-  (archive) share the existing REST application logic and Redis data. Writes
-  require Manager JWTs. Proposed Order/Inventory callers are not connected yet;
-  see [ADR-006](architecture/adr-006-catalog-rest-and-grpc.md).
+Frontend does not make a second Payment API call in this flow. The existing
+PaymentIntent/client_secret branch is a separate migration dependency, not an
+interchangeable Checkout Session server. Checkout accepts totals between 1 and
+99,999,999 THB minor units.
 
-Used for internal synchronous inter-service data requests and atomic operations, establishing a single source of truth without replicating tables:
-* **Order Service <-> Batch Inventory Service (Unary RPC):**
-  * `CheckAvailability`: Verify sellable portions.
-  * `ReservePortions`: Atomically reserve portions using FEFO.
-  * `ReleaseReservation`: Free reserved portions on timeout or cancellation.
-  * `ConfirmReservation`: Transition reserved portions to sold upon verified payment.
-* **Analytics Service -> Order Service:**
-  * `GetOrderDetails` (Unary RPC): Analytics Service queries this RPC synchronously upon receiving an `order.cancelled` thin event to retrieve the cancelled order line items and pricing breakdown, offsetting daily revenue and flavor sales without maintaining local shadow order tables.
-  * `StreamOrderItems` (Client-Streaming RPC): Analytics Service streams a sequence of `order_id`s over a single gRPC stream to Order Service, which returns consolidated order line items and pricing breakdowns for batch calculations and flavor popularity analysis.
-* **Cross-Service Entity Queries (Unary RPC):**
-  * When a downstream service (e.g., Fulfillment Service, Notification Service, or Analytics Service) receives a thin event containing an `order_id`, it calls Order Service via `GetOrderDetails(GetOrderDetailsRequest)` to retrieve authoritative order details (`status`, `items`, `total_amount_minor`, `pickup_at`) on demand.
+## Communication and implementation status
 
-### C. Message Broker - RabbitMQ (Internal Asynchronous)
-Used for decoupling services and handling asynchronous workflows. (RabbitMQ preferred over Kafka for this scope).
-* **Key Events:**
-  * `OrderPlaced`
-  * `OrderCancelled`
-  * `OrderReady`
-  * `OrderPickedUp`
-  * `BatchLowStock`
-  * `BatchExpiring`
-  * `WasteRecorded`
+| Boundary | Transport | Current status |
+| --- | --- | --- |
+| Frontend to Order | Versioned REST through Gateway | Order endpoints implemented; trusted Gateway integration needs verification |
+| Order to Catalog | BatchGetFlavors gRPC | Client and Catalog server implemented |
+| Inventory to Catalog | GetFlavor gRPC | Batch validation implemented |
+| Order to Inventory | Reserve/Confirm/Release gRPC | Client and server implemented; full checkout integration pending |
+| Order to Payment | CreateCheckoutSession gRPC | Contract, client, authenticated Payment server and Stripe adapter implemented; deployed end-to-end verification pending |
+| Payment to Order | Token-authenticated HTTP callbacks | Order handlers implemented; Checkout webhook adapter pending |
+| Order to RabbitMQ | CloudEvents through transactional outbox | Publisher confirmation matching, mandatory returns and reconnect implemented; broker runtime integration pending |
+| Analytics/downstream to Order | Order read gRPC | Order server pending |
 
-## 4. Core Workflows
+Order has a CheckAvailability client method, but checkout calls ReservePortions
+directly: an availability read cannot guarantee a later reservation.
+Local unit tests do not prove deployed end-to-end integration.
 
-### Ordering & Time-Slot Queue Flow (Happy Path)
-1. **Check Catalog, Availability & Time Slots:** Customer reads flavor metadata
-   from `GET /api/v1/flavors`, stock from
-   `GET /api/v1/inventory/availability`, and pickup slots from **Fulfillment
-   Service** through **API Gateway**. Gateway may compose these responses but
-   Catalog never owns stock or time slots.
-2. **Create Order:** Customer selects flavors and picks a desired time slot, then submits `POST /api/v1/orders`.
-3. **Reserve Stock:** **Order Service** calls **Batch Inventory Service** via `gRPC (ReservePortions)` to atomically reserve portions.
-4. **Pending Payment:** Order is saved with status `PENDING_PAYMENT` bound to the selected time slot.
-5. **Initiate Payment:** Frontend requests payment intent via `POST /api/v1/payments/create-payment-intent`.
-6. **Payment Service:** Calls Stripe to create PaymentIntent and returns `clientSecret`.
-7. **Direct Payment:** Customer completes card payment securely with Stripe.
-8. **Payment Webhook:** Stripe sends `payment_intent.succeeded` webhook to API Gateway (`POST /api/v1/payments/webhook`), which forwards to **Payment Service**. Payment Service reports the verified result to **Order Service**.
-9. **Confirm Reservation:** **Order Service** calls `ConfirmReservation`; Batch Inventory atomically moves reserved portions to sold, then Order changes to `PAID`.
-10. **Publish Event:** **Order Service** writes a transactional outbox record and publishes the versioned `OrderPlaced` CloudEvent containing integer minor-unit totals.
-11. **Time-Slot Queue Allocation:**
-    * **Fulfillment Service** consumes `OrderPlaced`, allocates a sequential **Queue Number scoped to that specific Time Slot** (e.g., Slot `14:00 - 14:15` -> Queue `#01`), and places it into the kitchen prep queue.
-12. **Notify Customer:** **Notification Service** consumes `OrderPlaced` and pushes an in-app order confirmation (pickup time and order summary) to the Customer's open SSE stream. `OrderPlaced` has no queue number, so the **Slot Queue Number** reaches the Customer in the `OrderReady` notification instead.
+## Failure, cancellation and expiry
 
-*(If stock is insufficient at step 3, Batch Inventory returns an Out of Stock error, and Order Service aborts the order).*
+- Payment timeout/unavailability retains the pending order and bounded stock
+  hold. The error includes details.order_id; retry the original body and key.
+  Payment must return the same session for that checkout key.
+- If order persistence fails after reserve, Order reconciles a possible committed
+  result and otherwise leaves the hold to Inventory expiry. It does not release
+  a reservation that a concurrent same-key request may still own.
+- Customer cancellation checks ownership; payment failure uses a trusted service
+  callback. Both first claim CANCEL_PENDING, blocking checkout and competing
+  confirmation. They release Inventory using the existing key and ORDER_CANCELLED
+  reason, then commit CANCELLED and cancellation outbox locally. A lifecycle
+  worker resumes cancellation/confirmation intents after failure or restart.
+- Release returns reserved portions to available while the batch is valid;
+  expired-batch portions become waste. Stable keys prevent repeated stock changes.
+- Inventory expires abandoned reservations independently. Order has no expiry
+  worker, so a pending order may outlive its reservation.
+- Cancellation does not currently expire a Stripe session. A later charge after
+  cancellation/expiry must be reconciled/refunded and cannot revive stock.
 
-### Fulfillment Flow (Storefront & Kitchen)
-1. Staff dashboard displays orders grouped and prioritized by **Time Slots** and **Slot Queue Numbers**.
-2. Staff prepares gelato according to the time slot schedule.
-3. When ready, staff updates status to `READY_FOR_PICKUP` (`PATCH /api/v1/fulfillments/:id/status`).
-4. **Fulfillment Service** publishes `OrderReady` event to **RabbitMQ**.
-5. **Notification Service** alerts the customer that their order for that time slot is ready.
-6. Customer arrives during their time slot, presents their QR/Queue reference, and staff marks order as `COMPLETED`.
+## Fulfillment and downstream targets
 
-## 5. Data Integrity & Overselling Prevention
-Preventing overselling is the most critical business requirement.
-* **Single Authority:** `Batch Inventory Service` is the sole decision-maker for stock.
-* **Mechanisms Required:**
-  * **Atomic Database Transactions**
-  * **Row Locking or Optimistic Locking**
-  * **Idempotency Keys** (to prevent duplicate order processing)
-  * **Transactional Outbox Pattern** (to guarantee event publishing after DB commits)
-* **Constraints:** `available_portions` must NEVER be negative. Reservations MUST be released if an order is cancelled or payment expires.
-* **Inventory Formula:** 
-  `Available = Produced - Reserved - Sold - Waste`
+The target journey adds pickup-slot selection, queue allocation, preparation,
+ready notifications and collection. These are not current Order checkout fields:
+it accepts pickup_at and returns no queue number or pickup-slot ID. PREPARING,
+READY_FOR_PICKUP and COMPLETED exist in the model, but this branch has no handlers
+that perform those transitions.
 
-## 6. Quality Attributes
+order.placed represents a paid sale after stock confirmation. Current
+order.cancelled represents cancellation of a never-paid pending order and must
+not automatically subtract a paid sale. Its schema and consumer semantics still
+need owner review. Its canonical schema and fixture are in contracts/. Inventory
+implements inventory.waste; low-stock and expiring
+notifications remain design targets. Analytics' Order gRPC dependency and consumer
+compatibility/deduplication must be verified separately.
 
-### A. Consistency (Primary)
-* Strict consistency is required to prevent overselling.
-* **Test Case:** If 1 portion of Pistachio remains and 20 concurrent requests arrive, exactly 1 order must succeed, 19 must fail, stock must not drop below 0, and no duplicate reservations should occur.
+## Integrity and operational expectations
 
-### B. Performance (Secondary)
-* Order API should maintain a p95 response time of < 1 second under designated user load.
+Inventory alone enforces initial = available + reserved + sold + wasted, FEFO,
+non-negative balances and all-or-nothing reservations. One remaining portion
+under twenty competing requests must yield one successful reservation.
+Order's status/outbox transaction does not form a distributed transaction with
+Inventory or Stripe; stable keys and reconciliation bridge those steps.
 
-## 7. Customer End-to-End Journey
-The platform operates as a modern Scheduled Pickup & Storefront Management system:
-1. **Browse:** Customer checks flavor availability in real-time.
-2. **Select Slot & Items:** Customer selects gelato flavors and chooses an available **Pickup Time Slot** (e.g., 14:00 - 14:15).
-3. **Pay:** Completes payment immediately via Stripe.
-4. **Receive Slot Queue:** Receives an Order Confirmation with a **Queue Number specifically assigned within their chosen time slot**.
-5. **Arrival & Collection:** Customer arrives at the store during the designated time slot, waits for their queue number to be called/notified, and collects their Gelato via QR Code.
+Order startup requires PostgreSQL and RabbitMQ. gRPC clients connect lazily.
+/health reports liveness, not dependency readiness. Checkout has synchronous
+dependencies and a configurable Payment deadline (default five seconds); latency
+objectives require load measurement.
+
+See [architecture diagrams](architecture-diagram.md),
+[sequence diagrams](sequence-diagram.md), [checkout boundary](architecture/order-checkout.md),
+[reservation lifecycle](architecture/inventory-reservation.md),
+[authentication](architecture/auth-and-jwt.md) and [events](event-schema-spec.md).
+ADR-006 and ADR-007 preserve their original proposal context; current integration
+status is recorded here and in service READMEs.
