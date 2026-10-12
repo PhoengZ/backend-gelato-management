@@ -47,6 +47,10 @@ HTTP Stripe stub; they require neither Stripe credentials nor Docker.
 
 ## Run locally
 
+For a complete PowerShell walkthrough with Order/Catalog/Inventory and a Stripe
+Sandbox payment, see [local integration testing](LOCAL_TEST.md). Its smoke script
+opens the actual Order-created Checkout and verifies PAID and stock balances.
+
 Supply `.env.example` values as environment variables. Spring does not load
 `.env` automatically. Set real Stripe test keys, Auth's signing secret and a
 dedicated `PAYMENT_SERVICE_TOKEN` matching Order; no usable secrets are committed.
