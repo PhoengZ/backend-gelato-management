@@ -97,6 +97,14 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/CreateBatchRequest'
+            example:
+              batch_code: GF-20261011-CHOC-01
+              flavor_id: 9e914b8c-2476-4c28-8a7d-36c88b1f2b9d
+              production_date: '2026-10-11'
+              expires_at: '2026-10-13T12:00:00Z'
+              initial_portions: 40
+              unit_cost_minor: 125
+              currency: THB
       responses:
         default:
           $ref: '#/components/responses/ServiceError'
@@ -222,7 +230,7 @@ components:
           schema:
             $ref: '#/components/schemas/ErrorResponse'
     Conflict:
-      description: Idempotency conflict or insufficient available portions
+      description: Duplicate batch code (BATCH_CODE_CONFLICT), idempotency conflict, or insufficient available portions
       content:
         application/json:
           schema:
@@ -247,6 +255,7 @@ components:
       additionalProperties: false
       required:
         - id
+        - batch_code
         - flavor_id
         - production_date
         - expires_at
@@ -264,6 +273,8 @@ components:
         id:
           type: string
           format: uuid
+        batch_code:
+          $ref: '#/components/schemas/BatchCode'
         flavor_id:
           type: string
           format: uuid
@@ -309,6 +320,17 @@ components:
       required:
         [flavor_id, production_date, expires_at, initial_portions, unit_cost_minor, currency]
       properties:
+        batch_code:
+          type: string
+          pattern: '^\s*[A-Za-z0-9][A-Za-z0-9_-]{0,63}\s*$'
+          description: >-
+            Optional production-container label, unique across all batches. Leading
+            and trailing whitespace is trimmed and ASCII letters are uppercased.
+            The normalized code must match [A-Z0-9][A-Z0-9_-]{0,63}. Blank or null
+            codes are invalid. Omission generates BATCH- followed by the uppercase
+            batch UUID, preserving compatibility with existing create requests.
+            Duplicate normalized codes return 409 BATCH_CODE_CONFLICT.
+          examples: [GF-20261011-CHOC-01]
         flavor_id:
           type: string
           format: uuid
@@ -328,6 +350,13 @@ components:
         currency:
           type: string
           const: THB
+    BatchCode:
+      type: string
+      pattern: '^[A-Z0-9][A-Z0-9_-]{0,63}$'
+      minLength: 1
+      maxLength: 64
+      description: Persisted unique production-container label; UUID id remains the resource identifier.
+      examples: [GF-20261011-CHOC-01]
     RecordWasteRequest:
       type: object
       additionalProperties: false

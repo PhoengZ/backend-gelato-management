@@ -32,7 +32,7 @@ func Run(ctx context.Context, c config.Config) error {
 		return fmt.Errorf("database unavailable at startup")
 	}
 	var migrated bool
-	if err = db.QueryRow(startup, "SELECT EXISTS(SELECT 1 FROM inventory_schema_migrations WHERE version='001_inventory.sql')").Scan(&migrated); err != nil || !migrated {
+	if err = db.QueryRow(startup, "SELECT count(*)=2 FROM inventory_schema_migrations WHERE version IN ('001_inventory.sql','002_batch_code.sql')").Scan(&migrated); err != nil || !migrated {
 		return fmt.Errorf("run Inventory migrations before starting service")
 	}
 	cc, err := grpc.NewClient(c.CatalogAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))

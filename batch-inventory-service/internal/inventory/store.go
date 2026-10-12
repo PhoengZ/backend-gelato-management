@@ -109,13 +109,13 @@ func mutate[T any](ctx context.Context, s *Service, op, key string, input any, f
 	return result, nil
 }
 
-const batchColumns = `id::text,flavor_id::text,production_date::text,expires_at,initial_portions,available_portions,reserved_portions,sold_portions,wasted_portions,unit_cost_minor,currency,status,created_at,updated_at`
+const batchColumns = `id::text,batch_code,flavor_id::text,production_date::text,expires_at,initial_portions,available_portions,reserved_portions,sold_portions,wasted_portions,unit_cost_minor,currency,status,created_at,updated_at`
 
 type scanner interface{ Scan(...any) error }
 
 func scanBatch(row scanner) (Batch, error) {
 	var b Batch
-	err := row.Scan(&b.ID, &b.FlavorID, &b.ProductionDate, &b.ExpiresAt, &b.Initial, &b.Available, &b.Reserved, &b.Sold, &b.Wasted, &b.UnitCost, &b.Currency, &b.Status, &b.CreatedAt, &b.UpdatedAt)
+	err := row.Scan(&b.ID, &b.BatchCode, &b.FlavorID, &b.ProductionDate, &b.ExpiresAt, &b.Initial, &b.Available, &b.Reserved, &b.Sold, &b.Wasted, &b.UnitCost, &b.Currency, &b.Status, &b.CreatedAt, &b.UpdatedAt)
 	if err == pgx.ErrNoRows {
 		err = ErrNotFound
 	}

@@ -18,6 +18,7 @@ func TestErrorClassificationDoesNotLeakDependencyDetails(t *testing.T) {
 		{context.DeadlineExceeded, 504, codes.DeadlineExceeded},
 		{context.Canceled, 408, codes.Canceled},
 		{inventory.ErrStock, 409, codes.FailedPrecondition},
+		{inventory.ErrBatchCodeConflict, 409, codes.AlreadyExists},
 		{inventory.ErrDependency, 503, codes.Unavailable},
 		{&pgconn.PgError{Code: "57P01", Message: "private database address"}, 503, codes.Unavailable},
 		{&pgconn.PgError{Code: "40P01", Message: "private SQL"}, 503, codes.Unavailable},
