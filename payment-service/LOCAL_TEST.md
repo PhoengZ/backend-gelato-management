@@ -198,11 +198,16 @@ in README. Order on the host still targets the published Payment port 50057.
 In a new terminal at the repository root:
 
 ```powershell
-$env:JWT_SECRET = 'development_only_change_this_secret_32_bytes'
+Get-Content catalog-service/.env | ForEach-Object {
+    if ($_ -match '^\s*JWT_SECRET=(.*)$') {
+        $env:JWT_SECRET = $matches[1]
+    }
+}
 & ./payment-service/scripts/test-local-stripe.ps1
 ```
 
-The script first checks process health, creates a uniquely named active flavor
+The script first checks process health and verifies Manager authentication with
+both Catalog and Inventory before creating data. It creates a uniquely named active flavor
 priced at 7500 THB minor units (75 THB) and a new batch of 10 portions, then
 orders two portions for pickup one hour ahead. It reuses the exact request/key
 if checkout times out and receives a recoverable Order dependency error.
@@ -265,7 +270,7 @@ already finalized.
 | Payment gRPC UNAUTHENTICATED | `PAYMENT_REQUEST_TOKEN` matches Order/Payment and is different from the other machine tokens |
 | gRPC TLS/handshake errors | Order's local client is plaintext; Payment needs `PAYMENT_GRPC_TLS=false` |
 | Inventory dependency UNAUTHENTICATED | Inventory/Order `ORDER_SERVICE_TOKEN` match |
-| Catalog/Inventory 401 or 403 | Shared local JWT secret, role, issuer/audience and system clock |
+| Catalog/Inventory 401 or 403 | Load the demo JWT_SECRET from Catalog's local `.env`; Inventory must use the same value. A different Payment JWT secret cannot sign these management requests. Also check role, issuer/audience and system clock |
 | Stripe 401 / provider 502 | Backend key belongs to the selected sandbox; it is a secret key, not `pk_test_` |
 | No webhook delivery | CLI running, connected to the same sandbox as backend key, Checkout events selected |
 | Webhook 400 INVALID_WEBHOOK | `STRIPE_WEBHOOK_SECRET` is the current listener's secret; re-import environment and restart Payment |

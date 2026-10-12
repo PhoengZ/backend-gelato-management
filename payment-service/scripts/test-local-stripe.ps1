@@ -51,7 +51,8 @@ function Send-Request([string]$Method, [string]$Url, [hashtable]$Headers, $Body 
         if ($null -ne $Body) {
             $request.Content = [System.Net.Http.StringContent]::new(($Body | ConvertTo-Json -Depth 10 -Compress), [Text.Encoding]::UTF8, 'application/json')
         }
-        $response = $http.SendAsync($request).GetAwaiter().GetResult()
+        try { $response = $http.SendAsync($request).GetAwaiter().GetResult() }
+        catch { throw "Cannot complete $Method $Url. Check that the service is running and reachable at this address. If a POST timed out, retry the same request/key rather than creating a different order." }
         try {
             $raw = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
             $data = $null
@@ -65,6 +66,9 @@ function Send-Request([string]$Method, [string]$Url, [hashtable]$Headers, $Body 
 
 function Assert-Status($Result, [int]$Expected, [string]$Step) {
     if ($Result.Status -ne $Expected) {
+        if ($Result.Status -in @(401, 403)) {
+            throw "$Step failed: HTTP $($Result.Status); code=$($Result.Data.code). The local demo JWT must match Catalog/Inventory JWT_SECRET, issuer and audience. Reload JWT_SECRET from catalog-service/.env in this terminal before running the script; Payment's key may differ."
+        }
         throw "$Step failed: HTTP $($Result.Status); code=$($Result.Data.code); message=$($Result.Data.message); order_id=$($Result.Data.details.order_id)"
     }
 }
@@ -85,6 +89,10 @@ try {
     $managerHeaders = @{ Authorization = 'Bearer ' + (New-LocalToken ([guid]::NewGuid().ToString()) 'MANAGER') }
     $customerId = [guid]::NewGuid().ToString()
     $customerHeaders = @{ 'X-User-ID' = $customerId; Authorization = 'Bearer ' + (New-LocalToken $customerId 'CUSTOMER') }
+
+    # Validate local Manager authentication before creating any demo records.
+    Assert-Status (Send-Request 'GET' "$CatalogUrl/api/v1/flavors?active=false" $managerHeaders) 200 'Catalog Manager authentication'
+    Assert-Status (Send-Request 'GET' "$InventoryUrl/api/v1/inventory/batches" $managerHeaders) 200 'Inventory Manager authentication'
 
     $flavor = Send-Request 'POST' "$CatalogUrl/api/v1/flavors" $managerHeaders @{
         name = 'Stripe Sandbox Demo ' + [guid]::NewGuid().ToString(); description = 'Local Order and Payment integration'
