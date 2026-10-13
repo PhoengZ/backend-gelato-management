@@ -86,6 +86,9 @@ class ApiClient:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.session = requests.Session()
+        adapter = requests.adapters.HTTPAdapter(pool_connections=50, pool_maxsize=50)
+        self.session.mount("http://", adapter)
+        self.session.mount("https://", adapter)
 
     def request(
         self,
