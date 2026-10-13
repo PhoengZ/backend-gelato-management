@@ -11,3 +11,6 @@ analytics-service/main
 
 # Gemini / IDE
 .gemini/
+
+# Binary Documents / PDF Exports
+*.pdf

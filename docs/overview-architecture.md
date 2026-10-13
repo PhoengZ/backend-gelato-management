@@ -116,12 +116,14 @@ Inventory or Stripe; stable keys and reconciliation bridge those steps.
 
 Order startup requires PostgreSQL and RabbitMQ. gRPC clients connect lazily.
 /health reports liveness, not dependency readiness. Checkout has synchronous
-dependencies and a configurable Payment deadline (default five seconds); latency
-objectives require load measurement.
+dependencies and a configurable Payment deadline (default five seconds); Order API
+p95 latency objective is under 1.0 second under MVP peak load. Logs must redact
+tokens, payment secrets and customer PII.
 
 See [architecture diagrams](architecture-diagram.md),
 [sequence diagrams](sequence-diagram.md), [checkout boundary](architecture/order-checkout.md),
 [reservation lifecycle](architecture/inventory-reservation.md),
-[authentication](architecture/auth-and-jwt.md) and [events](event-schema-spec.md).
+[authentication](architecture/auth-and-jwt.md), [events](event-schema-spec.md) and
+[non-functional requirements](architecture/non-functional-requirements.md).
 ADR-006 and ADR-007 preserve their original proposal context; current integration
 status is recorded here and in service READMEs.
