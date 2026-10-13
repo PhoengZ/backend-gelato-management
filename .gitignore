@@ -14,3 +14,8 @@ analytics-service/main
 
 # Binary Documents / PDF Exports
 *.pdf
+
+# Python Cache
+__pycache__/
+*.pyc
+.pytest_cache/
