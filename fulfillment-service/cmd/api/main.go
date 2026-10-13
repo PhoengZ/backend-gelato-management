@@ -16,6 +16,7 @@ import (
 	"fulfillment-service/internal/middleware"
 	"fulfillment-service/internal/repository"
 	"fulfillment-service/internal/router"
+	"fulfillment-service/migrations"
 )
 
 func main() {
@@ -34,6 +35,11 @@ func main() {
 		log.Fatalf("postgres ping failed: %v", err)
 	}
 	log.Println("[db] connected to postgres")
+
+	if err := migrations.Apply(ctx, pool); err != nil {
+		log.Fatalf("failed to apply migrations: %v", err)
+	}
+	log.Println("[db] migrations applied")
 
 	repo := repository.NewFulfillmentRepository(pool)
 

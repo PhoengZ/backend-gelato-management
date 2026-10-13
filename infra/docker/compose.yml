@@ -255,6 +255,9 @@ services:
       context: ../..
       dockerfile: payment-service/Dockerfile
     container_name: payment-service
+    env_file:
+      - path: ../../payment-service/.env
+        required: false
     environment:
       PORT: "3007"
       PAYMENT_GRPC_PORT: "50057"
@@ -266,8 +269,8 @@ services:
       ORDER_GRPC_TLS: "false"
       ORDER_HTTP_BASE_URL: http://order-service:3003
       PAYMENT_CALLBACK_ALLOW_PLAINTEXT: "true"
-      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-sk_test_dummy_key_for_testing}
-      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-whsec_test_secret_for_integration_testing_12345}
+      STRIPE_CHECKOUT_SUCCESS_URL: ${STRIPE_CHECKOUT_SUCCESS_URL:-http://localhost:3000/payment/success?session_id={CHECKOUT_SESSION_ID}}
+      STRIPE_CHECKOUT_CANCEL_URL: ${STRIPE_CHECKOUT_CANCEL_URL:-http://localhost:3000/payment/cancel}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       JWT_ISSUER: ${JWT_ISSUER:-gelatoflow-auth}
       JWT_AUDIENCE: ${JWT_AUDIENCE:-gelatoflow-api}

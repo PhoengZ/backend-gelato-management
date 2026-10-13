@@ -185,16 +185,16 @@ func (s *orderService) placeOrder(ctx context.Context, input CreateOrderInput, i
 		return nil, badRequest("pickup_at must be a future RFC 3339 timestamp")
 	}
 
+	maxCapacity := s.maxSlotCapacity
+	if maxCapacity <= 0 {
+		maxCapacity = DefaultPickupSlotMaxCapacity
+	}
+	if currentCount, err := s.repo.CountOrdersInSlot(ctx, pickupUTC); err == nil && int(currentCount) >= maxCapacity {
+		return nil, conflict("SLOT_CAPACITY_EXCEEDED", "pickup slot capacity exceeded")
+	}
 	if s.fulfillment != nil {
 		capacity, err := s.fulfillment.CheckSlotCapacity(ctx, pickupUTC)
-		if err != nil {
-			return nil, dependencyError("FULFILLMENT_UNAVAILABLE", err)
-		}
-		maxCapacity := s.maxSlotCapacity
-		if maxCapacity <= 0 {
-			maxCapacity = DefaultPickupSlotMaxCapacity
-		}
-		if capacity >= maxCapacity {
+		if err == nil && capacity >= maxCapacity {
 			return nil, conflict("SLOT_CAPACITY_EXCEEDED", "pickup slot capacity exceeded")
 		}
 	}

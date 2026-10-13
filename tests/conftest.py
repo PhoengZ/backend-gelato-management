@@ -96,18 +96,38 @@ def aligned_pickup_time() -> str:
     return aligned.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-@pytest.fixture
-def sample_flavor_id(api_client, customer_actor) -> str:
+@pytest.fixture(scope="session")
+def sample_flavor_id(api_client, manager_actor) -> str:
     """
-    Discovers an active flavor ID from /api/v1/flavors, or returns a standard UUID fallback.
+    Discovers an active flavor ID from /api/v1/flavors, or provisions one via manager_actor.
     """
     try:
-        res = api_client.get("/api/v1/flavors", actor=customer_actor, timeout=3.0)
+        res = api_client.get("/api/v1/flavors", actor=manager_actor, timeout=3.0)
         if res.status_code == 200:
             items = res.json().get("items", [])
             if items:
                 return items[0].get("id")
     except Exception:
         pass
-    # Fallback known seed flavor ID
+
+    # Provision a standard active flavor if catalog is fresh
+    try:
+        res = api_client.post(
+            "/api/v1/flavors",
+            actor=manager_actor,
+            json_data={
+                "name": f"Pistachio {uuid.uuid4().hex[:6]}",
+                "description": "Rich Sicilian pistachio gelato",
+                "price": {"amount_minor": 8500, "currency": "THB"},
+                "allergens": ["TREE_NUT", "MILK"],
+                "recipe": "Milk, cream, sugar, pistachio paste",
+                "active": True,
+            },
+            timeout=5.0,
+        )
+        if res.status_code == 201:
+            return res.json()["id"]
+    except Exception:
+        pass
+
     return "9e914b8c-2476-4c28-8a7d-36c88b1f2b9d"

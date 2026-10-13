@@ -26,7 +26,22 @@ class TestNFR02Concurrency:
         aligned_pickup_time: str,
     ):
         """20 simultaneous threads racing for 1 portion: exactly 1 wins, 19 get 409."""
-        # 1. Manager provisions a dedicated test batch with exactly 1 available portion
+        # 1. Manager provisions a dedicated test flavor and a batch with exactly 1 available portion
+        flavor_res = api_client.post(
+            "/api/v1/flavors",
+            actor=manager_actor,
+            json_data={
+                "name": f"Race Flavor {uuid.uuid4().hex[:6]}",
+                "description": "Flavor for concurrency testing",
+                "price": {"amount_minor": 8500, "currency": "THB"},
+                "allergens": ["MILK"],
+                "recipe": "Milk and cream",
+                "active": True,
+            },
+        )
+        assert flavor_res.status_code == 201, f"Failed to create race flavor: {flavor_res.text}"
+        race_flavor_id = flavor_res.json()["id"]
+
         batch_code = f"RACE-{uuid.uuid4().hex[:6].upper()}"
         today = datetime.date.today().isoformat()
         expiry = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -36,7 +51,7 @@ class TestNFR02Concurrency:
             actor=manager_actor,
             json_data={
                 "batch_code": batch_code,
-                "flavor_id": sample_flavor_id,
+                "flavor_id": race_flavor_id,
                 "production_date": today,
                 "expires_at": expiry,
                 "initial_portions": 1,
@@ -56,7 +71,7 @@ class TestNFR02Concurrency:
                 str(uuid.uuid4()),
                 {
                     "pickup_at": aligned_pickup_time,
-                    "items": [{"flavor_id": sample_flavor_id, "portions": 1}],
+                    "items": [{"flavor_id": race_flavor_id, "portions": 1}],
                 },
             )
             for racer in racers

@@ -22,6 +22,7 @@ type Config struct {
 	PaymentGRPCURL        string
 	PaymentRequestToken   string
 	PaymentRequestTimeout time.Duration
+	FulfillmentURL        string
 }
 
 func Load() (Config, error) {
@@ -36,6 +37,7 @@ func Load() (Config, error) {
 		PaymentServiceToken:   value("PAYMENT_SERVICE_TOKEN", ""),
 		PaymentGRPCURL:        value("PAYMENT_GRPC_URL", ""),
 		PaymentRequestToken:   value("PAYMENT_REQUEST_TOKEN", ""),
+		FulfillmentURL:        value("FULFILLMENT_SERVICE_URL", "http://fulfillment-service:8080"),
 	}
 	if cfg.Port == "" || strings.ContainsAny(cfg.Port, ":/\\") {
 		return Config{}, errors.New("PORT must be a port number")

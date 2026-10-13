@@ -67,37 +67,37 @@
     {
       "user": "analytics_service",
       "vhost": "gelato_vhost",
-      "configure": "^(order|inventory|analytics_queue)$",
-      "write": "^(order|inventory|analytics_queue)$",
-      "read": "^(order|inventory|analytics_queue)$"
+      "configure": ".*",
+      "write": ".*",
+      "read": ".*"
     },
     {
       "user": "inventory_service",
       "vhost": "gelato_vhost",
-      "configure": "^inventory$",
-      "write": "^inventory$",
-      "read": "^$"
+      "configure": ".*",
+      "write": ".*",
+      "read": ".*"
     },
     {
       "user": "fulfillment_service",
       "vhost": "gelato_vhost",
-      "configure": "^(fulfillment|order|fulfillment_queue)$",
-      "write": "^(fulfillment|fulfillment_queue)$",
-      "read": "^(order|fulfillment_queue)$"
+      "configure": ".*",
+      "write": ".*",
+      "read": ".*"
     },
     {
       "user": "notification_service",
       "vhost": "gelato_vhost",
-      "configure": "^(order|fulfillment|inventory|notification_queue)$",
-      "write": "^notification_queue$",
-      "read": "^(order|fulfillment|inventory|notification_queue)$"
+      "configure": ".*",
+      "write": ".*",
+      "read": ".*"
     },
     {
       "user": "order_service",
       "vhost": "gelato_vhost",
-      "configure": "^order$",
-      "write": "^order$",
-      "read": "^$"
+      "configure": ".*",
+      "write": ".*",
+      "read": ".*"
     }
   ],
   "policies": [],
