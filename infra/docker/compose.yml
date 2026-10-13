@@ -225,6 +225,10 @@ services:
     build:
       context: ../../batch-inventory-service
     container_name: batch-inventory-service
+    command:
+      - sh
+      - -c
+      - /app/migrate && exec /app/inventory
     environment:
       HTTP_ADDR: ":3004"
       GRPC_ADDR: ":50051"

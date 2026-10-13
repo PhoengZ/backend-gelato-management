@@ -7,7 +7,6 @@ import (
 	"batch-inventory-service/internal/inventory"
 	"batch-inventory-service/internal/messaging"
 	"batch-inventory-service/internal/transport"
-	"batch-inventory-service/migrations"
 	"context"
 	"errors"
 	"fmt"
@@ -32,8 +31,9 @@ func Run(ctx context.Context, c config.Config) error {
 	if err = db.Ping(startup); err != nil {
 		return fmt.Errorf("database unavailable at startup")
 	}
-	if err = migrations.Apply(startup, db); err != nil {
-		return fmt.Errorf("failed to apply inventory migrations: %w", err)
+	var migrated bool
+	if err = db.QueryRow(startup, "SELECT count(*)=2 FROM inventory_schema_migrations WHERE version IN ('001_inventory.sql','002_batch_code.sql')").Scan(&migrated); err != nil || !migrated {
+		return fmt.Errorf("run Inventory migrations before starting service")
 	}
 	cc, err := grpc.NewClient(c.CatalogAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
