@@ -18,6 +18,7 @@ the runnable local service interfaces and the legacy frontend demo.
 | [Auth and JWT](architecture/auth-and-jwt.md) | Gateway identity, ownership checks and machine credentials |
 | [Events](event-schema-spec.md) | Paid-sale/cancellation semantics, canonical envelopes and integration gaps |
 | [Frontend demo API migration](API_SPEC.md) | Current checkout examples alongside explicitly labeled legacy demo shapes |
+| [Non-functional requirements](architecture/non-functional-requirements.md) | Quality attributes, latency budgets, concurrency reliability, security, and privacy |
 | [ADR-006](architecture/adr-006-catalog-rest-and-grpc.md) | Historical Catalog transport proposal |
 | [ADR-007](architecture/adr-007-inventory-transactions-and-callers.md) | Historical Inventory transaction/caller proposal |
 
