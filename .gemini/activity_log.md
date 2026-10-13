@@ -286,3 +286,19 @@
   - Event schemas validated with 0 errors (9/9 fixtures valid).
   - Docker compose configuration validated with exit code 0.
   - `git diff --check` passed cleanly with 0 whitespace/formatting errors.
+
+## [2026-10-13] Cross-Service Python E2E Integration Testing Suite Architecture Plan
+
+- **What was attempted:**
+  - Formulated a comprehensive Phase 1 Technical Specification & Implementation Plan using the `architect` skill.
+  - Architected a Python-based End-to-End (E2E) integration test harness (`tests/`) using `pytest`, `httpx`, and `requests` to test cross-service business flows through the API Gateway:
+    - UC-01: Preorder, atomic FEFO reservation, Stripe webhook simulation, slot-scoped queue allocation, SSE event streaming, and analytics projection.
+    - UC-02: Kitchen preparation queue, status transitions, staff RBAC, and store pickup completion.
+    - UC-03: Batch inventory creation, waste recording, and low-stock alert triggers.
+    - NFR-02: Concurrency race test (20 threads on 1 portion) proving zero overselling and non-negative stock.
+    - Slot capacity limit validation (10 orders max per 15-min slot, rejecting 11th with 409 Conflict).
+  - Structured the branching strategy to create `feature/e2e-integration-testing-suite` and merge back into `feature/platform-nfr-hardening` upon verification.
+- **The hypothesis being tested:**
+  - Using a Python 3.12 test harness (`pytest` + `httpx`) provides a lightweight, non-intrusive black-box testing framework that executes seamlessly without interfering with the existing Go/Java service modules, verifying full platform integrity across all 9 services.
+- **The observed result/outcome:**
+  - Plan formulated and presented for user verification.
