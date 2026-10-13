@@ -71,10 +71,10 @@ must not publish a replacement event using another service's event type.
 
 Implementation status: Order currently produces order.placed/order.cancelled,
 and Inventory produces inventory.waste through outboxes. Canonical schemas and
-validated fixtures exist for OrderPlaced and WasteRecorded. OrderCancelled still
-needs its schema/fixture and consumer-owner agreement; fulfillment, low-stock and
-expiring events in this catalog describe integration/design targets. The catalog
-alone is not evidence that producers and consumers are connected end to end.
+validated fixtures exist for OrderPlaced, OrderCancelled, WasteRecorded, OrderReady
+and OrderPickedUp. Low-stock and expiring events in this catalog describe
+integration/design targets. The catalog alone is not evidence that producers and
+consumers are connected end to end.
 
 ### 3.1 OrderPlaced
 

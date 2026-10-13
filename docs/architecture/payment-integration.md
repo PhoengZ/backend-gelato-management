@@ -10,11 +10,11 @@ binding and Inventory workflow. No shared proto fields or REST shapes change.
 See [Payment gRPC guide](../../payment-service/GRPC.md) for configuration,
 validation, provider replay limits and verification.
 
-Only the inbound RPC is migrated in this increment. The existing REST/webhook
-code below still depends on PaymentIntent-era Order RPCs; Order's new HTTP result
-callbacks, retryable failure semantics, durable late-charge reconciliation/refunds
-and frontend migration remain pending. The new RPC does not access Inventory or
-emit operational events. This is not end-to-end Stripe integration.
+The inbound Checkout Session RPC and Checkout webhook adapter reporting to
+Order's HTTP result callbacks are implemented in this service. Durable late-charge
+reconciliation/refunds, Gateway provider webhook routing without JWT, and frontend
+migration remain pending. The service does not access Inventory or emit operational
+events. This is not deployed end-to-end Stripe integration.
 
 Checkout currently remains stateless and relies on provider idempotency retention.
 Permanent checkout-key deduplication after provider key pruning requires a later
@@ -111,8 +111,8 @@ Payment has application source, SDK/gRPC adapters, security, tests, a Dockerfile
 and CI. Order implements the new checkout orchestration, but the legacy
 GetOrderDetails, BindPaymentIntent and ReportPaymentResult RPCs used by this
 PaymentIntent adapter are not implemented in its runtime. Full Stripe-to-Inventory
-checkout remains an integration dependency until callbacks and reconciliation
-are connected.
+checkout remains an integration dependency until durable reconciliation and
+production deployment verification are connected.
 
 References: [Stripe idempotency](https://docs.stripe.com/api/idempotent_requests),
 [Stripe signature verification](https://docs.stripe.com/webhooks/signature),
