@@ -76,7 +76,15 @@ func run() error {
 	}
 	defer pub.Close()
 
-	svc, err := service.NewOrderService(repo, inv, cat, pay)
+	var svcOpts []service.Option
+	if cfg.FulfillmentURL != "" {
+		ful, fulErr := client.NewFulfillmentClient(cfg.FulfillmentURL, 5*time.Second)
+		if fulErr == nil {
+			svcOpts = append(svcOpts, service.WithFulfillmentClient(ful))
+		}
+	}
+
+	svc, err := service.NewOrderService(repo, inv, cat, pay, svcOpts...)
 	if err != nil {
 		return err
 	}
@@ -93,6 +101,7 @@ func run() error {
 	app := fiber.New(fiber.Config{DisableStartupMessage: true})
 	app.Use(logger.New(), recover.New())
 	api := app.Group("/api/v1/orders")
+	api.Post("", h.CreateOrder)
 	api.Post("/", h.CreateOrder)
 	api.Get("/:id", h.GetOrder)
 	api.Post("/:id/payment-succeeded", h.PaymentSucceeded)

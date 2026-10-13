@@ -15,6 +15,7 @@ import (
 	"auth-service/internal/repository"
 	"auth-service/internal/router"
 	"auth-service/internal/service"
+	"auth-service/migrations"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -36,6 +37,9 @@ func main() {
 	defer pool.Close()
 	if err := pool.Ping(startupCtx); err != nil {
 		log.Fatalf("connect to PostgreSQL: %v", err)
+	}
+	if err := migrations.Up(startupCtx, pool); err != nil {
+		log.Fatalf("run migrations: %v", err)
 	}
 
 	tokens := auth.NewTokenManager(cfg.JWTSecret, cfg.JWTIssuer, cfg.JWTAudience, cfg.JWTTTL)

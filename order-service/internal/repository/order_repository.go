@@ -28,6 +28,7 @@ type OrderRepository interface {
 	MarkCancelled(context.Context, string, *domain.OutboxEvent) error
 	PendingOutbox(context.Context, int) ([]domain.OutboxEvent, error)
 	MarkOutboxPublished(context.Context, string) error
+	CountOrdersInSlot(context.Context, time.Time) (int64, error)
 }
 
 // BindCheckout serializes competing responses and never exposes a payment URL
@@ -204,4 +205,19 @@ func (r *gormOrderRepository) PendingOutbox(ctx context.Context, limit int) ([]d
 
 func (r *gormOrderRepository) MarkOutboxPublished(ctx context.Context, id string) error {
 	return r.db.WithContext(ctx).Model(&domain.OutboxEvent{}).Where("id = ? AND published_at IS NULL", id).Update("published_at", gorm.Expr("CURRENT_TIMESTAMP")).Error
+}
+
+func (r *gormOrderRepository) CountOrdersInSlot(ctx context.Context, slotTime time.Time) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).Model(&domain.Order{}).
+		Where("pickup_at = ? AND status IN (?, ?, ?, ?, ?)",
+			slotTime,
+			domain.StatusPendingPayment,
+			domain.StatusPaymentConfirming,
+			domain.StatusPaid,
+			domain.StatusPreparing,
+			domain.StatusReadyForPickup,
+		).
+		Count(&count).Error
+	return count, err
 }

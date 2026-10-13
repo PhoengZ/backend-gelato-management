@@ -95,7 +95,7 @@ class TestUC03BatchInventory:
             actor=manager_actor,
             json_data={
                 "portions": 5,
-                "reason": "EXPIRED",
+                "reason": "QUALITY",
                 "note": "Temperature excursion testing",
                 "idempotency_key": waste_key,
             },
@@ -103,7 +103,7 @@ class TestUC03BatchInventory:
         assert waste_res.status_code == 201, f"Failed to record waste: {waste_res.text}"
         waste_data = waste_res.json()
         assert waste_data["portions"] == 5
-        assert waste_data["reason"] == "EXPIRED"
+        assert waste_data["reason"] == "QUALITY"
 
         # 3. Read batch balance to confirm deduction
         get_res = api_client.get(f"/api/v1/inventory/batches/{batch_id}", actor=manager_actor)
