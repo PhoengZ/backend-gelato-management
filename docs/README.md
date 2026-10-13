@@ -5,8 +5,9 @@ the [system and Order diagrams](architecture-diagram.md) and
 [checkout, retry, cancellation, expiry and state sequences](sequence-diagram.md).
 
 The selected checkout is Frontend -> Gateway -> Order -> Payment -> Stripe.
-Order's client and session binding are implemented; Payment's Checkout Session
-server/webhook adapter remain pending. Current docs distinguish that target from
+Order's client and session binding, along with Payment's Checkout Session
+server and webhook adapter, are implemented; durable reconciliation/refunds
+and deployed verification remain pending. Current docs distinguish that target from
 the runnable local service interfaces and the legacy frontend demo.
 
 | Reference | Purpose |

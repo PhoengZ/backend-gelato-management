@@ -28,12 +28,12 @@ flowchart LR
     Order -->|"gRPC: BatchGetFlavors"| Catalog
     Inventory -->|"gRPC: GetFlavor before batch creation"| Catalog
     Order -->|"gRPC: Reserve / Confirm / Release"| Inventory
-    Order -. "CreateCheckoutSession: client implemented, server pending" .-> Payment["Payment Service"]
+    Order -->|"gRPC: CreateCheckoutSession"| Payment["Payment Service"]
     Payment -. "Target: Stripe Checkout Session" .-> Stripe["Stripe"]
     Customer -. "Target: redirect to checkout_url" .-> Stripe
     Stripe -. "Signed webhook through Gateway" .-> Gateway
     Gateway -. "Provider webhook route" .-> Payment
-    Payment -. "Checkout adapter pending: authenticated HTTP callbacks" .-> Order
+    Payment -->|"HTTP: payment-succeeded / payment-failed"| Order
 
     Order -->|"Outbox: order.placed / order.cancelled"| Rabbit["RabbitMQ"]
     Inventory -->|"Outbox: inventory.waste, publishing configurable"| Rabbit
@@ -47,8 +47,8 @@ flowchart LR
 
 The selected frontend checkout calls Order only. The public PaymentIntent API
 on `chelsea/payment-service` is a separate implementation to migrate; it is not
-a second frontend call in this Checkout Session flow. Payment must implement the
-new gRPC API and connect verified webhook results to Order callbacks first.
+a second frontend call in this Checkout Session flow. Payment implements the
+inbound gRPC API and connects verified webhook results to Order HTTP callbacks.
 
 ## Order internals
 

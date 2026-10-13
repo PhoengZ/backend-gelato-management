@@ -1,9 +1,9 @@
 # Order checkout and reservation sequence diagrams
 
-Order handlers and outbound clients and Payment's authenticated
-CreateCheckoutSession server/Stripe adapter are implemented. Payment's Checkout
-webhook adapter is pending; webhook/callback steps below describe the selected
-integration target. Deployed end-to-end integration remains unverified.
+Order handlers and outbound clients, along with Payment's authenticated
+CreateCheckoutSession server and Checkout webhook adapter, are implemented.
+Webhook and callback steps below describe the selected flow. Deployed
+end-to-end integration remains unverified.
 Contracts under ../contracts/ remain authoritative.
 
 ## Checkout and successful payment
@@ -44,8 +44,8 @@ sequenceDiagram
 
     S->>G: Signed webhook, raw body and Stripe-Signature
     G->>P: Forward unchanged webhook bytes and signature
-    Note over P,O: Checkout webhook reporting to Order still pending
-    Note over P: Verify provider result and correlate it to the order
+    Note over P,O: Checkout webhook adapter verifies and reports to Order callbacks
+    Note over P: Correlate provider result to order
     P->>O: POST /api/v1/orders/{id}/payment-succeeded with service token
     O->>DB: Transaction: claim PAYMENT_CONFIRMING
     O->>I: gRPC ConfirmReservation with stable confirmation key

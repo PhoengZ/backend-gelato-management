@@ -13,7 +13,7 @@ Versioned [contracts](../contracts/README.md) are authoritative.
 | Catalog | Metadata, prices, active status, recipes and allergens | Redis |
 | Order | Orders, purchase snapshots, pickup_at, reservation references, session binding and outbox | PostgreSQL |
 | Batch Inventory | Batches, availability, reservations, sold portions, expiry and waste | PostgreSQL |
-| Payment | Stripe APIs and signature verification; Checkout result reporting and durable reconciliation/refunds pending | None (stateless Checkout and legacy PaymentIntent adapters) |
+| Payment | Stripe APIs and signature verification; Checkout result reporting implemented, durable reconciliation/refunds pending | None (stateless Checkout and legacy PaymentIntent adapters) |
 | Fulfillment | Implemented kitchen tickets, per-slot queue numbers and fulfillment status; Gateway/runtime integration pending | Owned PostgreSQL |
 | Notification | Implemented SSE and event consumer; Gateway/runtime integration pending | None (stateless; bounded in-memory routing and deduplication) |
 | Analytics | Derived sales and waste projections | MongoDB |
@@ -43,8 +43,8 @@ metadata and availability without taking ownership of either.
    unexpired order before returning checkout_url.
 9. Frontend redirects to Stripe. A verified Payment callback makes Order claim
    PAYMENT_CONFIRMING, confirm Inventory, then commit PAID and order.placed in one
-   database transaction. Order's handlers are implemented; Payment's Checkout
-   webhook reporting to these callbacks remains pending.
+   database transaction. Order's handlers and Payment's Checkout webhook reporting
+   to these callbacks are implemented.
 10. The outbox worker publishes asynchronously. After browser return, frontend
     reads authenticated GET /api/v1/orders/{id} for the current state.
 
@@ -62,7 +62,7 @@ interchangeable Checkout Session server. Checkout accepts totals between 1 and
 | Inventory to Catalog | GetFlavor gRPC | Batch validation implemented |
 | Order to Inventory | Reserve/Confirm/Release gRPC | Client and server implemented; full checkout integration pending |
 | Order to Payment | CreateCheckoutSession gRPC | Contract, client, authenticated Payment server and Stripe adapter implemented; deployed end-to-end verification pending |
-| Payment to Order | Token-authenticated HTTP callbacks | Order handlers implemented; Checkout webhook adapter pending |
+| Payment to Order | Token-authenticated HTTP callbacks | Order handlers and Checkout webhook adapter implemented; deployed end-to-end verification pending |
 | Order to RabbitMQ | CloudEvents through transactional outbox | Publisher confirmation matching, mandatory returns and reconnect implemented; broker runtime integration pending |
 | Analytics/downstream to Order | Order read gRPC | Order server pending |
 

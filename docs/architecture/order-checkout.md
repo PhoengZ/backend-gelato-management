@@ -1,9 +1,9 @@
 # Order-orchestrated Stripe checkout
 
-Status: Order checkout and Payment's inbound Checkout Session gRPC/Stripe adapter
-implemented; Checkout webhook reporting, reconciliation/refunds and deployed
-end-to-end verification pending. The boundary requires Order, Payment, Gateway
-and frontend owner review before shared deployment.
+Status: Order checkout, Payment's inbound Checkout Session gRPC/Stripe adapter,
+and Checkout webhook reporting are implemented; durable reconciliation/refunds
+and deployed end-to-end verification remain pending. The boundary requires Order,
+Payment, Gateway and frontend owner review before shared deployment.
 
 ## Ownership and transport
 
@@ -148,9 +148,8 @@ Order's outbound client, binding, REST response and retry handling are implement
 Payment implements the new authenticated gRPC server and Stripe Checkout adapter.
 Its retained PaymentIntent REST/webhook code still uses `client_secret` and
 Payment-to-Order gRPC binding/reporting; Order does not implement those RPCs.
-Payment must connect verified Checkout provider results to Order's existing
-authenticated HTTP callbacks (or jointly migrate callbacks to the proposed
-result-reporting gRPC contract). Frontend uses the new checkout_url instead of
+Payment connects verified Checkout provider results to Order's existing
+authenticated HTTP callbacks. Frontend uses the new checkout_url instead of
 calling the old public PaymentIntent endpoint. See
 [Payment integration](payment-integration.md) for the incremental migration.
 
