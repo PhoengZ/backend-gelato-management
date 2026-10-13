@@ -338,11 +338,11 @@ func TestExpiryAndWasteOutbox(t *testing.T) {
 		t.Fatal("duplicate expiry", count, total, err)
 	}
 	var events int
-	if err = s.DB.QueryRow(ctx, "SELECT count(*) FROM outbox_events").Scan(&events); err != nil || events != 2 {
+	if err = s.DB.QueryRow(ctx, "SELECT count(*) FROM outbox_events WHERE payload->>'type' = 'com.gelatoflow.inventory.waste-recorded.v1'").Scan(&events); err != nil || events != 2 {
 		t.Fatal(events, err)
 	}
 	var payload []byte
-	if err = s.DB.QueryRow(ctx, "SELECT payload FROM outbox_events LIMIT 1").Scan(&payload); err != nil {
+	if err = s.DB.QueryRow(ctx, "SELECT payload FROM outbox_events WHERE payload->>'type' = 'com.gelatoflow.inventory.waste-recorded.v1' LIMIT 1").Scan(&payload); err != nil {
 		t.Fatal(err)
 	}
 	var e map[string]any
@@ -438,7 +438,7 @@ func TestOutboxRetryAndRealRabbit(t *testing.T) {
 	raw := requireEnv(t, "TEST_RABBITMQ_URL")
 	s, _ := fixture(t)
 	ctx := context.Background()
-	b := batch(t, s, uuid.NewString(), 1, time.Now().Add(time.Hour))
+	b := batch(t, s, uuid.NewString(), 20, time.Now().Add(72*time.Hour))
 	if _, err := s.Waste(ctx, b.ID, uuid.NewString(), inventory.WasteInput{Portions: 1, Reason: "DAMAGED", Key: uuid.NewString()}); err != nil {
 		t.Fatal(err)
 	}
