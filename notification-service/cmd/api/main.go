@@ -16,6 +16,7 @@ import (
 	"notification-service/internal/hub"
 	"notification-service/internal/messaging"
 	"notification-service/internal/notify"
+	"notification-service/internal/stream"
 )
 
 func main() {
@@ -27,7 +28,10 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	replayBuffer := stream.NewReplayBuffer(500, 5*time.Minute)
 	connections := hub.New(cfg.SubscriberBuffer)
+	connections.OnPushToUser(replayBuffer.Add)
+
 	service := notify.New(connections, cfg.OrderOwnerTTL)
 
 	// RabbitMQ is optional: without it the SSE endpoint still serves, but nothing is pushed.
@@ -45,7 +49,7 @@ func main() {
 		}()
 	}
 
-	h := handler.New(auth.NewVerifier(cfg.JWTSecret, cfg.JWTIssuer, cfg.JWTAudience), connections, cfg.HeartbeatInterval)
+	h := handler.New(auth.NewVerifier(cfg.JWTSecret, cfg.JWTIssuer, cfg.JWTAudience), connections, cfg.HeartbeatInterval, replayBuffer)
 
 	srv := &http.Server{
 		Addr:    ":" + cfg.Port,

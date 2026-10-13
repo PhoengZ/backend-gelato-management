@@ -1,6 +1,7 @@
 package inventory
 
 import (
+	"batch-inventory-service/internal/service"
 	"context"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -106,6 +107,11 @@ func (s *Service) Reserve(ctx context.Context, in ReserveInput) (Reservation, er
 				return r, err
 			}
 		}
+		for _, item := range in.Items {
+			if _, err = service.CheckAndNotifyLowStock(ctx, tx, item.FlavorID, current); err != nil {
+				return r, err
+			}
+		}
 		return r, nil
 	})
 }
@@ -206,6 +212,11 @@ func (s *Service) transition(ctx context.Context, tx pgx.Tx, in TransitionInput,
 	if _, err = tx.Exec(ctx, "UPDATE reservations SET status=$2,updated_at=$3,release_reason=$4 WHERE id=$1", r.ID, target, t, in.Reason); err != nil {
 		return r, err
 	}
+	if !confirm {
+		for _, fid := range ids {
+			_ = service.ResetLowStockNotified(ctx, tx, fid, t)
+		}
+	}
 	r.Status = target
 	return r, nil
 }
@@ -273,6 +284,9 @@ func (s *Service) Sweep(ctx context.Context, limit int) error {
 			return err
 		}
 	}
+	if _, err = service.NotifyExpiringBatches(ctx, s.DB, limit); err != nil {
+		return err
+	}
 	return nil
 }
 func (s *Service) expireBatch(ctx context.Context, id, flavor string) error {
@@ -304,6 +318,9 @@ func (s *Service) expireBatch(ctx context.Context, id, flavor string) error {
 		}
 	}
 	if err = saveBatch(ctx, tx, b, t); err != nil {
+		return err
+	}
+	if _, err = service.CheckAndNotifyLowStock(ctx, tx, b.FlavorID, t); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

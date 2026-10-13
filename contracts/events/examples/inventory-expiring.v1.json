@@ -1,0 +1,13 @@
+{
+  "specversion": "1.0",
+  "id": "e8b9c5f3-7e3a-49f2-a6d4-2e5f6a7b8c9d",
+  "source": "/gelatoflow/batch-inventory-service",
+  "type": "com.gelatoflow.inventory.batch-expiring.v1",
+  "time": "2026-10-13T10:00:00Z",
+  "datacontenttype": "application/json",
+  "data": {
+    "batch_id": "36d9f415-d169-447b-9f81-37075fb19cdd",
+    "flavor_id": "0f3bca11-1eb2-4a86-908a-e60d7656c79b",
+    "expires_at": "2026-10-14T12:00:00Z"
+  }
+}

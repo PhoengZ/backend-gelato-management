@@ -52,18 +52,46 @@ type Service interface {
 	ResumePendingTransitions(context.Context) error
 }
 
-type orderService struct {
-	repo      repository.OrderRepository
-	inventory client.Inventory
-	catalog   client.Catalog
-	payment   client.Payment
+const DefaultPickupSlotMaxCapacity = 10
+
+type Option func(*orderService)
+
+func WithFulfillmentClient(ful client.Fulfillment) Option {
+	return func(s *orderService) {
+		s.fulfillment = ful
+	}
 }
 
-func NewOrderService(repo repository.OrderRepository, inv client.Inventory, cat client.Catalog, pay client.Payment) (Service, error) {
+func WithMaxSlotCapacity(max int) Option {
+	return func(s *orderService) {
+		s.maxSlotCapacity = max
+	}
+}
+
+type orderService struct {
+	repo            repository.OrderRepository
+	inventory       client.Inventory
+	catalog         client.Catalog
+	payment         client.Payment
+	fulfillment     client.Fulfillment
+	maxSlotCapacity int
+}
+
+func NewOrderService(repo repository.OrderRepository, inv client.Inventory, cat client.Catalog, pay client.Payment, opts ...Option) (Service, error) {
 	if repo == nil || inv == nil || cat == nil || pay == nil {
 		return nil, errors.New("order repository, inventory, catalog and payment clients are required")
 	}
-	return &orderService{repo: repo, inventory: inv, catalog: cat, payment: pay}, nil
+	s := &orderService{
+		repo:            repo,
+		inventory:       inv,
+		catalog:         cat,
+		payment:         pay,
+		maxSlotCapacity: DefaultPickupSlotMaxCapacity,
+	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s, nil
 }
 
 func (s *orderService) PlaceOrder(ctx context.Context, input CreateOrderInput, idemKey string) (*domain.CheckoutResponse, error) {
@@ -132,6 +160,10 @@ func (s *orderService) placeOrder(ctx context.Context, input CreateOrderInput, i
 	if input.PickupAt.IsZero() {
 		return nil, badRequest("pickup_at must be a future RFC 3339 timestamp")
 	}
+	pickupUTC := input.PickupAt.UTC()
+	if !pickupUTC.Truncate(15 * time.Minute).Equal(pickupUTC) {
+		return nil, badRequest("pickup_at must be aligned to a 15-minute slot boundary")
+	}
 	items, err := normalizeItems(input.Items)
 	if err != nil {
 		return nil, err
@@ -151,6 +183,20 @@ func (s *orderService) placeOrder(ctx context.Context, input CreateOrderInput, i
 	}
 	if !input.PickupAt.After(time.Now().UTC()) {
 		return nil, badRequest("pickup_at must be a future RFC 3339 timestamp")
+	}
+
+	if s.fulfillment != nil {
+		capacity, err := s.fulfillment.CheckSlotCapacity(ctx, pickupUTC)
+		if err != nil {
+			return nil, dependencyError("FULFILLMENT_UNAVAILABLE", err)
+		}
+		maxCapacity := s.maxSlotCapacity
+		if maxCapacity <= 0 {
+			maxCapacity = DefaultPickupSlotMaxCapacity
+		}
+		if capacity >= maxCapacity {
+			return nil, conflict("SLOT_CAPACITY_EXCEEDED", "pickup slot capacity exceeded")
+		}
 	}
 
 	flavorIDs := make([]string, 0, len(items))

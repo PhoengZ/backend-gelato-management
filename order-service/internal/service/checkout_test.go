@@ -105,7 +105,7 @@ func sessionResponse() *paymentv1.CreateCheckoutSessionResponse {
 	return &paymentv1.CreateCheckoutSessionResponse{CheckoutSessionId: "cs_test_checkout", CheckoutUrl: "https://checkout.stripe.com/c/pay/test"}
 }
 func checkoutInput() CreateOrderInput {
-	return CreateOrderInput{CustomerID: uuid.NewString(), PickupAt: time.Now().UTC().Add(time.Hour), Items: []OrderItemInput{{FlavorID: uuid.NewString(), Portions: 2}}}
+	return CreateOrderInput{CustomerID: uuid.NewString(), PickupAt: time.Now().UTC().Add(time.Hour).Truncate(15 * time.Minute), Items: []OrderItemInput{{FlavorID: uuid.NewString(), Portions: 2}}}
 }
 
 func TestCheckoutPaymentTimeoutRetryReusesOrderAndReservation(t *testing.T) {

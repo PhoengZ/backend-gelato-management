@@ -42,8 +42,36 @@ func NewConsumer(rabbitURL string, svc service.AnalyticsService) (*Consumer, err
 }
 
 func (c *Consumer) Start() error {
-	// Declare exchanges
+	// Declare Dead Letter Exchange
 	err := c.ch.ExchangeDeclare(
+		"analytics.dlx", "direct", true, false, false, false, nil,
+	)
+	if err != nil {
+		return err
+	}
+
+	// Declare Dead Letter Queue
+	dlq, err := c.ch.QueueDeclare(
+		"analytics_dlq", true, false, false, false, nil,
+	)
+	if err != nil {
+		return err
+	}
+
+	// Bind DLQ to DLX with DLQ routing key and event routing keys
+	dlqBindings := []string{
+		"analytics_dlq", "",
+		"order.placed", "order.cancelled", "inventory.waste",
+		"OrderPlaced", "OrderCancelled", "WasteRecorded",
+	}
+	for _, k := range dlqBindings {
+		if err := c.ch.QueueBind(dlq.Name, k, "analytics.dlx", false, nil); err != nil {
+			return err
+		}
+	}
+
+	// Declare topic exchanges
+	err = c.ch.ExchangeDeclare(
 		"order", "topic", true, false, false, false, nil,
 	)
 	if err != nil {
@@ -57,9 +85,13 @@ func (c *Consumer) Start() error {
 		return err
 	}
 
-	// Declare queue
+	// Declare queue with Dead Letter Exchange configuration
+	qArgs := amqp.Table{
+		"x-dead-letter-exchange":    "analytics.dlx",
+		"x-dead-letter-routing-key": "analytics_dlq",
+	}
 	q, err := c.ch.QueueDeclare(
-		"analytics_queue", true, false, false, false, nil,
+		"analytics_queue", true, false, false, false, qArgs,
 	)
 	if err != nil {
 		return err

@@ -54,4 +54,10 @@ func TestLoadConfigDefaults(t *testing.T) {
 	if cfg.JWTAudience == "" {
 		t.Errorf("expected default JWTAudience, got empty")
 	}
+	if cfg.PaymentServiceURL == "" {
+		t.Errorf("expected default PaymentServiceURL, got empty")
+	}
+	if cfg.NotificationServiceURL == "" {
+		t.Errorf("expected default NotificationServiceURL, got empty")
+	}
 }

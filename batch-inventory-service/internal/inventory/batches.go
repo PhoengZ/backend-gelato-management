@@ -1,6 +1,7 @@
 package inventory
 
 import (
+	"batch-inventory-service/internal/service"
 	"context"
 	"errors"
 	"github.com/google/uuid"
@@ -59,6 +60,7 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (Batch, error) {
 	if err = movement(ctx, tx, b.ID, "", "PRODUCED", b.Initial, t); err != nil {
 		return Batch{}, err
 	}
+	_ = service.ResetLowStockNotified(ctx, tx, b.FlavorID, t)
 	return b, tx.Commit(ctx)
 }
 

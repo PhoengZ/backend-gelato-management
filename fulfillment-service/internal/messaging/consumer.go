@@ -17,6 +17,10 @@ const (
 	OrderExchange = "order"
 	// ConsumerQueue is the durable queue Fulfillment owns for order events.
 	ConsumerQueue = "fulfillment_queue"
+	// DLXExchange is the Dead Letter Exchange for fulfillment poison messages.
+	DLXExchange = "fulfillment.dlx"
+	// DLQQueue is the Dead Letter Queue for fulfillment poison messages.
+	DLQQueue = "fulfillment_queue_dlq"
 )
 
 // OrderEvents is what the consumer needs to apply order events.
@@ -63,8 +67,8 @@ func Dispatch(ctx context.Context, h OrderEvents, body []byte) (retry bool, err 
 	}
 }
 
-// Consume declares the queue, binds order.placed and order.cancelled, and
-// processes messages until ctx is cancelled or the channel closes.
+// Consume declares the DLX, DLQ, order exchange and queue, binds order.placed and
+// order.cancelled, and processes messages until ctx is cancelled or the channel closes.
 func (b *Broker) Consume(ctx context.Context, h OrderEvents) error {
 	ch, err := b.conn.Channel()
 	if err != nil {
@@ -72,12 +76,34 @@ func (b *Broker) Consume(ctx context.Context, h OrderEvents) error {
 	}
 	defer ch.Close()
 
+	// 1. Declare Dead Letter Exchange ('fulfillment.dlx')
+	if err := ch.ExchangeDeclare(DLXExchange, "fanout", true, false, false, false, nil); err != nil {
+		return err
+	}
+
+	// 2. Declare Dead Letter Queue ('fulfillment_queue_dlq')
+	if _, err := ch.QueueDeclare(DLQQueue, true, false, false, false, nil); err != nil {
+		return err
+	}
+
+	// 3. Bind DLQ to DLX
+	if err := ch.QueueBind(DLQQueue, "", DLXExchange, false, nil); err != nil {
+		return err
+	}
+
+	// 4. Declare Order topic exchange
 	if err := ch.ExchangeDeclare(OrderExchange, "topic", true, false, false, false, nil); err != nil {
 		return err
 	}
-	if _, err := ch.QueueDeclare(ConsumerQueue, true, false, false, false, nil); err != nil {
+
+	// 5. Declare Consumer Queue with Dead Letter Exchange configuration
+	queueArgs := amqp.Table{
+		"x-dead-letter-exchange": DLXExchange,
+	}
+	if _, err := ch.QueueDeclare(ConsumerQueue, true, false, false, false, queueArgs); err != nil {
 		return err
 	}
+
 	for _, key := range []string{events.RoutingKeyOrderPlaced, events.RoutingKeyOrderCancel} {
 		if err := ch.QueueBind(ConsumerQueue, key, OrderExchange, false, nil); err != nil {
 			return err
@@ -91,7 +117,7 @@ func (b *Broker) Consume(ctx context.Context, h OrderEvents) error {
 	if err != nil {
 		return err
 	}
-	log.Printf("[consumer] consuming %s", ConsumerQueue)
+	log.Printf("[consumer] consuming %s with DLX %s -> %s", ConsumerQueue, DLXExchange, DLQQueue)
 
 	for {
 		select {
@@ -109,7 +135,7 @@ func (b *Broker) Consume(ctx context.Context, h OrderEvents) error {
 				log.Printf("[consumer] %s failed, requeueing: %v", d.RoutingKey, err)
 				_ = d.Nack(false, true)
 			default:
-				log.Printf("[consumer] dropping %s: %v", d.RoutingKey, err)
+				log.Printf("[consumer] rejecting poison message %s to DLQ: %v", d.RoutingKey, err)
 				_ = d.Nack(false, false)
 			}
 		}

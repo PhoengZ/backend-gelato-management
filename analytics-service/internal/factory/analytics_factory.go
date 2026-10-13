@@ -22,9 +22,6 @@ func BuildAnalyticsSummaryResponse(records []models.Analytics) *models.Analytics
 
 	for _, record := range records {
 		recordGrossSales := float64(record.Financials.GrossSalesMinor) / 100.0
-		if record.Financials.GrossSalesMinor == 0 && record.Financials.GrossSales > 0 {
-			recordGrossSales = record.Financials.GrossSales
-		}
 
 		// Accumulate totals
 		response.TotalRevenue += recordGrossSales
@@ -45,9 +42,6 @@ func BuildAnalyticsSummaryResponse(records []models.Analytics) *models.Analytics
 		// Aggregate per-flavor stats
 		for _, fs := range record.FlavorStats {
 			flavorRevenue := float64(fs.RevenueMinor) / 100.0
-			if fs.RevenueMinor == 0 && fs.Revenue > 0 {
-				flavorRevenue = fs.Revenue
-			}
 
 			// Sales aggregation
 			if fs.ScoopsSold > 0 || flavorRevenue > 0 {

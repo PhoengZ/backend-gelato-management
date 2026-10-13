@@ -3,24 +3,35 @@ package handler
 
 import (
 	"encoding/json"
-	"fmt"
-	"log"
 	"net/http"
 	"strings"
 	"time"
 
 	"notification-service/internal/auth"
 	"notification-service/internal/hub"
+	"notification-service/internal/stream"
 )
 
 type Handler struct {
 	verifier  *auth.Verifier
 	hub       *hub.Hub
 	heartbeat time.Duration
+	buffer    *stream.ReplayBuffer
 }
 
-func New(v *auth.Verifier, h *hub.Hub, heartbeat time.Duration) *Handler {
-	return &Handler{verifier: v, hub: h, heartbeat: heartbeat}
+// New creates a new Handler. An optional ReplayBuffer can be provided for replaying missed events.
+func New(v *auth.Verifier, h *hub.Hub, heartbeat time.Duration, buffer ...*stream.ReplayBuffer) *Handler {
+	var buf *stream.ReplayBuffer
+	if len(buffer) > 0 {
+		buf = buffer[0]
+	}
+	return &Handler{verifier: v, hub: h, heartbeat: heartbeat, buffer: buf}
+}
+
+// WithReplayBuffer attaches a ReplayBuffer to the Handler.
+func (h *Handler) WithReplayBuffer(b *stream.ReplayBuffer) *Handler {
+	h.buffer = b
+	return h
 }
 
 // Routes returns the service router.
@@ -33,67 +44,6 @@ func (h *Handler) Routes() http.Handler {
 
 func (h *Handler) health(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-}
-
-// stream holds the connection open and writes one SSE frame per notification.
-// Customers receive only notifications for their own orders; staff and managers
-// receive inventory alerts. Nothing is replayed on reconnect.
-func (h *Handler) stream(w http.ResponseWriter, r *http.Request) {
-	claims, err := h.authenticate(r)
-	if err != nil {
-		writeError(w, http.StatusUnauthorized, "UNAUTHORIZED", "A valid Bearer access token is required.")
-		return
-	}
-
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "Streaming is not supported.")
-		return
-	}
-
-	sub, cancel := h.hub.Subscribe(claims.UserID(), claims.Role)
-	defer cancel()
-
-	hdr := w.Header()
-	hdr.Set("Content-Type", "text/event-stream")
-	hdr.Set("Cache-Control", "no-cache")
-	hdr.Set("Connection", "keep-alive")
-	hdr.Set("X-Accel-Buffering", "no") // stop nginx-style proxies from buffering the stream
-	w.WriteHeader(http.StatusOK)
-
-	// Opening comment flushes headers so the client sees the connection is live.
-	_, _ = fmt.Fprint(w, ": connected\n\n")
-	flusher.Flush()
-
-	ticker := time.NewTicker(h.heartbeat)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-r.Context().Done():
-			return
-		case n := <-sub.C():
-			if err := writeFrame(w, n); err != nil {
-				log.Printf("[sse] write failed, closing: %v", err)
-				return
-			}
-			flusher.Flush()
-		case <-ticker.C:
-			if _, err := fmt.Fprint(w, ": keep-alive\n\n"); err != nil {
-				return
-			}
-			flusher.Flush()
-		}
-	}
-}
-
-func writeFrame(w http.ResponseWriter, n hub.Notification) error {
-	data, err := json.Marshal(n)
-	if err != nil {
-		return err
-	}
-	_, err = fmt.Fprintf(w, "id: %s\nevent: %s\ndata: %s\n\n", n.ID, n.Type, data)
-	return err
 }
 
 // authenticate requires exactly one "Authorization: Bearer <jwt>" header.

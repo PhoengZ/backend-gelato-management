@@ -19,12 +19,10 @@ type Analytics struct {
 }
 
 type Financials struct {
-	GrossSalesMinor        int64   `bson:"gross_sales_minor" json:"gross_sales_minor"`
-	GrossSales             float64 `bson:"gross_sales,omitempty" json:"gross_sales,omitempty"` // legacy fallback
-	TotalOrders            int     `bson:"total_orders" json:"total_orders"`
-	AverageOrderValueMinor int64   `bson:"average_order_value_minor" json:"average_order_value_minor"`
-	AverageOrderValue      float64 `bson:"average_order_value,omitempty" json:"average_order_value,omitempty"`
-	Currency               string  `bson:"currency,omitempty" json:"currency,omitempty"`
+	GrossSalesMinor        int64  `bson:"gross_sales_minor" json:"gross_sales_minor"`
+	TotalOrders            int    `bson:"total_orders" json:"total_orders"`
+	AverageOrderValueMinor int64  `bson:"average_order_value_minor" json:"average_order_value_minor"`
+	Currency               string `bson:"currency,omitempty" json:"currency,omitempty"`
 }
 
 type Operations struct {
@@ -45,13 +43,12 @@ type WasteByReason struct {
 }
 
 type FlavorStat struct {
-	FlavorID      string  `bson:"flavor_id" json:"flavor_id"`
-	Name          string  `bson:"name" json:"name"`
-	ScoopsSold    int     `bson:"scoops_sold" json:"scoops_sold"`
-	RevenueMinor  int64   `bson:"revenue_minor" json:"revenue_minor"`
-	Revenue       float64 `bson:"revenue,omitempty" json:"revenue,omitempty"` // legacy fallback
-	WastePortions int     `bson:"waste_portions" json:"waste_portions"`
-	CostLostMinor int64   `bson:"cost_lost_minor,omitempty" json:"cost_lost_minor,omitempty"`
+	FlavorID      string `bson:"flavor_id" json:"flavor_id"`
+	Name          string `bson:"name" json:"name"`
+	ScoopsSold    int    `bson:"scoops_sold" json:"scoops_sold"`
+	RevenueMinor  int64  `bson:"revenue_minor" json:"revenue_minor"`
+	WastePortions int    `bson:"waste_portions" json:"waste_portions"`
+	CostLostMinor int64  `bson:"cost_lost_minor,omitempty" json:"cost_lost_minor,omitempty"`
 }
 
 // --- API Response DTOs (matching API_SPEC.md GET /api/v1/analytics/summary) ---

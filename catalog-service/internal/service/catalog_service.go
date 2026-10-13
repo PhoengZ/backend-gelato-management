@@ -219,7 +219,11 @@ func (s *catalogService) Update(ctx context.Context, id uuid.UUID, input UpdateF
 	if input.Active != nil {
 		record.Active = *input.Active
 	}
-	record.UpdatedAt = s.now().UTC()
+	now := s.now().UTC()
+	if !now.After(previous.UpdatedAt) {
+		now = previous.UpdatedAt.Add(time.Millisecond)
+	}
+	record.UpdatedAt = now
 
 	if err := s.repository.Update(ctx, &previous, record); err != nil {
 		switch {
@@ -260,7 +264,11 @@ func (s *catalogService) Replace(ctx context.Context, id uuid.UUID, input Replac
 		previous.Active == active && previous.Recipe == recipe {
 		return previous, nil
 	}
-	replacement.UpdatedAt = s.now().UTC()
+	now := s.now().UTC()
+	if !now.After(previous.UpdatedAt) {
+		now = previous.UpdatedAt.Add(time.Millisecond)
+	}
+	replacement.UpdatedAt = now
 	if err := s.repository.Update(ctx, previous, replacement); err != nil {
 		return nil, fmt.Errorf("replace flavor: %w", err)
 	}
@@ -277,7 +285,11 @@ func (s *catalogService) Archive(ctx context.Context, id uuid.UUID) error {
 	}
 	previous := *record
 	record.Active = false
-	record.UpdatedAt = s.now().UTC()
+	now := s.now().UTC()
+	if !now.After(previous.UpdatedAt) {
+		now = previous.UpdatedAt.Add(time.Millisecond)
+	}
+	record.UpdatedAt = now
 	if err := s.repository.Update(ctx, &previous, record); err != nil {
 		if errors.Is(err, repository.ErrFlavorNotFound) {
 			return ErrFlavorNotFound

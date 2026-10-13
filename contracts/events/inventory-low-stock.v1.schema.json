@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gelatoflow.example/contracts/events/inventory-low-stock.v1.schema.json",
+  "title": "GelatoFlow BatchLowStock v1 CloudEvent",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "specversion",
+    "id",
+    "source",
+    "type",
+    "time",
+    "datacontenttype",
+    "data"
+  ],
+  "properties": {
+    "specversion": {
+      "const": "1.0"
+    },
+    "id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "source": {
+      "const": "/gelatoflow/batch-inventory-service"
+    },
+    "type": {
+      "enum": [
+        "com.gelatoflow.inventory.batch-low-stock.v1",
+        "com.gelatoflow.inventory.low-stock.v1"
+      ]
+    },
+    "time": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "datacontenttype": {
+      "const": "application/json"
+    },
+    "traceparent": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$",
+      "description": "Optional W3C trace context."
+    },
+    "data": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "batch_id",
+        "flavor_id",
+        "remaining_portions",
+        "threshold_portions"
+      ],
+      "properties": {
+        "batch_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "flavor_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "remaining_portions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "threshold_portions": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    }
+  }
+}

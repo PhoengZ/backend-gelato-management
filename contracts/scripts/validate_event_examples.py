@@ -26,6 +26,26 @@ EVENT_CONTRACTS = (
         ("cost_lost_minor",),
     ),
     (
+        "events/inventory-low-stock.v1.schema.json",
+        "examples/inventory-low-stock.v1.json",
+        (),
+    ),
+    (
+        "events/inventory-expiring.v1.schema.json",
+        "examples/inventory-expiring.v1.json",
+        (),
+    ),
+    (
+        "events/inventory-low-stock.v1.schema.json",
+        "events/examples/inventory-low-stock.v1.json",
+        (),
+    ),
+    (
+        "events/inventory-expiring.v1.schema.json",
+        "events/examples/inventory-expiring.v1.json",
+        (),
+    ),
+    (
         "events/order-cancelled.v1.schema.json",
         "examples/order-cancelled.v1.json",
         (),

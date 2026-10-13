@@ -17,16 +17,28 @@ import (
 )
 
 type fakeUserRepository struct {
-	byEmail   map[string]*model.User
-	byID      map[uuid.UUID]*model.User
-	createErr error
+	byEmail      map[string]*model.User
+	byID         map[uuid.UUID]*model.User
+	outboxEvents []*model.OutboxEvent
+	createErr    error
 }
 
 func newFakeUserRepository() *fakeUserRepository {
 	return &fakeUserRepository{
-		byEmail: make(map[string]*model.User),
-		byID:    make(map[uuid.UUID]*model.User),
+		byEmail:      make(map[string]*model.User),
+		byID:         make(map[uuid.UUID]*model.User),
+		outboxEvents: make([]*model.OutboxEvent, 0),
 	}
+}
+
+func (r *fakeUserRepository) CreateWithOutbox(ctx context.Context, user *model.User, event *model.OutboxEvent) error {
+	if err := r.Create(ctx, user); err != nil {
+		return err
+	}
+	if event != nil {
+		r.outboxEvents = append(r.outboxEvents, event)
+	}
+	return nil
 }
 
 func (r *fakeUserRepository) Create(_ context.Context, user *model.User) error {
@@ -218,6 +230,40 @@ func TestMissingUserCannotUseCurrentIdentity(t *testing.T) {
 
 	if _, err := svc.GetCurrentUser(context.Background(), uuid.New()); !errors.Is(err, service.ErrUnauthorized) {
 		t.Fatalf("expected missing account to be rejected, got %v", err)
+	}
+}
+
+func TestSignUpTransactionalOutboxEvent(t *testing.T) {
+	repo := newFakeUserRepository()
+	svc, _ := newService(repo)
+
+	user, err := svc.SignUp(context.Background(), service.SignUpInput{
+		Email:       "outbox@example.com",
+		Password:    "password123",
+		DisplayName: "Outbox Test",
+	})
+	if err != nil {
+		t.Fatalf("SignUp failed: %v", err)
+	}
+
+	if len(repo.outboxEvents) != 1 {
+		t.Fatalf("expected 1 outbox event, got %d", len(repo.outboxEvents))
+	}
+
+	event := repo.outboxEvents[0]
+	if event.EventType != "user.registered" {
+		t.Errorf("expected event_type 'user.registered', got %s", event.EventType)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal outbox payload: %v", err)
+	}
+	if payload["email"] != "outbox@example.com" {
+		t.Errorf("expected email 'outbox@example.com', got %v", payload["email"])
+	}
+	if payload["user_id"] != user.ID.String() {
+		t.Errorf("expected user_id %s, got %v", user.ID, payload["user_id"])
 	}
 }
 

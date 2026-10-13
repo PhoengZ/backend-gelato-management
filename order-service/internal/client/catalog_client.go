@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"errors"
+	"time"
 
 	catalogv1 "order-service/gen/catalog/v1"
 
@@ -39,9 +40,10 @@ func NewCatalogClient(address string) (Catalog, error) {
 }
 
 func (c *catalogClient) BatchGetFlavors(ctx context.Context, ids []string) ([]*catalogv1.Flavor, error) {
-	callCtx := ctx
+	callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
 	if bearer, ok := ctx.Value(authorizationKey{}).(string); ok && bearer != "" {
-		callCtx = metadata.AppendToOutgoingContext(ctx, "authorization", bearer)
+		callCtx = metadata.AppendToOutgoingContext(callCtx, "authorization", bearer)
 	}
 	resp, err := c.inner.BatchGetFlavors(callCtx, &catalogv1.BatchGetFlavorsRequest{FlavorIds: ids})
 	if err != nil {

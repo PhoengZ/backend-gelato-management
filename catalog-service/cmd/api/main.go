@@ -11,6 +11,7 @@ import (
 
 	"catalog-service/config"
 	"catalog-service/internal/auth"
+	"catalog-service/internal/logging"
 	"catalog-service/internal/repository"
 	"catalog-service/internal/router"
 	"catalog-service/internal/server"
@@ -22,6 +23,7 @@ import (
 )
 
 func main() {
+	log.SetOutput(logging.NewRedactorWriter(os.Stderr))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if err := run(ctx); err != nil {
@@ -61,7 +63,11 @@ func run(ctx context.Context) error {
 		IdleTimeout:           60 * time.Second,
 		DisableStartupMessage: true,
 	})
-	router.Setup(app, catalogService, verifier, cfg.RequestTimeout)
+
+	// Mount centralized redactor logger middleware
+	app.Use(logging.RedactorLoggerMiddleware())
+
+	router.Setup(app, catalogService, verifier, cfg.RequestTimeout, redisClient)
 
 	grpcServer := cataloggrpc.NewServer(catalogService, verifier, cfg.RequestTimeout)
 	return server.ListenAndServe(ctx, ":"+cfg.Port, cfg.GRPCAddr, app, grpcServer, 5*time.Second)
