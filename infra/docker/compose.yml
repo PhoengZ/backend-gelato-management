@@ -169,7 +169,7 @@ services:
     container_name: notification-service
     environment:
       PORT: "8080"
-      JWT_SECRET: ${NOTIFICATION_JWT_SECRET:?NOTIFICATION_JWT_SECRET is required}
+      JWT_SECRET: ${NOTIFICATION_JWT_SECRET:-${JWT_SECRET:?JWT_SECRET is required}}
       JWT_ISSUER: ${JWT_ISSUER:-gelatoflow-auth}
       JWT_AUDIENCE: ${JWT_AUDIENCE:-gelatoflow-api}
       # Empty keeps messaging disabled; the SSE endpoint still serves but nothing is pushed.
@@ -179,6 +179,168 @@ services:
     depends_on:
       rabbitmq:
         condition: service_healthy
+    restart: unless-stopped
+
+  auth-service:
+    build:
+      context: ../../auth-service
+    container_name: auth-service
+    environment:
+      PORT: "3001"
+      DATABASE_URL: postgres://${AUTH_POSTGRES_USER}:${AUTH_POSTGRES_PASSWORD}@auth-postgres:5432/${AUTH_POSTGRES_DB}?sslmode=disable
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      JWT_ISSUER: ${JWT_ISSUER:-gelatoflow-auth}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-gelatoflow-api}
+      JWT_TTL: 15m
+      BCRYPT_COST: 12
+      REQUEST_TIMEOUT: 5s
+    networks:
+      - gelato_network
+    depends_on:
+      auth-postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  catalog-service:
+    build:
+      context: ../../catalog-service
+    container_name: catalog-service
+    environment:
+      PORT: "3002"
+      GRPC_ADDR: ":50052"
+      REDIS_URL: redis://:${CATALOG_REDIS_PASSWORD}@catalog-redis:6379/0
+      REDIS_KEY_PREFIX: catalog:v1
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      JWT_ISSUER: ${JWT_ISSUER:-gelatoflow-auth}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-gelatoflow-api}
+      REQUEST_TIMEOUT: 3s
+    networks:
+      - gelato_network
+    depends_on:
+      catalog-redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  batch-inventory-service:
+    build:
+      context: ../../batch-inventory-service
+    container_name: batch-inventory-service
+    environment:
+      HTTP_ADDR: ":3004"
+      GRPC_ADDR: ":50051"
+      DATABASE_URL: postgres://${INVENTORY_POSTGRES_USER}:${INVENTORY_POSTGRES_PASSWORD}@inventory-postgres:5432/${INVENTORY_POSTGRES_DB}?sslmode=disable
+      CATALOG_GRPC_ADDR: catalog-service:50052
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      JWT_ISSUER: ${JWT_ISSUER:-gelatoflow-auth}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-gelatoflow-api}
+      ORDER_SERVICE_TOKEN: ${ORDER_SERVICE_TOKEN:?ORDER_SERVICE_TOKEN is required}
+      REQUEST_TIMEOUT: 3s
+      RESERVATION_TTL: 10m
+      SWEEP_INTERVAL: 1s
+      PUBLISH_EVENTS: "true"
+      RABBITMQ_URL: amqp://${INVENTORY_RABBITMQ_USER:-inventory_service}:${INVENTORY_RABBITMQ_PASSWORD:-inventory_dev_password}@rabbitmq:5672/gelato_vhost
+    networks:
+      - gelato_network
+    depends_on:
+      inventory-postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      catalog-service:
+        condition: service_started
+    restart: unless-stopped
+
+  payment-service:
+    build:
+      context: ../..
+      dockerfile: payment-service/Dockerfile
+    container_name: payment-service
+    environment:
+      PORT: "3007"
+      PAYMENT_GRPC_PORT: "50057"
+      PAYMENT_GRPC_TLS: "false"
+      PAYMENT_REQUEST_TOKEN: ${PAYMENT_REQUEST_TOKEN:?PAYMENT_REQUEST_TOKEN is required}
+      ORDER_SERVICE_TOKEN: ${ORDER_SERVICE_TOKEN:?ORDER_SERVICE_TOKEN is required}
+      PAYMENT_SERVICE_TOKEN: ${PAYMENT_SERVICE_TOKEN:?PAYMENT_SERVICE_TOKEN is required}
+      ORDER_GRPC_TARGET: order-service:50054
+      ORDER_GRPC_TLS: "false"
+      ORDER_HTTP_BASE_URL: http://order-service:3003
+      PAYMENT_CALLBACK_ALLOW_PLAINTEXT: "true"
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-sk_test_dummy_key_for_testing}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-whsec_test_secret_for_integration_testing_12345}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      JWT_ISSUER: ${JWT_ISSUER:-gelatoflow-auth}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-gelatoflow-api}
+    networks:
+      - gelato_network
+    restart: unless-stopped
+
+  order-service:
+    build:
+      context: ../../order-service
+    container_name: order-service
+    environment:
+      PORT: "3003"
+      DATABASE_URL: host=order-postgres user=${ORDER_POSTGRES_USER} password=${ORDER_POSTGRES_PASSWORD} dbname=${ORDER_POSTGRES_DB} port=5432 sslmode=disable
+      RABBITMQ_URL: amqp://${ORDER_RABBITMQ_USER:-order_service}:${ORDER_RABBITMQ_PASSWORD:-order_dev_password}@rabbitmq:5672/gelato_vhost
+      BATCH_INVENTORY_GRPC_URL: batch-inventory-service:50051
+      ORDER_SERVICE_TOKEN: ${ORDER_SERVICE_TOKEN:?ORDER_SERVICE_TOKEN is required}
+      CATALOG_GRPC_URL: catalog-service:50052
+      PAYMENT_SERVICE_TOKEN: ${PAYMENT_SERVICE_TOKEN:?PAYMENT_SERVICE_TOKEN is required}
+      PAYMENT_GRPC_URL: payment-service:50057
+      PAYMENT_REQUEST_TOKEN: ${PAYMENT_REQUEST_TOKEN:?PAYMENT_REQUEST_TOKEN is required}
+      PAYMENT_REQUEST_TIMEOUT: 5s
+    networks:
+      - gelato_network
+    depends_on:
+      order-postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      batch-inventory-service:
+        condition: service_started
+      catalog-service:
+        condition: service_started
+      payment-service:
+        condition: service_started
+    restart: unless-stopped
+
+  api-gateway:
+    build:
+      context: ../../api-gateway
+    container_name: api-gateway
+    environment:
+      PORT: "8080"
+      AUTH_SERVICE_URL: http://auth-service:3001
+      CATALOG_SERVICE_URL: http://catalog-service:3002
+      ORDER_SERVICE_URL: http://order-service:3003
+      INVENTORY_SERVICE_URL: http://batch-inventory-service:3004
+      FULFILLMENT_SERVICE_URL: http://fulfillment-service:8080
+      ANALYTICS_SERVICE_URL: http://analytics-service:8080
+      PAYMENT_SERVICE_URL: http://payment-service:3007
+      NOTIFICATION_SERVICE_URL: http://notification-service:8080
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      JWT_ISSUER: ${JWT_ISSUER:-gelatoflow-auth}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-gelatoflow-api}
+    networks:
+      - gelato_network
+    depends_on:
+      auth-service:
+        condition: service_started
+      catalog-service:
+        condition: service_started
+      batch-inventory-service:
+        condition: service_started
+      order-service:
+        condition: service_started
+      fulfillment-service:
+        condition: service_started
+      analytics-service:
+        condition: service_started
+      payment-service:
+        condition: service_started
+      notification-service:
+        condition: service_started
     restart: unless-stopped
 
 networks:
