@@ -19,6 +19,7 @@ func RequireAuth(verifier *auth.Verifier) fiber.Handler {
 		if allowed, err := authenticate(c, verifier, true); !allowed {
 			return err
 		}
+		InjectUserHeaders(c)
 		return c.Next()
 	}
 }
@@ -30,6 +31,7 @@ func AuthenticateIfPresent(verifier *auth.Verifier) fiber.Handler {
 		if allowed, err := authenticate(c, verifier, false); !allowed {
 			return err
 		}
+		InjectUserHeaders(c)
 		return c.Next()
 	}
 }

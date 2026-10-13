@@ -6,8 +6,8 @@ import (
 	"net"
 	"testing"
 
+	orderv1 "analytics-service/gen/order/v1"
 	"analytics-service/internal/client"
-	"analytics-service/internal/models"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/test/bufconn"
@@ -15,72 +15,73 @@ import (
 
 const bufSize = 1024 * 1024
 
-type inMemoryOrderServer struct{}
+type inMemoryOrderServer struct {
+	orderv1.UnimplementedOrderServiceServer
+}
+
+func (s *inMemoryOrderServer) StreamOrderItems(stream orderv1.OrderService_StreamOrderItemsServer) error {
+	var receivedIDs []string
+	for {
+		req, err := stream.Recv()
+		if err == io.EOF {
+			return stream.SendAndClose(&orderv1.StreamOrderItemsResponse{
+				Items: []*orderv1.OrderItem{
+					{
+						FlavorId:       "flv_01",
+						FlavorName:     "Pistachio",
+						Portions:       3,
+						UnitPriceMinor: 5000,
+						SubtotalMinor:  15000,
+					},
+					{
+						FlavorId:       "flv_02",
+						FlavorName:     "Strawberry",
+						Portions:       2,
+						UnitPriceMinor: 5000,
+						SubtotalMinor:  10000,
+					},
+				},
+			})
+		}
+		if err != nil {
+			return err
+		}
+		receivedIDs = append(receivedIDs, req.OrderId)
+	}
+}
+
+func (s *inMemoryOrderServer) GetOrderDetails(ctx context.Context, req *orderv1.GetOrderDetailsRequest) (*orderv1.GetOrderDetailsResponse, error) {
+	return &orderv1.GetOrderDetailsResponse{
+		OrderId:          req.OrderId,
+		CustomerId:       "cust_123",
+		Status:           "PAID",
+		PickupAt:         "2026-08-20T10:00:00Z",
+		TotalAmountMinor: 25000,
+		Currency:         "THB",
+		Items: []*orderv1.OrderItem{
+			{
+				FlavorId:       "flv_01",
+				FlavorName:     "Pistachio",
+				Portions:       3,
+				UnitPriceMinor: 5000,
+				SubtotalMinor:  15000,
+			},
+			{
+				FlavorId:       "flv_02",
+				FlavorName:     "Strawberry",
+				Portions:       2,
+				UnitPriceMinor: 5000,
+				SubtotalMinor:  10000,
+			},
+		},
+	}, nil
+}
 
 func startInMemoryOrderGRPCServer(t *testing.T) (*bufconn.Listener, func()) {
 	lis := bufconn.Listen(bufSize)
 	baseServer := grpc.NewServer()
 
-	// Register generic stream handler for client-streaming StreamOrderItems
-	streamDesc := grpc.StreamDesc{
-		StreamName:    "StreamOrderItems",
-		ServerStreams: false,
-		ClientStreams: true,
-		Handler: func(srv any, stream grpc.ServerStream) error {
-			var receivedIDs []string
-			for {
-				var req client.StreamOrderItemsRequest
-				err := stream.RecvMsg(&req)
-				if err == io.EOF {
-					// Client finished streaming; return consolidated response
-					resp := client.StreamOrderItemsResponse{
-						Items: []models.OrderItemDetail{
-							{FlavorID: "flv_01", FlavorName: "Pistachio", Portions: 3, SubtotalMinor: 15000},
-							{FlavorID: "flv_02", FlavorName: "Strawberry", Portions: 2, SubtotalMinor: 10000},
-						},
-					}
-					return stream.SendMsg(&resp)
-				}
-				if err != nil {
-					return err
-				}
-				receivedIDs = append(receivedIDs, req.OrderID)
-			}
-		},
-	}
-
-	// Register unary handler for GetOrderDetails
-	unaryHandler := func(srv any, ctx context.Context, dec func(any) error, interp grpc.UnaryServerInterceptor) (any, error) {
-		var req client.GetOrderDetailsRequest
-		if err := dec(&req); err != nil {
-			return nil, err
-		}
-		return &models.OrderDetails{
-			OrderID:          req.OrderID,
-			CustomerID:       "cust_123",
-			Status:           "PAID",
-			CreatedAt:        "2026-08-20T10:00:00Z",
-			TotalAmountMinor: 25000,
-			Currency:         "THB",
-			Items: []models.OrderItemDetail{
-				{FlavorID: "flv_01", FlavorName: "Pistachio", Portions: 3, SubtotalMinor: 15000},
-				{FlavorID: "flv_02", FlavorName: "Strawberry", Portions: 2, SubtotalMinor: 10000},
-			},
-		}, nil
-	}
-
-	methodDesc := grpc.MethodDesc{
-		MethodName: "GetOrderDetails",
-		Handler:    unaryHandler,
-	}
-
-	sd := grpc.ServiceDesc{
-		ServiceName: "order.v1.OrderService",
-		HandlerType: (*any)(nil),
-		Methods:     []grpc.MethodDesc{methodDesc},
-		Streams:     []grpc.StreamDesc{streamDesc},
-	}
-	baseServer.RegisterService(&sd, &inMemoryOrderServer{})
+	orderv1.RegisterOrderServiceServer(baseServer, &inMemoryOrderServer{})
 
 	go func() {
 		_ = baseServer.Serve(lis)
@@ -138,6 +139,9 @@ func TestOrderClient_Bufconn_Integration(t *testing.T) {
 		}
 		if orderDetails.TotalAmountMinor != 25000 {
 			t.Errorf("Expected TotalAmountMinor 25000, got %d", orderDetails.TotalAmountMinor)
+		}
+		if len(orderDetails.Items) != 2 {
+			t.Errorf("Expected 2 items, got %d", len(orderDetails.Items))
 		}
 	})
 }

@@ -11,17 +11,18 @@ import (
 const MinimumJWTSecretBytes = 32
 
 type Config struct {
-	Port                  string
-	AuthServiceURL        string
-	CatalogServiceURL     string
-	OrderServiceURL       string
-	InventoryServiceURL   string
-	FulfillmentServiceURL string
-	AnalyticsServiceURL   string
-	PaymentServiceURL     string
-	JWTSecret             string
-	JWTIssuer             string
-	JWTAudience           string
+	Port                   string
+	AuthServiceURL         string
+	CatalogServiceURL      string
+	OrderServiceURL        string
+	InventoryServiceURL    string
+	FulfillmentServiceURL  string
+	AnalyticsServiceURL    string
+	PaymentServiceURL      string
+	NotificationServiceURL string
+	JWTSecret              string
+	JWTIssuer              string
+	JWTAudience            string
 }
 
 func LoadConfig() Config {
@@ -31,17 +32,18 @@ func LoadConfig() Config {
 	}
 
 	return Config{
-		Port:                  getEnv("PORT", "8080"),
-		AuthServiceURL:        getEnv("AUTH_SERVICE_URL", "http://localhost:3001"),
-		CatalogServiceURL:     getEnv("CATALOG_SERVICE_URL", "http://localhost:3002"),
-		OrderServiceURL:       getEnv("ORDER_SERVICE_URL", "http://localhost:3003"),
-		InventoryServiceURL:   getEnv("INVENTORY_SERVICE_URL", "http://localhost:3004"),
-		FulfillmentServiceURL: getEnv("FULFILLMENT_SERVICE_URL", "http://localhost:3005"),
-		AnalyticsServiceURL:   getEnv("ANALYTICS_SERVICE_URL", "http://localhost:3006"),
-		PaymentServiceURL:     getEnv("PAYMENT_SERVICE_URL", "http://localhost:3007"),
-		JWTSecret:             os.Getenv("JWT_SECRET"),
-		JWTIssuer:             getEnv("JWT_ISSUER", "gelatoflow-auth"),
-		JWTAudience:           getEnv("JWT_AUDIENCE", "gelatoflow-api"),
+		Port:                   getEnv("PORT", "8080"),
+		AuthServiceURL:         getEnv("AUTH_SERVICE_URL", "http://localhost:3001"),
+		CatalogServiceURL:      getEnv("CATALOG_SERVICE_URL", "http://localhost:3002"),
+		OrderServiceURL:        getEnv("ORDER_SERVICE_URL", "http://localhost:3003"),
+		InventoryServiceURL:    getEnv("INVENTORY_SERVICE_URL", "http://localhost:3004"),
+		FulfillmentServiceURL:  getEnv("FULFILLMENT_SERVICE_URL", "http://localhost:3005"),
+		AnalyticsServiceURL:    getEnv("ANALYTICS_SERVICE_URL", "http://localhost:3006"),
+		PaymentServiceURL:      getEnv("PAYMENT_SERVICE_URL", "http://localhost:3007"),
+		NotificationServiceURL: getEnv("NOTIFICATION_SERVICE_URL", "http://localhost:3008"),
+		JWTSecret:              os.Getenv("JWT_SECRET"),
+		JWTIssuer:              getEnv("JWT_ISSUER", "gelatoflow-auth"),
+		JWTAudience:            getEnv("JWT_AUDIENCE", "gelatoflow-api"),
 	}
 }
 

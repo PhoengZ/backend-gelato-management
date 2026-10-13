@@ -9,12 +9,32 @@ import (
 	"time"
 
 	"analytics-service/internal/handler"
+	"analytics-service/internal/middleware"
 	"analytics-service/internal/models"
 	"analytics-service/internal/router"
 	"analytics-service/internal/service"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/golang-jwt/jwt/v5"
 )
+
+const testHandlerSecret = "development_only_change_this_secret_32_bytes"
+
+func managerAuthHeader() string {
+	now := time.Now().UTC()
+	claims := middleware.Claims{
+		Role: middleware.RoleManager,
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   "test-manager-uuid",
+			Issuer:    "gelatoflow-auth",
+			Audience:  jwt.ClaimStrings{"gelatoflow-api"},
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(now.Add(15 * time.Minute)),
+		},
+	}
+	token, _ := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte(testHandlerSecret))
+	return "Bearer " + token
+}
 
 func setupTestApp() (*fiber.App, *MockRepository) {
 	mockRepo := NewMockRepository()
@@ -25,7 +45,8 @@ func setupTestApp() (*fiber.App, *MockRepository) {
 	app := fiber.New(fiber.Config{
 		ErrorHandler: handler.CustomErrorHandler,
 	})
-	router.SetupRoutes(app, svc)
+	verifier := middleware.NewVerifier(testHandlerSecret, "gelatoflow-auth", "gelatoflow-api")
+	router.SetupRoutes(app, svc, verifier)
 
 	return app, mockRepo
 }
@@ -37,8 +58,8 @@ func TestGetAnalyticsSummary_Handler_Success(t *testing.T) {
 	mockRepo.Records[today] = &models.Analytics{
 		Date: today,
 		Financials: models.Financials{
-			GrossSales:  5000,
-			TotalOrders: 20,
+			GrossSalesMinor: 500000,
+			TotalOrders:     20,
 		},
 		Operations: models.Operations{
 			ScoopsSold: 60,
@@ -48,12 +69,13 @@ func TestGetAnalyticsSummary_Handler_Success(t *testing.T) {
 			WasteByReason:      []models.WasteByReason{},
 		},
 		FlavorStats: []models.FlavorStat{
-			{FlavorID: "flv_01", Name: "Vanilla", ScoopsSold: 35, Revenue: 3000, WastePortions: 2},
-			{FlavorID: "flv_02", Name: "Chocolate", ScoopsSold: 25, Revenue: 2000, WastePortions: 2},
+			{FlavorID: "flv_01", Name: "Vanilla", ScoopsSold: 35, RevenueMinor: 300000, WastePortions: 2},
+			{FlavorID: "flv_02", Name: "Chocolate", ScoopsSold: 25, RevenueMinor: 200000, WastePortions: 2},
 		},
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/analytics/summary?period=1w", nil)
+	req.Header.Set("Authorization", managerAuthHeader())
 	resp, err := app.Test(req, -1)
 	if err != nil {
 		t.Fatalf("app.Test failed: %v", err)
@@ -80,10 +102,36 @@ func TestGetAnalyticsSummary_Handler_Success(t *testing.T) {
 	}
 }
 
+func TestGetAnalyticsSummary_Handler_Unauthorized(t *testing.T) {
+	app, _ := setupTestApp()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/analytics/summary?period=1w", nil)
+	resp, err := app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("app.Test failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("Expected status 401 Unauthorized, got %d", resp.StatusCode)
+	}
+
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	var errResp models.ApiErrorResponse
+	if err := json.Unmarshal(bodyBytes, &errResp); err != nil {
+		t.Fatalf("Failed to decode ApiErrorResponse: %v, raw: %s", err, string(bodyBytes))
+	}
+
+	if errResp.Code != "UNAUTHORIZED" {
+		t.Errorf("Expected error code 'UNAUTHORIZED', got '%s'", errResp.Code)
+	}
+}
+
 func TestGetAnalyticsSummary_Handler_InvalidPeriod(t *testing.T) {
 	app, _ := setupTestApp()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/analytics/summary?period=invalid_period", nil)
+	req.Header.Set("Authorization", managerAuthHeader())
 	resp, err := app.Test(req, -1)
 	if err != nil {
 		t.Fatalf("app.Test failed: %v", err)
@@ -112,6 +160,7 @@ func TestGetAnalyticsSummary_Handler_NotFound(t *testing.T) {
 	app, _ := setupTestApp()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/analytics/unknown-path", nil)
+	req.Header.Set("Authorization", managerAuthHeader())
 	resp, err := app.Test(req, -1)
 	if err != nil {
 		t.Fatalf("app.Test failed: %v", err)

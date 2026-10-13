@@ -119,11 +119,9 @@ func (s *analyticsService) ProcessOrderPlaced(ctx context.Context, event models.
 
 	// Update financials
 	record.Financials.GrossSalesMinor += totalAmountMinor
-	record.Financials.GrossSales = float64(record.Financials.GrossSalesMinor) / 100.0
 	record.Financials.TotalOrders += 1
 	if record.Financials.TotalOrders > 0 {
 		record.Financials.AverageOrderValueMinor = record.Financials.GrossSalesMinor / int64(record.Financials.TotalOrders)
-		record.Financials.AverageOrderValue = float64(record.Financials.AverageOrderValueMinor) / 100.0
 	}
 	if event.Data.Currency != "" {
 		record.Financials.Currency = event.Data.Currency
@@ -144,7 +142,6 @@ func (s *analyticsService) ProcessOrderPlaced(ctx context.Context, event models.
 			if fs.FlavorID == item.FlavorID {
 				record.FlavorStats[i].ScoopsSold += item.Portions
 				record.FlavorStats[i].RevenueMinor += subtotalMinor
-				record.FlavorStats[i].Revenue = float64(record.FlavorStats[i].RevenueMinor) / 100.0
 				if item.FlavorName != "" {
 					record.FlavorStats[i].Name = item.FlavorName
 				}
@@ -158,7 +155,6 @@ func (s *analyticsService) ProcessOrderPlaced(ctx context.Context, event models.
 				Name:         item.FlavorName,
 				ScoopsSold:   item.Portions,
 				RevenueMinor: subtotalMinor,
-				Revenue:      float64(subtotalMinor) / 100.0,
 			})
 		}
 	}
@@ -227,16 +223,13 @@ func (s *analyticsService) ProcessOrderCancelled(ctx context.Context, event mode
 	if record.Financials.GrossSalesMinor < 0 {
 		record.Financials.GrossSalesMinor = 0
 	}
-	record.Financials.GrossSales = float64(record.Financials.GrossSalesMinor) / 100.0
 
 	record.Financials.TotalOrders -= 1
 	if record.Financials.TotalOrders > 0 {
 		record.Financials.AverageOrderValueMinor = record.Financials.GrossSalesMinor / int64(record.Financials.TotalOrders)
-		record.Financials.AverageOrderValue = float64(record.Financials.AverageOrderValueMinor) / 100.0
 	} else {
 		record.Financials.TotalOrders = 0
 		record.Financials.AverageOrderValueMinor = 0
-		record.Financials.AverageOrderValue = 0
 	}
 
 	// Update operations and flavor stats
@@ -257,7 +250,6 @@ func (s *analyticsService) ProcessOrderCancelled(ctx context.Context, event mode
 				if record.FlavorStats[i].RevenueMinor < 0 {
 					record.FlavorStats[i].RevenueMinor = 0
 				}
-				record.FlavorStats[i].Revenue = float64(record.FlavorStats[i].RevenueMinor) / 100.0
 				break
 			}
 		}

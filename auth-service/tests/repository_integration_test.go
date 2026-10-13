@@ -95,4 +95,24 @@ func TestPostgresUserRepository(t *testing.T) {
 	if _, err := repo.FindByID(ctx, uuid.New()); !errors.Is(err, repository.ErrUserNotFound) {
 		t.Fatalf("expected not found error, got %v", err)
 	}
+
+	outboxUser := &model.User{
+		ID:           uuid.New(),
+		Email:        "outbox-user@example.com",
+		DisplayName:  "Outbox Test",
+		PasswordHash: "$2a$10$test-hash",
+		Role:         model.RoleCustomer,
+		Status:       model.UserStatusActive,
+	}
+	outboxEvent := &model.OutboxEvent{
+		ID:        uuid.New(),
+		EventType: "user.registered",
+		Payload:   []byte(`{"test":true}`),
+	}
+	if err := repo.CreateWithOutbox(ctx, outboxUser, outboxEvent); err != nil {
+		t.Fatalf("CreateWithOutbox returned error: %v", err)
+	}
+	if outboxEvent.CreatedAt.IsZero() {
+		t.Fatal("outboxEvent timestamp not populated")
+	}
 }

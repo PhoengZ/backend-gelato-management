@@ -12,6 +12,9 @@ type Config struct {
 	RabbitMQURL          string
 	Port                 string
 	OrderServiceGRPCAddr string
+	JWTSecret            string
+	JWTIssuer            string
+	JWTAudience          string
 }
 
 func LoadConfig() Config {
@@ -49,10 +52,28 @@ func LoadConfig() Config {
 		orderServiceGRPCAddr = "localhost:50051"
 	}
 
+	jwtSecret := os.Getenv("JWT_SECRET")
+	if jwtSecret == "" {
+		jwtSecret = "development_only_change_this_secret_32_bytes"
+	}
+
+	jwtIssuer := os.Getenv("JWT_ISSUER")
+	if jwtIssuer == "" {
+		jwtIssuer = "gelatoflow-auth"
+	}
+
+	jwtAudience := os.Getenv("JWT_AUDIENCE")
+	if jwtAudience == "" {
+		jwtAudience = "gelatoflow-api"
+	}
+
 	return Config{
 		MongoURI:             mongoURI,
 		RabbitMQURL:          rabbitMQURL,
 		Port:                 port,
 		OrderServiceGRPCAddr: orderServiceGRPCAddr,
+		JWTSecret:            jwtSecret,
+		JWTIssuer:            jwtIssuer,
+		JWTAudience:          jwtAudience,
 	}
 }

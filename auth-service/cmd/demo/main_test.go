@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -443,6 +444,9 @@ func TestInvalidFixtureStateStopsBeforeNetworkAndDatabaseWork(t *testing.T) {
 }
 
 func TestPrivateStateRoundTripRepairsPermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX file permissions are not supported on Windows")
+	}
 	dir := filepath.Join(t.TempDir(), "state")
 	state := demoTestState(t)
 	if err := writePrivate(dir, "credentials.json", state); err != nil {
@@ -490,6 +494,9 @@ func TestLoadStateRejectsUnsafeOrAmbiguousFiles(t *testing.T) {
 			switch tc {
 			case "missing":
 			case "symlink":
+				if runtime.GOOS == "windows" {
+					t.Skip("symlinks require elevated privileges on Windows")
+				}
 				target := filepath.Join(t.TempDir(), "target.json")
 				if os.WriteFile(target, body, 0o600) != nil || os.Symlink(target, path) != nil {
 					t.Fatal("could not create symlink fixture")
@@ -527,6 +534,9 @@ func TestLoadStateRejectsUnsafeOrAmbiguousFiles(t *testing.T) {
 }
 
 func TestPrivateDirectoryRejectsSymlinkAndAtomicWriteProtectsTarget(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks require elevated privileges on Windows")
+	}
 	root := t.TempDir()
 	targetDir := filepath.Join(root, "target")
 	if os.Mkdir(targetDir, 0o700) != nil || os.Symlink(targetDir, filepath.Join(root, "linked")) != nil {

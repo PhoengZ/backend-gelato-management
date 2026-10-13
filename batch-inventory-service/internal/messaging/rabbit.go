@@ -1,6 +1,7 @@
 package messaging
 
 import (
+	"batch-inventory-service/internal/outbox"
 	"context"
 	"errors"
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -44,7 +45,8 @@ func (p Rabbit) Publish(ctx context.Context, id string, body []byte) error {
 		return ErrPublish
 	}
 	returns := ch.NotifyReturn(make(chan amqp.Return, 1))
-	confirmation, err := ch.PublishWithDeferredConfirmWithContext(ctx, "inventory", "inventory.waste", true, false, amqp.Publishing{ContentType: "application/cloudevents+json", DeliveryMode: amqp.Persistent, MessageId: id, Body: body, Timestamp: time.Now().UTC()})
+	routingKey := outbox.ResolveRoutingKey(body)
+	confirmation, err := ch.PublishWithDeferredConfirmWithContext(ctx, "inventory", routingKey, true, false, amqp.Publishing{ContentType: "application/cloudevents+json", DeliveryMode: amqp.Persistent, MessageId: id, Body: body, Timestamp: time.Now().UTC()})
 	if err != nil || confirmation == nil {
 		return ErrPublish
 	}

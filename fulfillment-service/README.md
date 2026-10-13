@@ -13,9 +13,10 @@ Stack: Go, Echo, pgx (PostgreSQL), amqp091-go (RabbitMQ, optional)
 | Consumer `order.placed` / `order.cancelled` + dedupe ด้วย event `id` | ทำแล้ว (unit test ผ่าน; ยังไม่ได้ทดสอบกับ broker จริง) |
 | Queue number ต่อ pickup slot (slot 15 นาที สร้างอัตโนมัติจาก `pickup_at`) | ทำแล้ว (SQL ยังไม่ได้ทดสอบกับ Postgres จริง) |
 | Publisher CloudEvents ผ่าน transactional outbox → exchange `fulfillment` | ทำแล้ว (ยังไม่ได้ทดสอบกับ broker จริง) |
-| Pickup slot management (ความจุ, endpoint ให้ Order ดู slot ว่าง) | ยังไม่ทำ |
+| Pickup slot management (GET `/api/v1/fulfillments/slots/capacity?slot_time=...` ดู active ticket count ใน slot 15 นาที) | ทำแล้ว (unit test ผ่าน) |
 | QR pickup | นอกขอบเขตตอนนี้ |
-| JWT / role check (ทำที่ API Gateway), route ใน Gateway | ยังไม่ทำ |
+| Local JWT verification & RBAC middleware (`STAFF`, `MANAGER` สำหรับ mutating endpoints) | ทำแล้ว (unit test ผ่าน) |
+| RabbitMQ DLX `fulfillment.dlx` + DLQ `fulfillment_queue_dlq` (reject poison messages ด้วย Nack requeue=false) | ทำแล้ว (unit test ผ่าน) |
 | RabbitMQ user `fulfillment_service` + permission ใน `infra/rabbitmq/definitions.json` | เพิ่มแล้ว (ยังไม่ได้ทดสอบกับ broker จริง; ควรให้เจ้าของ service อื่นรีวิวตอน PR) |
 
 ## Endpoints
@@ -23,8 +24,9 @@ Stack: Go, Echo, pgx (PostgreSQL), amqp091-go (RabbitMQ, optional)
 | Method | Path | หมายเหตุ |
 | --- | --- | --- |
 | GET | `/api/v1/fulfillments?status=PREPARING,READY_FOR_PICKUP` | เรียงตาม slot แล้วตาม queue |
+| GET | `/api/v1/fulfillments/slots/capacity?slot_time=...` | ดู active ticket count ใน slot window 15 นาที |
 | GET | `/api/v1/fulfillments/{order_id}` | |
-| PATCH | `/api/v1/fulfillments/{order_id}/status` | body `{"status":"READY_FOR_PICKUP"}` หรือ `PICKED_UP`; ข้ามขั้น → 409 `INVALID_TRANSITION` |
+| PATCH | `/api/v1/fulfillments/{order_id}/status` | ต้องใช้บทบาท `STAFF` หรือ `MANAGER`; body `{"status":"READY_FOR_PICKUP"}` หรือ `PICKED_UP`; ข้ามขั้น → 409 `INVALID_TRANSITION` |
 | GET | `/health` | |
 
 Ticket ไม่ถูกสร้างผ่าน REST — สร้างจาก event `order.placed` เท่านั้น และ `order.cancelled` จะเปลี่ยน ticket ที่ยัง `PREPARING` เป็น `CANCELLED`

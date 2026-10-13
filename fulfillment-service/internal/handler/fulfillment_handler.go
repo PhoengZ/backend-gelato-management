@@ -5,10 +5,12 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 
+	"fulfillment-service/internal/middleware"
 	"fulfillment-service/internal/models"
 	"fulfillment-service/internal/repository"
 )
@@ -18,6 +20,7 @@ type Store interface {
 	List(ctx context.Context, statuses []models.Status) ([]models.Fulfillment, error)
 	GetByOrderID(ctx context.Context, orderID uuid.UUID) (models.Fulfillment, error)
 	UpdateStatus(ctx context.Context, orderID uuid.UUID, to models.Status) (models.Fulfillment, error)
+	GetSlotCapacity(ctx context.Context, slotTime time.Time) (int, error)
 }
 
 type FulfillmentHandler struct {
@@ -101,7 +104,12 @@ func (h *FulfillmentHandler) UpdateStatus(c echo.Context) error {
 			map[string]string{"status": "must be READY_FOR_PICKUP or PICKED_UP"})
 	}
 
-	f, err := h.store.UpdateStatus(c.Request().Context(), orderID, req.Status)
+	ctx := c.Request().Context()
+	if actorID, ok := middleware.GetUserID(c); ok {
+		ctx = repository.WithActorID(ctx, actorID)
+	}
+
+	f, err := h.store.UpdateStatus(ctx, orderID, req.Status)
 	switch {
 	case errors.Is(err, repository.ErrNotFound):
 		return fail(c, http.StatusNotFound, "NOT_FOUND", "fulfillment not found", nil)
@@ -111,4 +119,38 @@ func (h *FulfillmentHandler) UpdateStatus(c echo.Context) error {
 		return internalError(c, err)
 	}
 	return c.JSON(http.StatusOK, f)
+}
+
+// GET /api/v1/fulfillments/slots/capacity?slot_time=2026-10-13T14:00:00Z
+func (h *FulfillmentHandler) GetSlotCapacity(c echo.Context) error {
+	rawTime := c.QueryParam("slot_time")
+	if strings.TrimSpace(rawTime) == "" {
+		return fail(c, http.StatusBadRequest, "VALIDATION_ERROR", "slot_time query parameter is required",
+			map[string]string{"slot_time": "must not be empty"})
+	}
+
+	slotTime, err := time.Parse(time.RFC3339, rawTime)
+	if err != nil {
+		slotTime, err = time.Parse(time.RFC3339Nano, rawTime)
+	}
+	if err != nil {
+		return fail(c, http.StatusBadRequest, "VALIDATION_ERROR", "slot_time must be a valid RFC3339 timestamp",
+			map[string]string{"slot_time": "must be RFC3339 format, e.g. 2026-10-13T14:00:00Z"})
+	}
+
+	activeCount, err := h.store.GetSlotCapacity(c.Request().Context(), slotTime)
+	if err != nil {
+		return internalError(c, err)
+	}
+
+	start := slotTime.UTC().Truncate(15 * time.Minute)
+	end := start.Add(15 * time.Minute)
+
+	return c.JSON(http.StatusOK, models.SlotCapacityResponse{
+		SlotTime:          slotTime.UTC(),
+		SlotStart:         start,
+		SlotEnd:           end,
+		ActiveTicketCount: activeCount,
+		ActiveCount:       activeCount,
+	})
 }

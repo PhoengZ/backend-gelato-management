@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"auth-service/config"
+	"auth-service/internal/audit"
 	"auth-service/internal/auth"
 	"auth-service/internal/middleware"
 	"auth-service/internal/repository"
@@ -59,7 +60,14 @@ func main() {
 			return fiber.DefaultErrorHandler(c, err)
 		},
 	})
-	router.Setup(app, authService, tokens, router.Options{RequestTimeout: cfg.RequestTimeout})
+	auditLogger := audit.NewPostgresAuditLogger(pool)
+	rateLimiter := middleware.NewRateLimiter(5, 15*time.Minute)
+	router.Setup(app, authService, tokens, router.Options{
+		RequestTimeout: cfg.RequestTimeout,
+		Pool:           pool,
+		AuditLogger:    auditLogger,
+		RateLimiter:    rateLimiter,
+	})
 
 	serverErrors := make(chan error, 1)
 	go func() {

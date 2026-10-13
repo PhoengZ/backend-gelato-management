@@ -1,6 +1,9 @@
 package router
 
 import (
+	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -195,11 +198,15 @@ func TestProtectedRoutesRequireAuth(t *testing.T) {
 		{http.MethodDelete, "/api/v1/flavors/123"},
 		{http.MethodGet, "/api/v1/inventory/batches"},
 		{http.MethodPost, "/api/v1/inventory/waste"},
+		{http.MethodGet, "/api/v1/orders"},
+		{http.MethodPost, "/api/v1/orders"},
 		{http.MethodGet, "/api/v1/orders/123"},
 		{http.MethodPost, "/api/v1/orders/create"},
 		{http.MethodGet, "/api/v1/fulfillments/123"},
 		{http.MethodGet, "/api/v1/analytics/sales"},
+		{http.MethodGet, "/api/v1/payments"},
 		{http.MethodPost, "/api/v1/payments/charge"},
+		{http.MethodGet, "/api/v1/notifications/stream"},
 	}
 
 	for _, route := range protectedRoutes {
@@ -333,10 +340,17 @@ func TestProxyPreservesBearerTokenAndStripsIdentityHeaders(t *testing.T) {
 		t.Errorf("Authorization header modified or missing: %q", got)
 	}
 
-	// Verify all spoofed identity headers are stripped
+	// Verify verified claims headers are injected from JWT claims (not client's attacker-uuid)
+	if got := capturedHeaders.Get("X-User-ID"); got != "11111111-2222-3333-4444-555555555555" {
+		t.Errorf("X-User-ID = %q, want verified subject %q", got, "11111111-2222-3333-4444-555555555555")
+	}
+	if got := capturedHeaders.Get("X-User-Role"); got != "MANAGER" {
+		t.Errorf("X-User-Role = %q, want %q", got, "MANAGER")
+	}
+
+	// Verify all other spoofed identity headers are stripped
 	for _, stripped := range []string{
-		"X-User-Id", "X-User-Role", "X-User-Email",
-		"X-Role", "X-Roles", "X-Authenticated-User-Id",
+		"X-User-Email", "X-Role", "X-Roles", "X-Authenticated-User-Id",
 	} {
 		if got := capturedHeaders.Get(stripped); got != "" {
 			t.Errorf("upstream unexpectedly received stripped header %s: %q", stripped, got)
@@ -386,4 +400,257 @@ func TestCORSAllowsIdempotencyHeaders(t *testing.T) {
 
 func containsCaseInsensitive(s, substr string) bool {
 	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
+}
+
+func TestPaymentWebhookExemptFromAuth(t *testing.T) {
+	var capturedURI, capturedMethod string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedMethod = r.Method
+		capturedURI = r.RequestURI
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"received":true}`))
+	}))
+	t.Cleanup(upstream.Close)
+
+	app := fiber.New()
+	SetupRoutes(app, testConfig(func(c *config.Config) {
+		c.PaymentServiceURL = upstream.URL
+	}))
+
+	t.Run("POST /api/v1/payments/webhook proxies without token", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/payments/webhook", strings.NewReader(`{"id":"evt_123"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Stripe-Signature", "t=123,v1=sig")
+
+		resp, err := app.Test(req, -1)
+		if err != nil {
+			t.Fatalf("webhook request failed: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+		}
+		if capturedMethod != http.MethodPost {
+			t.Errorf("method = %q, want %q", capturedMethod, http.MethodPost)
+		}
+		if capturedURI != "/api/v1/payments/webhook" {
+			t.Errorf("URI = %q, want %q", capturedURI, "/api/v1/payments/webhook")
+		}
+	})
+
+	t.Run("POST /api/v1/payments/charge requires auth", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/payments/charge", strings.NewReader(`{}`))
+		req.Header.Set("Content-Type", "application/json")
+
+		resp, err := app.Test(req, -1)
+		if err != nil {
+			t.Fatalf("charge request failed: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusUnauthorized)
+		}
+	})
+}
+
+func TestOrderRoutesMatchBothRootAndSubpath(t *testing.T) {
+	type capturedReq struct {
+		method string
+		uri    string
+	}
+	received := make(chan capturedReq, 2)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		received <- capturedReq{method: r.Method, uri: r.RequestURI}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(upstream.Close)
+
+	app := fiber.New()
+	SetupRoutes(app, testConfig(func(c *config.Config) {
+		c.OrderServiceURL = upstream.URL
+	}))
+
+	token := testToken(t, auth.RoleCustomer)
+
+	t.Run("GET /api/v1/orders matches root orders route", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/orders", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+
+		resp, err := app.Test(req, -1)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+		}
+		got := <-received
+		if got.uri != "/api/v1/orders" {
+			t.Errorf("upstream URI = %q, want %q", got.uri, "/api/v1/orders")
+		}
+	})
+
+	t.Run("POST /api/v1/orders matches root orders route", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/orders", strings.NewReader(`{}`))
+		req.Header.Set("Authorization", "Bearer "+token)
+
+		resp, err := app.Test(req, -1)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+		}
+		got := <-received
+		if got.uri != "/api/v1/orders" {
+			t.Errorf("upstream URI = %q, want %q", got.uri, "/api/v1/orders")
+		}
+	})
+
+	t.Run("GET /api/v1/orders/abc matches subpath orders route", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/orders/abc", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+
+		resp, err := app.Test(req, -1)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+		}
+		got := <-received
+		if got.uri != "/api/v1/orders/abc" {
+			t.Errorf("upstream URI = %q, want %q", got.uri, "/api/v1/orders/abc")
+		}
+	})
+}
+
+func TestNotificationStreamSSEProxy(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "flusher unavailable", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.WriteHeader(http.StatusOK)
+
+		_, _ = fmt.Fprint(w, ": connected\n\n")
+		flusher.Flush()
+		_, _ = fmt.Fprint(w, "id: 1\nevent: test\ndata: ok\n\n")
+		flusher.Flush()
+	}))
+	t.Cleanup(upstream.Close)
+
+	app := fiber.New()
+	SetupRoutes(app, testConfig(func(c *config.Config) {
+		c.NotificationServiceURL = upstream.URL
+	}))
+
+	t.Run("unauthenticated request returns 401", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/notifications/stream", nil)
+		resp, err := app.Test(req, -1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusUnauthorized)
+		}
+	})
+
+	t.Run("authenticated request streams unbuffered SSE", func(t *testing.T) {
+		token := testToken(t, auth.RoleCustomer)
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/notifications/stream", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+
+		resp, err := app.Test(req, 5000)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+		}
+		if ct := resp.Header.Get("Content-Type"); !strings.Contains(ct, "text/event-stream") {
+			t.Errorf("Content-Type = %q, want text/event-stream", ct)
+		}
+
+		bodyBytes, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := string(bodyBytes)
+		if !strings.Contains(body, ": connected\n\n") {
+			t.Errorf("body missing ': connected', got %q", body)
+		}
+		if !strings.Contains(body, "event: test\ndata: ok\n\n") {
+			t.Errorf("body missing event data, got %q", body)
+		}
+	})
+}
+
+func TestRouterRateLimiting(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"token":"abc"}`))
+	}))
+	t.Cleanup(upstream.Close)
+
+	app := fiber.New()
+	SetupRoutes(app, testConfig(func(c *config.Config) {
+		c.AuthServiceURL = upstream.URL
+	}))
+
+	// Send 100 requests to /api/v1/auth/login (default limit is 100 req/min)
+	for i := 0; i < 100; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{}`))
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := app.Test(req, -1)
+		if err != nil {
+			t.Fatalf("request %d failed: %v", i, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("request %d got status %d, want 200", i, resp.StatusCode)
+		}
+	}
+
+	// 101st request should be rate limited
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req, -1)
+	if err != nil {
+		t.Fatalf("101st request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("101st request status = %d, want 429", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+
+	var errResp map[string]string
+	if err := json.Unmarshal(body, &errResp); err != nil {
+		t.Fatalf("parse JSON error response: %v", err)
+	}
+
+	if errResp["code"] != "RATE_LIMITED" {
+		t.Errorf("code = %q, want %q", errResp["code"], "RATE_LIMITED")
+	}
 }

@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"time"
 
 	"analytics-service/internal/models"
 
@@ -10,10 +11,13 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
+const AnalyticsCollectionName = "daily_aggregates"
+
 type AnalyticsRepository interface {
 	FindByDate(ctx context.Context, date string) (*models.Analytics, error)
 	Save(ctx context.Context, analytics *models.Analytics) error
 	FindByDateRange(ctx context.Context, startDate, endDate string) ([]models.Analytics, error)
+	EnsureIndexes(ctx context.Context) error
 }
 
 type analyticsRepository struct {
@@ -21,9 +25,28 @@ type analyticsRepository struct {
 }
 
 func NewAnalyticsRepository(db *mongo.Database) AnalyticsRepository {
-	return &analyticsRepository{
-		collection: db.Collection("analytics"),
+	coll := db.Collection(AnalyticsCollectionName)
+	repo := &analyticsRepository{
+		collection: coll,
 	}
+
+	// Ensure unique index on 'date' in daily_aggregates collection
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = repo.EnsureIndexes(ctx)
+	}()
+
+	return repo
+}
+
+func (r *analyticsRepository) EnsureIndexes(ctx context.Context) error {
+	indexModel := mongo.IndexModel{
+		Keys:    bson.D{{Key: "date", Value: 1}},
+		Options: options.Index().SetUnique(true),
+	}
+	_, err := r.collection.Indexes().CreateOne(ctx, indexModel)
+	return err
 }
 
 func (r *analyticsRepository) FindByDate(ctx context.Context, date string) (*models.Analytics, error) {

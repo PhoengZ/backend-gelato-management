@@ -86,8 +86,11 @@ func TestStripIdentityHeaders(t *testing.T) {
 func TestRequireAuth(t *testing.T) {
 	verifier := auth.NewVerifier(testSecret, "gelatoflow-auth", "gelatoflow-api")
 
+	var downstreamUserID, downstreamRole string
 	app := fiber.New()
 	app.Get("/protected", RequireAuth(verifier), func(c *fiber.Ctx) error {
+		downstreamUserID = c.Get(HeaderXUserID)
+		downstreamRole = c.Get(HeaderXUserRole)
 		return c.JSON(fiber.Map{
 			"user_id": c.Locals(LocalUserID),
 			"role":    c.Locals(LocalUserRole),
@@ -164,6 +167,12 @@ func TestRequireAuth(t *testing.T) {
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
 		}
+		if downstreamUserID != "a3b8c4d2-1234-4567-89ab-cdef01234567" {
+			t.Errorf("downstream X-User-ID = %q, want %q", downstreamUserID, "a3b8c4d2-1234-4567-89ab-cdef01234567")
+		}
+		if downstreamRole != "MANAGER" {
+			t.Errorf("downstream X-User-Role = %q, want %q", downstreamRole, "MANAGER")
+		}
 	})
 }
 
@@ -219,4 +228,35 @@ func TestAuthenticateIfPresent(t *testing.T) {
 			t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
 		}
 	})
+}
+
+func TestInjectTrustedHeaders(t *testing.T) {
+	app := fiber.New()
+	app.Use(func(c *fiber.Ctx) error {
+		c.Locals(LocalUserID, "test-user-id-123")
+		c.Locals(LocalUserRole, "MANAGER")
+		return c.Next()
+	})
+	app.Use(InjectTrustedHeaders())
+
+	var capturedUserID, capturedUserRole string
+	app.Get("/test-inject", func(c *fiber.Ctx) error {
+		capturedUserID = c.Get(HeaderXUserID)
+		capturedUserRole = c.Get(HeaderXUserRole)
+		return c.SendStatus(fiber.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/test-inject", nil)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if capturedUserID != "test-user-id-123" {
+		t.Errorf("capturedUserID = %q, want %q", capturedUserID, "test-user-id-123")
+	}
+	if capturedUserRole != "MANAGER" {
+		t.Errorf("capturedUserRole = %q, want %q", capturedUserRole, "MANAGER")
+	}
 }

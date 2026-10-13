@@ -24,6 +24,11 @@ type UserRepository interface {
 	FindByID(ctx context.Context, id uuid.UUID) (*model.User, error)
 }
 
+type OutboxUserRepository interface {
+	UserRepository
+	CreateWithOutbox(ctx context.Context, user *model.User, event *model.OutboxEvent) error
+}
+
 type PostgresUserRepository struct {
 	pool *pgxpool.Pool
 }
@@ -33,12 +38,22 @@ func NewPostgresUserRepository(pool *pgxpool.Pool) *PostgresUserRepository {
 }
 
 func (r *PostgresUserRepository) Create(ctx context.Context, user *model.User) error {
+	return r.CreateWithOutbox(ctx, user, nil)
+}
+
+func (r *PostgresUserRepository) CreateWithOutbox(ctx context.Context, user *model.User, event *model.OutboxEvent) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
 	const query = `
 		INSERT INTO users (id, email, display_name, password_hash, role, status)
 		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING created_at, updated_at`
 
-	err := r.pool.QueryRow(
+	err = tx.QueryRow(
 		ctx,
 		query,
 		user.ID,
@@ -48,15 +63,32 @@ func (r *PostgresUserRepository) Create(ctx context.Context, user *model.User) e
 		user.Role,
 		user.Status,
 	).Scan(&user.CreatedAt, &user.UpdatedAt)
-	if err == nil {
-		return nil
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return ErrEmailAlreadyExists
+		}
+		return fmt.Errorf("create user: %w", err)
 	}
 
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-		return ErrEmailAlreadyExists
+	if event != nil {
+		if event.ID == uuid.Nil {
+			event.ID = uuid.New()
+		}
+		const outboxQuery = `
+			INSERT INTO outbox_events (id, event_type, payload, created_at)
+			VALUES ($1, $2, $3, NOW())
+			RETURNING created_at`
+		err = tx.QueryRow(ctx, outboxQuery, event.ID, event.EventType, event.Payload).Scan(&event.CreatedAt)
+		if err != nil {
+			return fmt.Errorf("insert outbox event: %w", err)
+		}
 	}
-	return fmt.Errorf("create user: %w", err)
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit transaction: %w", err)
+	}
+	return nil
 }
 
 func (r *PostgresUserRepository) FindByEmail(ctx context.Context, email string) (*model.User, error) {

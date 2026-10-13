@@ -49,10 +49,22 @@ func TestConsumerIntegration(t *testing.T) {
 	}
 
 	db := mongoClient.Database("analytics_test_db")
+	_ = db.Collection("daily_aggregates").Drop(ctx)
 	_ = db.Collection("analytics").Drop(ctx)
 	_ = db.Collection("processed_events").Drop(ctx)
+	defer db.Collection("daily_aggregates").Drop(ctx)
 	defer db.Collection("analytics").Drop(ctx)
 	defer db.Collection("processed_events").Drop(ctx)
+
+	// Clean up any stale RabbitMQ queues from previous test runs
+	if cleanupConn, err := amqp.Dial(rabbitURL); err == nil {
+		if cleanupCh, err := cleanupConn.Channel(); err == nil {
+			_, _ = cleanupCh.QueueDelete("analytics_queue", false, false, false)
+			_, _ = cleanupCh.QueueDelete("analytics_dlq", false, false, false)
+			_ = cleanupCh.Close()
+		}
+		_ = cleanupConn.Close()
+	}
 
 	// 2. Setup Real Repositories and Service
 	analyticsRepo := repository.NewAnalyticsRepository(db)
@@ -187,9 +199,6 @@ func TestConsumerIntegration(t *testing.T) {
 	// 9. Verify Aggregation Results in Real MongoDB analytics Collection
 	if record.Financials.GrossSalesMinor != 2500050 {
 		t.Errorf("Expected GrossSalesMinor 2500050, got %d", record.Financials.GrossSalesMinor)
-	}
-	if record.Financials.GrossSales != 25000.50 {
-		t.Errorf("Expected GrossSales 25000.50, got %f", record.Financials.GrossSales)
 	}
 	// Verify that duplicate order event was NOT counted twice
 	if record.Financials.TotalOrders != 1 {

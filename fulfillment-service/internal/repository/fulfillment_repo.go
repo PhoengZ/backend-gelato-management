@@ -32,6 +32,23 @@ const uniqueViolation = "23505"
 
 const selectCols = `id, order_id, queue_number, pickup_slot_id, pickup_at, status, items, picked_up_at, created_at, updated_at`
 
+type contextKey string
+
+const actorContextKey contextKey = "fulfillment_actor_id"
+
+// WithActorID stores an actor UUID in the context for status change auditing.
+func WithActorID(ctx context.Context, actorID uuid.UUID) context.Context {
+	return context.WithValue(ctx, actorContextKey, actorID)
+}
+
+// ActorIDFromContext retrieves the actor UUID from context if present.
+func ActorIDFromContext(ctx context.Context) *uuid.UUID {
+	if v, ok := ctx.Value(actorContextKey).(uuid.UUID); ok && v != uuid.Nil {
+		return &v
+	}
+	return nil
+}
+
 type FulfillmentRepository struct {
 	db *pgxpool.Pool
 }
@@ -140,10 +157,12 @@ func (r *FulfillmentRepository) CreateFromOrderPlaced(ctx context.Context, event
 		return err
 	}
 
-	_, err = tx.Exec(ctx, `
+	var fulfillmentID uuid.UUID
+	err = tx.QueryRow(ctx, `
 		INSERT INTO fulfillments (order_id, pickup_slot_id, queue_seq, queue_number, pickup_at, status, items)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		d.OrderID, slotID, seq, fmt.Sprintf("%02d", seq), d.PickupAt.UTC(), models.StatusPreparing, itemsJSON)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		RETURNING id`,
+		d.OrderID, slotID, seq, fmt.Sprintf("%02d", seq), d.PickupAt.UTC(), models.StatusPreparing, itemsJSON).Scan(&fulfillmentID)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
@@ -153,6 +172,15 @@ func (r *FulfillmentRepository) CreateFromOrderPlaced(ctx context.Context, event
 		}
 		return err
 	}
+
+	_, err = tx.Exec(ctx, `
+		INSERT INTO fulfillment_status_history (id, fulfillment_id, old_status, new_status, actor_id, created_at)
+		VALUES (gen_random_uuid(), $1, NULL, $2, NULL, now())`,
+		fulfillmentID, models.StatusPreparing)
+	if err != nil {
+		return err
+	}
+
 	return tx.Commit(ctx)
 }
 
@@ -169,14 +197,28 @@ func (r *FulfillmentRepository) CancelByOrder(ctx context.Context, eventID, orde
 		return false, err
 	}
 
-	tag, err := tx.Exec(ctx, `
+	var fID uuid.UUID
+	err = tx.QueryRow(ctx, `
 		UPDATE fulfillments SET status = $2, updated_at = now()
-		WHERE order_id = $1 AND status = $3`,
-		orderID, models.StatusCancelled, models.StatusPreparing)
+		WHERE order_id = $1 AND status = $3
+		RETURNING id`,
+		orderID, models.StatusCancelled, models.StatusPreparing).Scan(&fID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, tx.Commit(ctx)
+		}
+		return false, err
+	}
+
+	_, err = tx.Exec(ctx, `
+		INSERT INTO fulfillment_status_history (id, fulfillment_id, old_status, new_status, actor_id, created_at)
+		VALUES (gen_random_uuid(), $1, $2, $3, NULL, now())`,
+		fID, models.StatusPreparing, models.StatusCancelled)
 	if err != nil {
 		return false, err
 	}
-	return tag.RowsAffected() > 0, tx.Commit(ctx)
+
+	return true, tx.Commit(ctx)
 }
 
 // UpdateStatus moves a ticket to READY_FOR_PICKUP or PICKED_UP and writes the
@@ -215,6 +257,14 @@ func (r *FulfillmentRepository) UpdateStatus(ctx context.Context, orderID uuid.U
 		return models.Fulfillment{}, err
 	}
 
+	actorID := ActorIDFromContext(ctx)
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO fulfillment_status_history (id, fulfillment_id, old_status, new_status, actor_id, created_at)
+		VALUES (gen_random_uuid(), $1, $2, $3, $4, $5)`,
+		updated.ID, cur.Status, to, actorID, now); err != nil {
+		return models.Fulfillment{}, err
+	}
+
 	var env events.Envelope
 	var routingKey string
 	switch to {
@@ -247,4 +297,50 @@ func (r *FulfillmentRepository) UpdateStatus(ctx context.Context, orderID uuid.U
 		return models.Fulfillment{}, err
 	}
 	return updated, nil
+}
+
+// GetSlotCapacity returns the active ticket count (PREPARING or READY_FOR_PICKUP)
+// for the 15-minute slot window corresponding to slotTime.
+func (r *FulfillmentRepository) GetSlotCapacity(ctx context.Context, slotTime time.Time) (int, error) {
+	startsAt := slotTime.UTC().Truncate(SlotLength)
+	slotID := uuid.NewSHA1(slotNamespace, []byte(startsAt.Format(time.RFC3339)))
+
+	var count int
+	err := r.db.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM fulfillments
+		WHERE pickup_slot_id = $1 AND status IN ($2, $3)`,
+		slotID, models.StatusPreparing, models.StatusReady).Scan(&count)
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+// GetHistory returns the immutable audit history entries for a fulfillment ticket.
+func (r *FulfillmentRepository) GetHistory(ctx context.Context, fulfillmentID uuid.UUID) ([]models.FulfillmentStatusHistory, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT id, fulfillment_id, old_status, new_status, actor_id, created_at
+		FROM fulfillment_status_history
+		WHERE fulfillment_id = $1
+		ORDER BY created_at ASC, id ASC`, fulfillmentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var history []models.FulfillmentStatusHistory
+	for rows.Next() {
+		var h models.FulfillmentStatusHistory
+		var oldStatus *string
+		if err := rows.Scan(&h.ID, &h.FulfillmentID, &oldStatus, &h.NewStatus, &h.ActorID, &h.CreatedAt); err != nil {
+			return nil, err
+		}
+		if oldStatus != nil {
+			s := models.Status(*oldStatus)
+			h.OldStatus = &s
+		}
+		history = append(history, h)
+	}
+	return history, rows.Err()
 }

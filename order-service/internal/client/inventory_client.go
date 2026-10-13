@@ -3,8 +3,9 @@ package client
 import (
 	"context"
 	"errors"
+	"time"
 
-	"order-service/gen/inventory/v1"
+	inventoryv1 "order-service/gen/inventory/v1"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -41,15 +42,27 @@ func (c *inventoryClient) authenticated(ctx context.Context) context.Context {
 }
 
 func (c *inventoryClient) CheckAvailability(ctx context.Context, req *inventoryv1.CheckAvailabilityRequest) (*inventoryv1.CheckAvailabilityResponse, error) {
-	return c.inner.CheckAvailability(c.authenticated(ctx), req)
+	callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	return c.inner.CheckAvailability(c.authenticated(callCtx), req)
 }
+
 func (c *inventoryClient) ReservePortions(ctx context.Context, req *inventoryv1.ReservePortionsRequest) (*inventoryv1.ReservePortionsResponse, error) {
-	return c.inner.ReservePortions(c.authenticated(ctx), req)
+	callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	return c.inner.ReservePortions(c.authenticated(callCtx), req)
 }
+
 func (c *inventoryClient) ConfirmReservation(ctx context.Context, req *inventoryv1.ConfirmReservationRequest) (*inventoryv1.ConfirmReservationResponse, error) {
-	return c.inner.ConfirmReservation(c.authenticated(ctx), req)
+	callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	return c.inner.ConfirmReservation(c.authenticated(callCtx), req)
 }
+
 func (c *inventoryClient) ReleaseReservation(ctx context.Context, req *inventoryv1.ReleaseReservationRequest) (*inventoryv1.ReleaseReservationResponse, error) {
-	return c.inner.ReleaseReservation(c.authenticated(ctx), req)
+	callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	return c.inner.ReleaseReservation(c.authenticated(callCtx), req)
 }
+
 func (c *inventoryClient) Close() error { return c.conn.Close() }

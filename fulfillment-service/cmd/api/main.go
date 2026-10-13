@@ -13,6 +13,7 @@ import (
 	"fulfillment-service/internal/config"
 	"fulfillment-service/internal/handler"
 	"fulfillment-service/internal/messaging"
+	"fulfillment-service/internal/middleware"
 	"fulfillment-service/internal/repository"
 	"fulfillment-service/internal/router"
 )
@@ -52,7 +53,8 @@ func main() {
 		}()
 	}
 
-	e := router.New(handler.NewFulfillmentHandler(repo))
+	verifier := middleware.NewVerifier(cfg.JWTSecret, cfg.JWTIssuer, cfg.JWTAudience)
+	e := router.New(handler.NewFulfillmentHandler(repo), verifier)
 
 	go func() {
 		<-ctx.Done()

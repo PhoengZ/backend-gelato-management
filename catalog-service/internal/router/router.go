@@ -9,12 +9,20 @@ import (
 	"catalog-service/internal/service"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/redis/go-redis/v9"
 )
 
-func Setup(app *fiber.App, catalogService service.CatalogService, verifier *auth.Verifier, requestTimeout time.Duration) {
+func Setup(app *fiber.App, catalogService service.CatalogService, verifier *auth.Verifier, requestTimeout time.Duration, redisClient ...redis.Cmdable) {
 	handler := v1.NewCatalogHandler(catalogService)
 	managerOnly := middleware.RequireManager(verifier)
 	optionalAuth := middleware.AuthenticateIfPresent(verifier)
+
+	var idempotency fiber.Handler
+	if len(redisClient) > 0 && redisClient[0] != nil {
+		idempotency = middleware.Idempotency(redisClient[0])
+	} else {
+		idempotency = middleware.Idempotency(nil)
+	}
 
 	app.Get("/health", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{"status": "ok"})
@@ -22,7 +30,7 @@ func Setup(app *fiber.App, catalogService service.CatalogService, verifier *auth
 
 	flavors := app.Group("/api/v1/flavors", middleware.PreventCaching, middleware.RequestTimeout(requestTimeout))
 	flavors.Get("/", optionalAuth, handler.List)
-	flavors.Post("/", managerOnly, handler.Create)
+	flavors.Post("/", managerOnly, idempotency, handler.Create)
 	flavors.Get("/:flavor_id/recipe", managerOnly, handler.GetRecipe)
 	flavors.Get("/:flavor_id", optionalAuth, handler.Get)
 	flavors.Put("/:flavor_id", managerOnly, handler.Replace)

@@ -96,3 +96,45 @@ func TestDispatchUnknownTypeIgnored(t *testing.T) {
 		t.Fatalf("retry=%v err=%v", retry, err)
 	}
 }
+
+func TestDLQConfiguration(t *testing.T) {
+	if DLXExchange != "fulfillment.dlx" {
+		t.Errorf("DLXExchange = %s, want fulfillment.dlx", DLXExchange)
+	}
+	if DLQQueue != "fulfillment_queue_dlq" {
+		t.Errorf("DLQQueue = %s, want fulfillment_queue_dlq", DLQQueue)
+	}
+}
+
+func TestDispatchPoisonMessagePayloads(t *testing.T) {
+	poisonCases := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "order.placed nil order_id",
+			body: `{"specversion":"1.0","id":"c3f8510a-6c17-48b2-b1ef-24901b0f5556","type":"com.gelatoflow.order.placed.v1","data":{"order_id":"00000000-0000-0000-0000-000000000000","pickup_at":"2026-09-02T15:00:00Z","items":[{"flavor_id":"0f3bca11-1eb2-4a86-908a-e60d7656c79b","portions":1}]}}`,
+		},
+		{
+			name: "order.placed zero pickup_at",
+			body: `{"specversion":"1.0","id":"c3f8510a-6c17-48b2-b1ef-24901b0f5556","type":"com.gelatoflow.order.placed.v1","data":{"order_id":"8d29d6cf-bd4d-48ca-9e4f-dcd8ec54e594","items":[{"flavor_id":"0f3bca11-1eb2-4a86-908a-e60d7656c79b","portions":1}]}}`,
+		},
+		{
+			name: "order.cancelled nil order_id",
+			body: `{"specversion":"1.0","id":"11111111-1111-4111-8111-111111111111","type":"com.gelatoflow.order.cancelled.v1","data":{"order_id":"00000000-0000-0000-0000-000000000000"}}`,
+		},
+	}
+
+	for _, tc := range poisonCases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := &fakeOrders{}
+			retry, err := Dispatch(context.Background(), h, []byte(tc.body))
+			if err == nil {
+				t.Fatalf("expected error for poison message %s", tc.name)
+			}
+			if retry {
+				t.Fatalf("retry must be false (non-requeueable poison message routed to DLQ) for %s", tc.name)
+			}
+		})
+	}
+}

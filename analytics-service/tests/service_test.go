@@ -58,6 +58,10 @@ func (m *MockRepository) FindByDateRange(ctx context.Context, startDate, endDate
 	return result, nil
 }
 
+func (m *MockRepository) EnsureIndexes(ctx context.Context) error {
+	return nil
+}
+
 // Get returns a thread-safe copy of the record for the given date.
 func (m *MockRepository) Get(date string) *models.Analytics {
 	m.mu.RLock()
@@ -179,9 +183,6 @@ func TestProcessOrderPlaced(t *testing.T) {
 	if record.Financials.GrossSalesMinor != 1550000 {
 		t.Errorf("Expected GrossSalesMinor 1550000, got %d", record.Financials.GrossSalesMinor)
 	}
-	if record.Financials.GrossSales != 15500.00 {
-		t.Errorf("Expected GrossSales 15500.00, got %f", record.Financials.GrossSales)
-	}
 	if record.Financials.TotalOrders != 1 {
 		t.Errorf("Expected TotalOrders 1, got %d", record.Financials.TotalOrders)
 	}
@@ -210,15 +211,14 @@ func TestProcessOrderCancelled_ViaGRPC(t *testing.T) {
 		Date: "2026-08-20",
 		Financials: models.Financials{
 			GrossSalesMinor: 200000,
-			GrossSales:      2000.00,
 			TotalOrders:     2,
 		},
 		Operations: models.Operations{
 			ScoopsSold: 20,
 		},
 		FlavorStats: []models.FlavorStat{
-			{FlavorID: "F01", Name: "Vanilla", ScoopsSold: 10, RevenueMinor: 100000, Revenue: 1000.00},
-			{FlavorID: "F02", Name: "Chocolate", ScoopsSold: 10, RevenueMinor: 100000, Revenue: 1000.00},
+			{FlavorID: "F01", Name: "Vanilla", ScoopsSold: 10, RevenueMinor: 100000},
+			{FlavorID: "F02", Name: "Chocolate", ScoopsSold: 10, RevenueMinor: 100000},
 		},
 	}
 
@@ -375,7 +375,6 @@ func TestGetAnalyticsSummary(t *testing.T) {
 		Date: today,
 		Financials: models.Financials{
 			GrossSalesMinor: 100000, // 1000.00
-			GrossSales:      1000,
 			TotalOrders:     10,
 		},
 		Operations: models.Operations{
@@ -387,8 +386,8 @@ func TestGetAnalyticsSummary(t *testing.T) {
 			WasteByReason:      []models.WasteByReason{},
 		},
 		FlavorStats: []models.FlavorStat{
-			{FlavorID: "F01", Name: "Vanilla", ScoopsSold: 30, RevenueMinor: 60000, Revenue: 600, WastePortions: 3},
-			{FlavorID: "F02", Name: "Chocolate", ScoopsSold: 20, RevenueMinor: 40000, Revenue: 400, WastePortions: 2},
+			{FlavorID: "F01", Name: "Vanilla", ScoopsSold: 30, RevenueMinor: 60000, WastePortions: 3},
+			{FlavorID: "F02", Name: "Chocolate", ScoopsSold: 20, RevenueMinor: 40000, WastePortions: 2},
 		},
 	}
 

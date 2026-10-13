@@ -10,6 +10,7 @@ import (
 	"analytics-service/internal/repository"
 
 	"github.com/joho/godotenv"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -42,15 +43,21 @@ func TestAnalyticsRepositoryIntegration(t *testing.T) {
 	repo := repository.NewAnalyticsRepository(db)
 
 	// Clean up collection before and after test
+	_ = db.Collection("daily_aggregates").Drop(ctx)
 	_ = db.Collection("analytics").Drop(ctx)
+	defer db.Collection("daily_aggregates").Drop(ctx)
 	defer db.Collection("analytics").Drop(ctx)
+
+	// Ensure unique index is established synchronously for test
+	if err := repo.EnsureIndexes(ctx); err != nil {
+		t.Fatalf("Failed to ensure indexes: %v", err)
+	}
 
 	t.Run("Create and Read Record", func(t *testing.T) {
 		record := &models.Analytics{
 			Date: "2026-08-25",
 			Financials: models.Financials{
 				GrossSalesMinor: 15000,
-				GrossSales:      150.0,
 			},
 			WasteStats: models.WasteStats{
 				CostLostMinor: 5000,
@@ -74,9 +81,6 @@ func TestAnalyticsRepositoryIntegration(t *testing.T) {
 		if found.Financials.GrossSalesMinor != 15000 {
 			t.Errorf("Expected GrossSalesMinor 15000, got %d", found.Financials.GrossSalesMinor)
 		}
-		if found.Financials.GrossSales != 150.0 {
-			t.Errorf("Expected GrossSales 150.0, got %f", found.Financials.GrossSales)
-		}
 		if found.WasteStats.CostLostMinor != 5000 {
 			t.Errorf("Expected CostLostMinor 5000, got %d", found.WasteStats.CostLostMinor)
 		}
@@ -86,7 +90,6 @@ func TestAnalyticsRepositoryIntegration(t *testing.T) {
 		// Fetch existing
 		record, _ := repo.FindByDate(ctx, "2026-08-25")
 		record.Financials.GrossSalesMinor = 30000
-		record.Financials.GrossSales = 300.0 // Update field
 
 		// Test Save (Update)
 		err := repo.Save(ctx, record)
@@ -98,9 +101,6 @@ func TestAnalyticsRepositoryIntegration(t *testing.T) {
 		updated, _ := repo.FindByDate(ctx, "2026-08-25")
 		if updated.Financials.GrossSalesMinor != 30000 {
 			t.Errorf("Expected GrossSalesMinor to be updated to 30000, got %d", updated.Financials.GrossSalesMinor)
-		}
-		if updated.Financials.GrossSales != 300.0 {
-			t.Errorf("Expected GrossSales to be updated to 300.0, got %f", updated.Financials.GrossSales)
 		}
 	})
 
@@ -117,6 +117,24 @@ func TestAnalyticsRepositoryIntegration(t *testing.T) {
 
 		if len(results) != 2 {
 			t.Errorf("Expected 2 records in range, got %d", len(results))
+		}
+	})
+
+	t.Run("Unique Index on Date in daily_aggregates", func(t *testing.T) {
+		coll := db.Collection("daily_aggregates")
+
+		// Direct insertion of duplicate date documents should violate unique index
+		dupDate := "2026-12-31"
+		_, err := coll.InsertOne(ctx, bson.M{"date": dupDate, "note": "first"})
+		if err != nil {
+			t.Fatalf("First insert failed: %v", err)
+		}
+
+		_, err = coll.InsertOne(ctx, bson.M{"date": dupDate, "note": "second"})
+		if err == nil {
+			t.Errorf("Expected duplicate key error inserting duplicate date %s, but got nil", dupDate)
+		} else if !mongo.IsDuplicateKeyError(err) {
+			t.Errorf("Expected mongo.IsDuplicateKeyError, got: %v", err)
 		}
 	})
 }

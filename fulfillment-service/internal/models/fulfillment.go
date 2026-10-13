@@ -66,3 +66,22 @@ type Fulfillment struct {
 type UpdateStatusRequest struct {
 	Status Status `json:"status"`
 }
+
+// FulfillmentStatusHistory is an immutable audit log entry of a ticket state change.
+type FulfillmentStatusHistory struct {
+	ID            uuid.UUID  `json:"id"`
+	FulfillmentID uuid.UUID  `json:"fulfillment_id"`
+	OldStatus     *Status    `json:"old_status,omitempty"`
+	NewStatus     Status     `json:"new_status"`
+	ActorID       *uuid.UUID `json:"actor_id,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
+}
+
+// SlotCapacityResponse represents active ticket capacity for a 15-minute slot window.
+type SlotCapacityResponse struct {
+	SlotTime          time.Time `json:"slot_time"`
+	SlotStart         time.Time `json:"slot_start"`
+	SlotEnd           time.Time `json:"slot_end"`
+	ActiveTicketCount int       `json:"active_ticket_count"`
+	ActiveCount       int       `json:"active_count"`
+}

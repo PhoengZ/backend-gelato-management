@@ -16,6 +16,10 @@ const (
 	// ConsumerQueue is the durable queue Notification owns.
 	ConsumerQueue = "notification_queue"
 
+	// DeadLetterExchange and DeadLetterQueue handle poison/rejected messages.
+	DeadLetterExchange = "notification.dlx"
+	DeadLetterQueue    = "notification_dlq"
+
 	// Topic exchanges owned by the publishing services.
 	OrderExchange       = "order"
 	FulfillmentExchange = "fulfillment"
@@ -98,18 +102,40 @@ func Dispatch(h Events, body []byte) (retry bool, err error) {
 	return false, nil
 }
 
-// Consume declares the exchanges and queue, binds the routing keys, and
-// processes messages until ctx is cancelled or the channel closes.
-func (b *Broker) Consume(ctx context.Context, h Events) error {
-	ch, err := b.conn.Channel()
-	if err != nil {
-		return err
-	}
-	defer ch.Close()
+// TopologyDeclarer abstracts the RabbitMQ channel operations required to declare topology.
+type TopologyDeclarer interface {
+	ExchangeDeclare(name, kind string, durable, autoDelete, internal, noWait bool, args amqp.Table) error
+	QueueDeclare(name string, durable, autoDelete, exclusive, noWait bool, args amqp.Table) (amqp.Queue, error)
+	QueueBind(name, key, exchange string, noWait bool, args amqp.Table) error
+}
 
-	if _, err := ch.QueueDeclare(ConsumerQueue, true, false, false, false, nil); err != nil {
+// SetupTopology declares the Dead Letter Exchange, Dead Letter Queue, main Consumer Queue,
+// and binds the topics and routing keys.
+func SetupTopology(ch TopologyDeclarer) error {
+	// 1. Declare Dead Letter Exchange (topic)
+	if err := ch.ExchangeDeclare(DeadLetterExchange, "topic", true, false, false, false, nil); err != nil {
 		return err
 	}
+
+	// 2. Declare Dead Letter Queue
+	if _, err := ch.QueueDeclare(DeadLetterQueue, true, false, false, false, nil); err != nil {
+		return err
+	}
+
+	// 3. Bind Dead Letter Queue to DLX with '#' matching all routing keys
+	if err := ch.QueueBind(DeadLetterQueue, "#", DeadLetterExchange, false, nil); err != nil {
+		return err
+	}
+
+	// 4. Declare Consumer Queue with DLX configuration
+	queueArgs := amqp.Table{
+		"x-dead-letter-exchange": DeadLetterExchange,
+	}
+	if _, err := ch.QueueDeclare(ConsumerQueue, true, false, false, false, queueArgs); err != nil {
+		return err
+	}
+
+	// 5. Declare topic exchanges and bind consumer queue
 	for exchange, keys := range bindings {
 		if err := ch.ExchangeDeclare(exchange, "topic", true, false, false, false, nil); err != nil {
 			return err
@@ -119,6 +145,38 @@ func (b *Broker) Consume(ctx context.Context, h Events) error {
 				return err
 			}
 		}
+	}
+
+	return nil
+}
+
+// HandleDelivery processes a single message delivery, acknowledging valid messages
+// and rejecting poison messages with Nack(requeue=false) so they are routed to the DLX.
+func HandleDelivery(d amqp.Delivery, h Events) error {
+	retry, err := Dispatch(h, d.Body)
+	switch {
+	case err == nil:
+		return d.Ack(false)
+	case retry:
+		log.Printf("[consumer] %s failed, requeueing: %v", d.RoutingKey, err)
+		return d.Nack(false, true)
+	default:
+		log.Printf("[consumer] poison message on %s, rejecting to DLQ: %v", d.RoutingKey, err)
+		return d.Nack(false, false)
+	}
+}
+
+// Consume declares the exchanges and queue (including DLX/DLQ), binds the routing keys,
+// and processes messages until ctx is cancelled or the channel closes.
+func (b *Broker) Consume(ctx context.Context, h Events) error {
+	ch, err := b.conn.Channel()
+	if err != nil {
+		return err
+	}
+	defer ch.Close()
+
+	if err := SetupTopology(ch); err != nil {
+		return err
 	}
 	if err := ch.Qos(10, 0, false); err != nil {
 		return err
@@ -138,17 +196,7 @@ func (b *Broker) Consume(ctx context.Context, h Events) error {
 			if !ok {
 				return amqp.ErrClosed
 			}
-			retry, err := Dispatch(h, d.Body)
-			switch {
-			case err == nil:
-				_ = d.Ack(false)
-			case retry:
-				log.Printf("[consumer] %s failed, requeueing: %v", d.RoutingKey, err)
-				_ = d.Nack(false, true)
-			default:
-				log.Printf("[consumer] dropping %s: %v", d.RoutingKey, err)
-				_ = d.Nack(false, false)
-			}
+			_ = HandleDelivery(d, h)
 		}
 	}
 }

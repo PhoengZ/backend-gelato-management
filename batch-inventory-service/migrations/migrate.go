@@ -7,10 +7,23 @@ import (
 	"fmt"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"sort"
+	"strings"
 )
 
 //go:embed *.sql
 var files embed.FS
+
+func parseVersion(name string) int {
+	var v int
+	for _, ch := range name {
+		if ch >= '0' && ch <= '9' {
+			v = v*10 + int(ch-'0')
+		} else {
+			break
+		}
+	}
+	return v
+}
 
 func Apply(ctx context.Context, pool *pgxpool.Pool) error {
 	tx, err := pool.Begin(ctx)
@@ -28,8 +41,17 @@ func Apply(ctx context.Context, pool *pgxpool.Pool) error {
 	if err != nil {
 		return err
 	}
-	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+	sort.Slice(entries, func(i, j int) bool {
+		vi, vj := parseVersion(entries[i].Name()), parseVersion(entries[j].Name())
+		if vi != vj {
+			return vi < vj
+		}
+		return entries[i].Name() < entries[j].Name()
+	})
 	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".down.sql") {
+			continue
+		}
 		var exists bool
 		if err = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM inventory_schema_migrations WHERE version=$1)", entry.Name()).Scan(&exists); err != nil {
 			return err

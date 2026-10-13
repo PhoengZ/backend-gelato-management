@@ -4,6 +4,8 @@ import (
 	"os"
 	"testing"
 
+	amqp "github.com/rabbitmq/amqp091-go"
+
 	"notification-service/internal/events"
 )
 
@@ -141,5 +143,171 @@ func TestDispatchDropsMalformedMessages(t *testing.T) {
 				t.Error("malformed message must not reach the handler")
 			}
 		})
+	}
+}
+
+type mockAcknowledger struct {
+	acked       bool
+	nacked      bool
+	requeue     bool
+	deliveryTag uint64
+	multiple    bool
+}
+
+func (m *mockAcknowledger) Ack(tag uint64, multiple bool) error {
+	m.acked = true
+	m.deliveryTag = tag
+	m.multiple = multiple
+	return nil
+}
+
+func (m *mockAcknowledger) Nack(tag uint64, multiple bool, requeue bool) error {
+	m.nacked = true
+	m.deliveryTag = tag
+	m.multiple = multiple
+	m.requeue = requeue
+	return nil
+}
+
+func (m *mockAcknowledger) Reject(tag uint64, requeue bool) error {
+	m.nacked = true
+	m.deliveryTag = tag
+	m.requeue = requeue
+	return nil
+}
+
+func TestHandleDeliveryValidMessageAcks(t *testing.T) {
+	mockAck := &mockAcknowledger{}
+	d := amqp.Delivery{
+		Acknowledger: mockAck,
+		DeliveryTag:  42,
+		RoutingKey:   "order.placed",
+		Body:         contractExample(t, "order-placed.v1.json"),
+	}
+	r := &recorder{}
+	err := HandleDelivery(d, r)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !mockAck.acked {
+		t.Error("expected message to be acknowledged")
+	}
+	if mockAck.nacked {
+		t.Error("message should not be nacked")
+	}
+	if mockAck.deliveryTag != 42 {
+		t.Errorf("deliveryTag = %d, want 42", mockAck.deliveryTag)
+	}
+}
+
+func TestHandleDeliveryPoisonMessageNacksWithoutRequeue(t *testing.T) {
+	poisonBodies := map[string][]byte{
+		"malformed json": []byte("not-json-content"),
+		"missing id":     []byte(`{"specversion":"1.0","type":"order.placed","data":{}}`),
+		"empty order_id": envelope(events.TypeOrderPlaced, `{"order_id":"00000000-0000-0000-0000-000000000000","customer_id":"8dc81c31-a354-4774-b835-36ea0411bc54"}`),
+	}
+
+	for name, body := range poisonBodies {
+		t.Run(name, func(t *testing.T) {
+			mockAck := &mockAcknowledger{}
+			d := amqp.Delivery{
+				Acknowledger: mockAck,
+				DeliveryTag:  99,
+				RoutingKey:   "order.placed",
+				Body:         body,
+			}
+			r := &recorder{}
+			err := HandleDelivery(d, r)
+			if err != nil {
+				t.Fatalf("unexpected handler error: %v", err)
+			}
+			if mockAck.acked {
+				t.Error("poison message must NOT be acked")
+			}
+			if !mockAck.nacked {
+				t.Fatal("poison message MUST be nacked")
+			}
+			if mockAck.requeue {
+				t.Error("poison message must be rejected with requeue=false (for DLQ)")
+			}
+			if mockAck.deliveryTag != 99 {
+				t.Errorf("deliveryTag = %d, want 99", mockAck.deliveryTag)
+			}
+		})
+	}
+}
+
+type mockChannelDeclarer struct {
+	exchanges map[string]string
+	queues    map[string]amqp.Table
+	bindings  []mockBinding
+}
+
+type mockBinding struct {
+	queue    string
+	key      string
+	exchange string
+}
+
+func newMockChannel() *mockChannelDeclarer {
+	return &mockChannelDeclarer{
+		exchanges: make(map[string]string),
+		queues:    make(map[string]amqp.Table),
+	}
+}
+
+func (m *mockChannelDeclarer) ExchangeDeclare(name, kind string, durable, autoDelete, internal, noWait bool, args amqp.Table) error {
+	m.exchanges[name] = kind
+	return nil
+}
+
+func (m *mockChannelDeclarer) QueueDeclare(name string, durable, autoDelete, exclusive, noWait bool, args amqp.Table) (amqp.Queue, error) {
+	m.queues[name] = args
+	return amqp.Queue{Name: name}, nil
+}
+
+func (m *mockChannelDeclarer) QueueBind(name, key, exchange string, noWait bool, args amqp.Table) error {
+	m.bindings = append(m.bindings, mockBinding{queue: name, key: key, exchange: exchange})
+	return nil
+}
+
+func TestSetupTopologyDLXAndDLQ(t *testing.T) {
+	mockCh := newMockChannel()
+	err := SetupTopology(mockCh)
+	if err != nil {
+		t.Fatalf("SetupTopology failed: %v", err)
+	}
+
+	// 1. DLX exchange declared
+	kind, ok := mockCh.exchanges[DeadLetterExchange]
+	if !ok || kind != "topic" {
+		t.Errorf("expected %s exchange to be declared as topic, got %v (exists: %v)", DeadLetterExchange, kind, ok)
+	}
+
+	// 2. DLQ declared
+	_, ok = mockCh.queues[DeadLetterQueue]
+	if !ok {
+		t.Errorf("expected %s queue to be declared", DeadLetterQueue)
+	}
+
+	// 3. DLQ bound to DLX with '#'
+	foundDLQBinding := false
+	for _, b := range mockCh.bindings {
+		if b.queue == DeadLetterQueue && b.exchange == DeadLetterExchange && b.key == "#" {
+			foundDLQBinding = true
+			break
+		}
+	}
+	if !foundDLQBinding {
+		t.Errorf("expected binding %s -> %s with key '#'", DeadLetterQueue, DeadLetterExchange)
+	}
+
+	// 4. ConsumerQueue declared with x-dead-letter-exchange
+	consumerArgs, ok := mockCh.queues[ConsumerQueue]
+	if !ok {
+		t.Fatalf("expected %s queue to be declared", ConsumerQueue)
+	}
+	if dlxArg, exists := consumerArgs["x-dead-letter-exchange"]; !exists || dlxArg != DeadLetterExchange {
+		t.Errorf("expected x-dead-letter-exchange=%s in %s arguments, got %v", DeadLetterExchange, ConsumerQueue, dlxArg)
 	}
 }

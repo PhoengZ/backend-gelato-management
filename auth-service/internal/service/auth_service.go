@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/mail"
@@ -104,11 +105,38 @@ func (s *authService) SignUp(ctx context.Context, input SignUpInput) (*model.Use
 		Role:         model.RoleCustomer,
 		Status:       model.UserStatusActive,
 	}
-	if err := s.repository.Create(ctx, user); err != nil {
-		if errors.Is(err, repository.ErrEmailAlreadyExists) {
-			return nil, ErrEmailAlreadyExists
+
+	payload, err := json.Marshal(map[string]any{
+		"user_id":      user.ID,
+		"email":        user.Email,
+		"display_name": user.DisplayName,
+		"role":         user.Role,
+		"status":       user.Status,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("marshal outbox payload: %w", err)
+	}
+
+	event := &model.OutboxEvent{
+		ID:        uuid.New(),
+		EventType: "user.registered",
+		Payload:   payload,
+	}
+
+	if outboxRepo, ok := s.repository.(repository.OutboxUserRepository); ok {
+		if err := outboxRepo.CreateWithOutbox(ctx, user, event); err != nil {
+			if errors.Is(err, repository.ErrEmailAlreadyExists) {
+				return nil, ErrEmailAlreadyExists
+			}
+			return nil, fmt.Errorf("create account with outbox: %w", err)
 		}
-		return nil, fmt.Errorf("create account: %w", err)
+	} else {
+		if err := s.repository.Create(ctx, user); err != nil {
+			if errors.Is(err, repository.ErrEmailAlreadyExists) {
+				return nil, ErrEmailAlreadyExists
+			}
+			return nil, fmt.Errorf("create account: %w", err)
+		}
 	}
 	return user, nil
 }

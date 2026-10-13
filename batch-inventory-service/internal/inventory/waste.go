@@ -1,6 +1,7 @@
 package inventory
 
 import (
+	"batch-inventory-service/internal/service"
 	"context"
 	"encoding/json"
 	"github.com/google/uuid"
@@ -57,7 +58,13 @@ func (s *Service) Waste(ctx context.Context, batchID, actor string, in WasteInpu
 		if err != nil {
 			return result, err
 		}
-		return result, saveBatch(ctx, tx, b, t)
+		if err = saveBatch(ctx, tx, b, t); err != nil {
+			return result, err
+		}
+		if _, err = service.CheckAndNotifyLowStock(ctx, tx, b.FlavorID, t); err != nil {
+			return result, err
+		}
+		return result, nil
 	})
 }
 func (s *Service) recordWaste(ctx context.Context, tx pgx.Tx, b Batch, n int64, reason, note, actor, reservation string, t time.Time) (WasteRecord, error) {

@@ -1,0 +1,14 @@
+{
+  "specversion": "1.0",
+  "id": "c7a8b4e2-6d2f-48e1-95c3-1d4e5f6a7b8c",
+  "source": "/gelatoflow/batch-inventory-service",
+  "type": "com.gelatoflow.inventory.batch-low-stock.v1",
+  "time": "2026-10-13T10:00:00Z",
+  "datacontenttype": "application/json",
+  "data": {
+    "batch_id": "36d9f415-d169-447b-9f81-37075fb19cdd",
+    "flavor_id": "0f3bca11-1eb2-4a86-908a-e60d7656c79b",
+    "remaining_portions": 8,
+    "threshold_portions": 10
+  }
+}

@@ -8,6 +8,7 @@ import (
 	"log"
 
 	"catalog-service/internal/auth"
+	"catalog-service/internal/handler"
 	"catalog-service/internal/middleware"
 	"catalog-service/internal/repository"
 	"catalog-service/internal/service"
@@ -76,6 +77,7 @@ func (h *CatalogHandler) Create(c *fiber.Ctx) error {
 	if err != nil {
 		return handleServiceError(c, err)
 	}
+	handler.LogAudit(c, "CREATE", flavor.ID.String(), flavor.Name)
 	return c.Status(fiber.StatusCreated).JSON(flavor)
 }
 
@@ -92,6 +94,7 @@ func (h *CatalogHandler) Update(c *fiber.Ctx) error {
 	if err != nil {
 		return handleServiceError(c, err)
 	}
+	handler.LogAudit(c, "UPDATE", flavor.ID.String(), flavor.Name)
 	return c.Status(fiber.StatusOK).JSON(flavor)
 }
 
@@ -108,6 +111,7 @@ func (h *CatalogHandler) Replace(c *fiber.Ctx) error {
 	if err != nil {
 		return handleServiceError(c, err)
 	}
+	handler.LogAudit(c, "REPLACE", flavor.ID.String(), flavor.Name)
 	return c.Status(fiber.StatusOK).JSON(flavor)
 }
 
@@ -119,6 +123,7 @@ func (h *CatalogHandler) Archive(c *fiber.Ctx) error {
 	if err := h.service.Archive(c.UserContext(), id); err != nil {
 		return handleServiceError(c, err)
 	}
+	handler.LogAudit(c, "DELETE", id.String(), "archived")
 	return c.SendStatus(fiber.StatusNoContent)
 }
 

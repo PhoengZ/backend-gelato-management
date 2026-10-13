@@ -11,6 +11,9 @@ type Config struct {
 	Port        string
 	DatabaseURL string
 	RabbitMQURL string // optional: leave empty to run without a broker
+	JWTSecret   string
+	JWTIssuer   string
+	JWTAudience string
 }
 
 // Load reads a .env file if present, then falls back to real env vars.
@@ -21,6 +24,9 @@ func Load() Config {
 		Port:        getEnv("PORT", "8080"),
 		DatabaseURL: getEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/fulfillment?sslmode=disable"),
 		RabbitMQURL: getEnv("RABBITMQ_URL", ""), // empty = messaging disabled
+		JWTSecret:   getEnv("JWT_SECRET", "development_only_change_this_secret_32_bytes"),
+		JWTIssuer:   getEnv("JWT_ISSUER", "gelatoflow-auth"),
+		JWTAudience: getEnv("JWT_AUDIENCE", "gelatoflow-api"),
 	}
 }
 

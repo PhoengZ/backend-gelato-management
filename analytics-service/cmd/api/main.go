@@ -12,6 +12,7 @@ import (
 	"analytics-service/internal/client"
 	"analytics-service/internal/handler"
 	"analytics-service/internal/messaging"
+	"analytics-service/internal/middleware"
 	"analytics-service/internal/repository"
 	"analytics-service/internal/router"
 	"analytics-service/internal/service"
@@ -64,7 +65,8 @@ func main() {
 	app := fiber.New(fiber.Config{
 		ErrorHandler: handler.CustomErrorHandler,
 	})
-	router.SetupRoutes(app, svc)
+	verifier := middleware.NewVerifier(cfg.JWTSecret, cfg.JWTIssuer, cfg.JWTAudience)
+	router.SetupRoutes(app, svc, verifier)
 
 	// Start server gracefully
 	go func() {

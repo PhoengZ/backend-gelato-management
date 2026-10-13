@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gelatoflow.example/contracts/events/inventory-expiring.v1.schema.json",
+  "title": "GelatoFlow BatchExpiring v1 CloudEvent",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "specversion",
+    "id",
+    "source",
+    "type",
+    "time",
+    "datacontenttype",
+    "data"
+  ],
+  "properties": {
+    "specversion": {
+      "const": "1.0"
+    },
+    "id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "source": {
+      "const": "/gelatoflow/batch-inventory-service"
+    },
+    "type": {
+      "enum": [
+        "com.gelatoflow.inventory.batch-expiring.v1",
+        "com.gelatoflow.inventory.expiring.v1"
+      ]
+    },
+    "time": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "datacontenttype": {
+      "const": "application/json"
+    },
+    "traceparent": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$",
+      "description": "Optional W3C trace context. Scheduled expiry jobs may have no inbound trace."
+    },
+    "data": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "batch_id",
+        "flavor_id",
+        "expires_at"
+      ],
+      "properties": {
+        "batch_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "flavor_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    }
+  }
+}
