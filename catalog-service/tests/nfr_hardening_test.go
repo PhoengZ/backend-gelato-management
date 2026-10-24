@@ -2,7 +2,9 @@ package tests
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"net/http"
@@ -20,11 +22,13 @@ import (
 )
 
 func TestNFR11RESTFlavorCreateIdempotency(t *testing.T) {
-	catalog := service.NewCatalogService(newMemoryFlavorRepository())
+	repo, client, _ := redisRepositoryForTest(t)
+	catalog := service.NewCatalogService(repo)
 	app := newCatalogHandlerApp(catalog)
 	managerToken := handlerToken(t, auth.RoleManager)
 
 	idemKey := uuid.NewString()
+	t.Cleanup(func() { _ = client.Del(context.Background(), "idempotency:"+idemKey).Err() })
 	payload1 := `{"name":"Pistachio Gelato","description":"Authentic Sicilian pistachio","price":{"amount_minor":8500,"currency":"THB"},"allergens":["TREE_NUT"],"recipe":"pistachio paste; milk"}`
 
 	// 1. Initial POST request with Idempotency-Key
@@ -107,8 +111,9 @@ func TestNFR11RESTFlavorCreateIdempotency(t *testing.T) {
 
 func TestNFR08ActorAttributionAndAuditLogging(t *testing.T) {
 	var logBuf bytes.Buffer
+	previous := log.Writer()
 	log.SetOutput(&logBuf)
-	defer log.SetOutput(log.Writer())
+	defer log.SetOutput(previous)
 
 	catalog := service.NewCatalogService(newMemoryFlavorRepository())
 	app := newCatalogHandlerApp(catalog)
@@ -157,6 +162,27 @@ func TestNFR08ActorAttributionAndAuditLogging(t *testing.T) {
 	logs = logBuf.String()
 	if !strings.Contains(logs, "[AUDIT]") || !strings.Contains(logs, "actor_id="+actorID) || !strings.Contains(logs, "action=DELETE") {
 		t.Errorf("expected DELETE audit log with actor %s, got: %s", actorID, logs)
+	}
+}
+
+func TestNFR07MutationAndFailureLogsExcludeFreeformData(t *testing.T) {
+	var output bytes.Buffer
+	previous := log.Writer()
+	log.SetOutput(&output)
+	defer log.SetOutput(previous)
+	manager := handlerToken(t, auth.RoleManager)
+	app := newCatalogHandlerApp(service.NewCatalogService(newMemoryFlavorRepository()))
+	createBody := `{"name":"private-person@example.invalid\ninjected-log-record","description":"private-description","price":{"amount_minor":5500,"currency":"THB"},"allergens":[],"recipe":"private-recipe"}`
+	catalogRequest(t, app, http.MethodPost, "/api/v1/flavors", createBody, manager, fiber.StatusCreated)
+	failed := newCatalogHandlerApp(&stubCatalogService{createErr: errors.New("private-person@example.invalid private-storage-secret")})
+	catalogRequest(t, failed, http.MethodPost, "/api/v1/flavors", replacementJSON, manager, fiber.StatusInternalServerError)
+	for _, value := range []string{"private-", "example.invalid", "injected-log-record", manager} {
+		if strings.Contains(output.String(), value) {
+			t.Fatalf("freeform input/error reached log: %s", output.String())
+		}
+	}
+	if !strings.Contains(output.String(), "[AUDIT]") || !strings.Contains(output.String(), "catalog request failed") {
+		t.Fatal("operational receipts disappeared")
 	}
 }
 

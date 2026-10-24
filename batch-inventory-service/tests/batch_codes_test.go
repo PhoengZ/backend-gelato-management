@@ -114,7 +114,7 @@ func TestConcurrentBatchCodeUniqueness(t *testing.T) {
 		in := inventory.CreateInput{BatchCode: &code, FlavorID: uuid.NewString(), ProductionDate: time.Now().UTC().Format("2006-01-02"), ExpiresAt: time.Now().Add(time.Hour), Initial: 4, UnitCost: &cost, Currency: "THB"}
 		go func() {
 			<-start
-			_, err := s.Create(ctx, in)
+			_, err := s.Create(inventory.WithActor(ctx, uuid.NewString(), "MANAGER"), in)
 			results <- err
 		}()
 	}

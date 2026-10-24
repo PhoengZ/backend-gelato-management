@@ -52,6 +52,10 @@ shared Compose, gRPC contracts or event payloads.
 
 ## Local setup
 
+See [owned NFR evidence, actor migration and TLS setup](NFR.md) for migration
+005, verified production attribution and optional inbound/outbound TLS. Public
+request/response contracts and teammate clients are unchanged.
+
 Use the existing Inventory PostgreSQL on host port 5434, and run Catalog with
 its gRPC listener on 127.0.0.1:50052. Copy `.env.example` to `.env`, replace the
 credentials, then export it in your shell (the executable does not load files):
@@ -66,7 +70,11 @@ go run ./cmd/api
 
 The default REST port is 3004, matching Gateway's existing Inventory target.
 The gRPC default is 127.0.0.1:50051. `GET /health` checks liveness; `GET /ready`
-checks PostgreSQL connectivity. Catalog/RabbitMQ failures do not remove access
+checks PostgreSQL connectivity, every embedded forward migration marker and the
+batch-code/alert columns used by this binary. Startup checks the same invariant
+before opening listeners; an old or inconsistent schema fails startup and `/ready`
+returns `503` if drift appears later. Run the updated migrator, including
+`000004` and `005_movement_actor.sql`, before starting this binary. Catalog/RabbitMQ failures do not remove access
 to existing stock: batch creation fails if Catalog is down, and outbox work waits
 if RabbitMQ is down. Migrations run explicitly before startup, never implicitly
 inside request handling. They are embedded, versioned and transactionally locked.

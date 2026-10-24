@@ -1,6 +1,8 @@
 package config
 
 import (
+	"auth-service/internal/transportsecurity"
+	"crypto/tls"
 	"fmt"
 	"os"
 	"strconv"
@@ -13,6 +15,7 @@ import (
 const minimumJWTSecretBytes = 32
 
 type Config struct {
+	HTTPTLS        *tls.Config
 	Port           string
 	DatabaseURL    string
 	JWTSecret      string
@@ -64,6 +67,9 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("REQUEST_TIMEOUT must be positive and at most 30s")
 	}
 	cfg.RequestTimeout = timeout
+	if cfg.HTTPTLS, err = transportsecurity.ServerFromEnv("HTTP_TLS"); err != nil {
+		return Config{}, err
+	}
 
 	return cfg, nil
 }

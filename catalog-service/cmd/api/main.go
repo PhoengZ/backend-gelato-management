@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"log"
 	"os"
 	"os/signal"
@@ -20,14 +20,18 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/redis/go-redis/v9"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/grpclog"
 )
 
 func main() {
 	log.SetOutput(logging.NewRedactorWriter(os.Stderr))
+	grpclog.SetLoggerV2(logging.NewGRPCLogger(os.Stderr))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if err := run(ctx); err != nil {
-		log.Fatal(err)
+		log.Fatalf("Catalog startup/serving failed: error_type=%T", err)
 	}
 }
 
@@ -39,7 +43,7 @@ func run(ctx context.Context) error {
 
 	redisOptions, err := redis.ParseURL(cfg.RedisURL)
 	if err != nil {
-		return fmt.Errorf("configure Redis: %w", err)
+		return errors.New("configure Redis failed; check Redis URL configuration")
 	}
 	redisOptions.ContextTimeoutEnabled = true
 	redisClient := redis.NewClient(redisOptions)
@@ -48,11 +52,14 @@ func run(ctx context.Context) error {
 	startupCtx, cancelStartup := context.WithTimeout(ctx, 10*time.Second)
 	defer cancelStartup()
 	if err := redisClient.Ping(startupCtx).Err(); err != nil {
-		return fmt.Errorf("connect to Redis: %w", err)
+		return errors.New("connect to Redis failed; check storage connectivity")
 	}
 
 	verifier := auth.NewVerifier(cfg.JWTSecret, cfg.JWTIssuer, cfg.JWTAudience)
 	flavors := repository.NewRedisFlavorRepository(redisClient, cfg.RedisKeyPrefix)
+	if err := flavors.PrepareIdempotency(startupCtx); err != nil {
+		return errors.New("prepare Catalog idempotency storage failed; check storage access")
+	}
 	catalogService := service.NewCatalogService(flavors)
 
 	app := fiber.New(fiber.Config{
@@ -69,6 +76,10 @@ func run(ctx context.Context) error {
 
 	router.Setup(app, catalogService, verifier, cfg.RequestTimeout, redisClient)
 
-	grpcServer := cataloggrpc.NewServer(catalogService, verifier, cfg.RequestTimeout)
-	return server.ListenAndServe(ctx, ":"+cfg.Port, cfg.GRPCAddr, app, grpcServer, 5*time.Second)
+	var options []grpc.ServerOption
+	if cfg.GRPCTLS != nil {
+		options = append(options, grpc.Creds(credentials.NewTLS(cfg.GRPCTLS)))
+	}
+	grpcServer := cataloggrpc.NewServer(catalogService, verifier, cfg.RequestTimeout, options...)
+	return server.ListenAndServeTLS(ctx, ":"+cfg.Port, cfg.GRPCAddr, app, grpcServer, 5*time.Second, cfg.HTTPTLS)
 }

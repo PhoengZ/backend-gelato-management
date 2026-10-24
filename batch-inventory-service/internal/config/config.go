@@ -1,6 +1,8 @@
 package config
 
 import (
+	"batch-inventory-service/internal/transportsecurity"
+	"crypto/tls"
 	"fmt"
 	"net"
 	"net/url"
@@ -11,6 +13,7 @@ import (
 )
 
 type Config struct {
+	HTTPTLS, GRPCTLS, CatalogTLS                                                                           *tls.Config
 	HTTPAddr, GRPCAddr, DatabaseURL, CatalogAddr, JWTSecret, JWTIssuer, JWTAudience, OrderToken, RabbitURL string
 	RequestTimeout, ReservationTTL, SweepInterval                                                          time.Duration
 	PublishEvents                                                                                          bool
@@ -64,6 +67,15 @@ func Load() (Config, error) {
 		if e != nil || u.Host == "" || (u.Scheme != "amqp" && u.Scheme != "amqps") {
 			return c, fmt.Errorf("RABBITMQ_URL required when publishing is enabled")
 		}
+	}
+	if c.HTTPTLS, e = transportsecurity.ServerFromEnv("HTTP_TLS"); e != nil {
+		return c, e
+	}
+	if c.GRPCTLS, e = transportsecurity.ServerFromEnv("GRPC_TLS"); e != nil {
+		return c, e
+	}
+	if c.CatalogTLS, e = transportsecurity.ClientFromEnv(); e != nil {
+		return c, e
 	}
 	return c, nil
 }

@@ -4,6 +4,7 @@ package migrations
 import (
 	"context"
 	"embed"
+	"errors"
 	"fmt"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"sort"
@@ -12,6 +13,39 @@ import (
 
 //go:embed *.sql
 var files embed.FS
+
+var ErrNotReady = errors.New("run Inventory migrations before starting service")
+
+// CheckReady requires every forward migration embedded in this binary, while
+// accepting additional markers written by newer binaries. Probe the actual
+// columns as well so a stale/incorrect marker cannot advertise readiness.
+func CheckReady(ctx context.Context, pool *pgxpool.Pool) error {
+	entries, err := files.ReadDir(".")
+	if err != nil {
+		return ErrNotReady
+	}
+	var required []string
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".sql") && !strings.HasSuffix(entry.Name(), ".down.sql") {
+			required = append(required, entry.Name())
+		}
+	}
+	var complete bool
+	if err := pool.QueryRow(ctx, "SELECT count(*)=$2 FROM inventory_schema_migrations WHERE version=ANY($1::text[])", required, len(required)).Scan(&complete); err != nil || !complete {
+		return ErrNotReady
+	}
+	for _, query := range []string{"SELECT batch_code,low_stock_notified_at,expiring_notified_at FROM batches LIMIT 0", "SELECT actor_id,actor_role FROM inventory_movements LIMIT 0"} {
+		rows, err := pool.Query(ctx, query)
+		if err != nil {
+			return ErrNotReady
+		}
+		rows.Close()
+		if rows.Err() != nil {
+			return ErrNotReady
+		}
+	}
+	return nil
+}
 
 func parseVersion(name string) int {
 	var v int

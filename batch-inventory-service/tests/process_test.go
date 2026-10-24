@@ -32,16 +32,29 @@ func address(t *testing.T) string {
 	return a
 }
 func startProcess(t *testing.T, bin, dsn string) (pb.InventoryServiceClient, func()) {
+	client, stop, _ := startProcessOptions(t, bin, dsn, nil, "")
+	return client, stop
+}
+
+func startProcessOptions(t *testing.T, bin, dsn string, extraEnv []string, outputPath string) (pb.InventoryServiceClient, func(), string) {
 	t.Helper()
 	httpAddr, grpcAddr := address(t), address(t)
 	logfile, err := os.CreateTemp(t.TempDir(), "inventory-process")
 	if err != nil {
 		t.Fatal(err)
 	}
+	if outputPath != "" {
+		logfile.Close()
+		logfile, err = os.Create(outputPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	t.Cleanup(func() { logfile.Close() })
 	cmd := exec.Command(bin)
 	cmd.Env = append(os.Environ(), "DATABASE_URL="+dsn, "HTTP_ADDR="+httpAddr, "GRPC_ADDR="+grpcAddr, "CATALOG_GRPC_ADDR=127.0.0.1:50052", "JWT_SECRET="+jwtSecret, "ORDER_SERVICE_TOKEN="+serviceToken, "JWT_ISSUER=gelatoflow-auth", "JWT_AUDIENCE=gelatoflow-api", "PUBLISH_EVENTS=false", "SWEEP_INTERVAL=100ms", "REQUEST_TIMEOUT=2s", "RESERVATION_TTL=1m")
 	cmd.Stdout = logfile
+	cmd.Env = append(cmd.Env, extraEnv...)
 	cmd.Stderr = logfile
 	if err = cmd.Start(); err != nil {
 		t.Fatal(err)
@@ -95,7 +108,7 @@ func startProcess(t *testing.T, bin, dsn string) (pb.InventoryServiceClient, fun
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { conn.Close() })
-	return pb.NewInventoryServiceClient(conn), stop
+	return pb.NewInventoryServiceClient(conn), stop, grpcAddr
 }
 func TestTwoProcessesAndRestartPreserveReservation(t *testing.T) {
 	s, dsn := fixture(t)

@@ -114,8 +114,8 @@ func TestCatalogHTTPRedisLifecycle(t *testing.T) {
 }
 
 func TestRedisConcurrentRenamesRejectStaleWritesAndPreserveIndexes(t *testing.T) {
-	repo, _, _ := redisRepositoryForTest(t)
-	ctx := context.Background()
+	repo, client, prefix := redisRepositoryForTest(t)
+	ctx := repositoryManagerContext(context.Background())
 	original := redisTestFlavor("Original")
 	if err := repo.Create(ctx, original); err != nil {
 		t.Fatal(err)
@@ -146,6 +146,9 @@ func TestRedisConcurrentRenamesRejectStaleWritesAndPreserveIndexes(t *testing.T)
 	}
 	if successes != 1 || conflicts != 1 {
 		t.Fatalf("success=%d conflict=%d", successes, conflicts)
+	}
+	if count := len(readAuditDocuments(t, client, prefix, original.ID.String())); count != 2 {
+		t.Fatalf("CAS loser must not append an audit event: got %d records", count)
 	}
 	winner, err := repo.FindByID(ctx, original.ID)
 	if err != nil {

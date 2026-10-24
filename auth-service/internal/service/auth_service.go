@@ -161,8 +161,11 @@ func (s *authService) Login(ctx context.Context, input LoginInput) (*AuthResult,
 		_ = s.comparePassword(s.dummyHash, []byte(input.Password))
 		return nil, ErrInvalidCredentials
 	}
-	if s.comparePassword([]byte(user.PasswordHash), []byte(input.Password)) != nil {
-		return nil, ErrInvalidCredentials
+	if err := s.comparePassword([]byte(user.PasswordHash), []byte(input.Password)); err != nil {
+		if errors.Is(err, bcrypt.ErrMismatchedHashAndPassword) {
+			return nil, ErrInvalidCredentials
+		}
+		return nil, fmt.Errorf("credential verification unavailable: %w", err)
 	}
 
 	accessToken, err := s.tokens.Issue(user)

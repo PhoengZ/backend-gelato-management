@@ -3,8 +3,10 @@ package logging
 import (
 	"bytes"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gofiber/fiber/v2"
@@ -159,5 +161,55 @@ func TestRedactorLoggerMiddleware(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	if string(body) != "ok" {
 		t.Fatalf("expected 'ok', got %q", string(body))
+	}
+}
+
+func TestRequestLoggerExcludesUntrustedInputs(t *testing.T) {
+	for _, target := range []string{
+		"/api/v1/flavors?email=student%40example.invalid&token=private-token",
+		"/api/v1/flavors?%65mail=student%2540example.invalid&unknown=private-value",
+		"/api/v1/flavors/student%40example.invalid",
+		"/unknown/student%40example.invalid?name=private-name",
+	} {
+		t.Run(target, func(t *testing.T) {
+			var output bytes.Buffer
+			previous := log.Writer()
+			log.SetOutput(NewRedactorWriter(&output))
+			defer log.SetOutput(previous)
+			app := fiber.New()
+			app.Use(RedactorLoggerMiddleware())
+			app.Get("/api/v1/flavors", func(c *fiber.Ctx) error { return c.SendStatus(200) })
+			app.Get("/api/v1/flavors/:flavor_id", func(c *fiber.Ctx) error { return c.SendStatus(400) })
+			request := httptest.NewRequest(http.MethodGet, target, nil)
+			request.Header.Set("Authorization", "Basic private-credential")
+			request.Header.Set("X-Payment-Service-Token", "private-machine-token")
+			response, err := app.Test(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			response.Body.Close()
+			text := output.String()
+			for _, secret := range []string{"student", "example.invalid", "private-", "email=", "%65mail", "?", "auth="} {
+				if strings.Contains(text, secret) {
+					t.Errorf("request input %q reached operational log: %s", secret, text)
+				}
+			}
+			if !strings.Contains(text, "[GET]") || !strings.Contains(text, "status=") || !strings.Contains(text, "duration=") {
+				t.Errorf("bounded operational fields are missing: %s", text)
+			}
+		})
+	}
+}
+
+func TestHTTP2FrameDiagnosticsDoNotCopyProtocolContents(t *testing.T) {
+	var output bytes.Buffer
+	writer := NewRedactorWriter(&output)
+	input := []byte(`http2: decoded hpack field header field "x-private-bin" = "private-person@example.invalid"`)
+	n, err := writer.Write(input)
+	if err != nil || n != len(input) {
+		t.Fatalf("writer failed: %d %v", n, err)
+	}
+	if !strings.Contains(output.String(), "[HTTP2]") || strings.Contains(output.String(), "private-") || strings.Contains(output.String(), "example.invalid") {
+		t.Fatal(output.String())
 	}
 }

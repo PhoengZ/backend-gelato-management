@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"catalog-service/internal/audit"
 	"catalog-service/internal/model"
 	"catalog-service/internal/repository"
 
@@ -29,6 +30,7 @@ func TestRedisFlavorRepository(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
+	ctx = repositoryManagerContext(ctx)
 	if err := client.Ping(ctx).Err(); err != nil {
 		t.Fatalf("connect to Redis: %v", err)
 	}
@@ -96,6 +98,7 @@ func TestRedisCreateIsAtomicForConcurrentDuplicateNames(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
+	ctx = repositoryManagerContext(ctx)
 	var successes atomic.Int32
 	var conflicts atomic.Int32
 	var unexpected atomic.Int32
@@ -119,6 +122,10 @@ func TestRedisCreateIsAtomicForConcurrentDuplicateNames(t *testing.T) {
 	if successes.Load() != 1 || conflicts.Load() != 11 || unexpected.Load() != 0 {
 		t.Fatalf("expected 1 success and 11 conflicts, got success=%d conflict=%d unexpected=%d", successes.Load(), conflicts.Load(), unexpected.Load())
 	}
+}
+
+func repositoryManagerContext(ctx context.Context) context.Context {
+	return audit.WithActor(ctx, "76ea43cb-42fa-44c8-bb0f-168769632a7d", "MANAGER")
 }
 
 func redisTestFlavor(name string) *model.FlavorAdmin {

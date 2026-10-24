@@ -6,6 +6,7 @@ import (
 	"time"
 
 	pb "catalog-service/gen/catalog/v1"
+	"catalog-service/internal/audit"
 	"catalog-service/internal/auth"
 	"catalog-service/internal/service"
 
@@ -32,6 +33,7 @@ func interceptor(verifier *auth.Verifier, timeout time.Duration) grpc.UnaryServe
 				return nil, unauthenticated()
 			}
 			ctx = context.WithValue(ctx, identityKey{}, claims)
+			ctx = audit.WithActor(ctx, claims.Subject, string(claims.Role))
 		}
 		switch info.FullMethod {
 		case pb.CatalogService_GetFlavor_FullMethodName,

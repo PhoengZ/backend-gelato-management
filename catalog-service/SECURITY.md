@@ -1,5 +1,37 @@
 # Catalog security review — 2026-09-09
 
+## Privacy and committed-mutation audit - 2026-10-24
+
+The request logger uses a bounded method/route/status/duration schema. It never
+copies raw paths, query parameters, Authorization contents, other headers, or
+bodies. This covers unknown/rejected routes, encoded query names/values and
+non-Bearer credentials without depending on a regex recognizing them. Mutation
+receipts contain only canonical verified actor/resource UUIDs and fixed actions;
+freeform flavor names and recipes are excluded. Runtime storage errors and Redis
+URL configuration failures do not echo underlying values into application logs.
+The separate gRPC library logger records only severity and source call site,
+including optional diagnostic modes that would otherwise log malformed metadata
+and unsupported content subtypes before authentication. A real-process HTTP/2
+regression test exercises both of those unauthenticated inputs.
+It also enables HTTP/2 frame debugging; standard-logger protocol dumps are
+reduced to bounded diagnostic events without retaining decoded header values.
+
+Both transports propagate the locally verified JWT subject through a private
+typed context. Repository writes fail without a valid Manager audit identity.
+The same create/CAS Lua operation appends the durable per-flavor Redis audit list
+and changes Catalog data/indexes. Key-type and Redis 7 command/key-permission
+checks run before writes, including the new audit append, because a runtime Lua
+error does not roll back earlier commands. Conflicts and failed authorization or
+validation do not add committed history. Identical PUTs/repeated archives retain
+their existing no-op behavior. Records retain before/after allergens/active and
+changed field names, not names, recipe text, URLs or credentials.
+
+See `tests/catalog_audit_integration_test.go`, the logging/audit package tests,
+`tests/nfr_hardening_test.go`, and the process-restart test for regression cases.
+Redis AOF/volumes, backups and restricted administrative access remain deployment
+responsibilities. Existing history is not reconstructed, and the application
+ledger is append-only rather than tamper-proof against a Redis administrator.
+
 ## gRPC extension — 2026-09-27
 
 The gRPC transport reuses the JWT verifier and application rules. Unary

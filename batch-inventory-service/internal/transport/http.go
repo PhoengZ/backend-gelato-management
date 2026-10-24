@@ -3,6 +3,7 @@ package transport
 import (
 	"batch-inventory-service/internal/auth"
 	"batch-inventory-service/internal/inventory"
+	"batch-inventory-service/migrations"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -137,7 +138,9 @@ func NewHTTP(svc *inventory.Service, v *auth.Verifier, timeout time.Duration) ht
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) { reply(w, 200, map[string]string{"status": "ok"}) })
 	mux.HandleFunc("GET /ready", func(w http.ResponseWriter, r *http.Request) {
-		if err := svc.DB.Ping(r.Context()); err != nil {
+		ctx, cancel := context.WithTimeout(r.Context(), timeout)
+		defer cancel()
+		if err := migrations.CheckReady(ctx, svc.DB); err != nil {
 			reply(w, 503, map[string]string{"status": "unavailable"})
 			return
 		}
@@ -168,6 +171,7 @@ func NewHTTP(svc *inventory.Service, v *auth.Verifier, timeout time.Duration) ht
 				authFailure(w, 403)
 				return
 			}
+			r = r.WithContext(inventory.WithActor(r.Context(), claims.Subject, string(claims.Role)))
 			fn(w, r, claims)
 		}
 	}

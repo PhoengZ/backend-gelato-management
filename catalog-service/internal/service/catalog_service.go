@@ -11,6 +11,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"catalog-service/internal/audit"
+	"catalog-service/internal/idempotency"
 	"catalog-service/internal/model"
 	"catalog-service/internal/repository"
 
@@ -103,12 +105,30 @@ func (s *catalogService) Create(ctx context.Context, input CreateFlavorInput) (*
 		},
 		Recipe: recipe,
 	}
-	if err := s.repository.Create(ctx, flavor); err != nil {
+	var createErr error
+	if request, ok := idempotency.FromContext(ctx); ok {
+		atomicRepo, supported := s.repository.(interface {
+			CreateIdempotent(context.Context, *model.FlavorAdmin, idempotency.Request) (*model.FlavorAdmin, bool, error)
+		})
+		if !supported {
+			return nil, idempotency.ErrUnavailable
+		}
+		var replayed bool
+		flavor, replayed, createErr = atomicRepo.CreateIdempotent(ctx, flavor, request)
+		if createErr == nil && replayed {
+			flavor.IdempotentReplay = true
+			return flavor, nil
+		}
+	} else {
+		createErr = s.repository.Create(ctx, flavor)
+	}
+	if err := createErr; err != nil {
 		if errors.Is(err, repository.ErrNameConflict) {
 			return nil, ErrNameConflict
 		}
 		return nil, fmt.Errorf("create flavor: %w", err)
 	}
+	audit.LogCommitted(ctx, audit.Create, flavor.ID)
 	return flavor, nil
 }
 
@@ -225,7 +245,7 @@ func (s *catalogService) Update(ctx context.Context, id uuid.UUID, input UpdateF
 	}
 	record.UpdatedAt = now
 
-	if err := s.repository.Update(ctx, &previous, record); err != nil {
+	if err := s.repository.Update(audit.WithAction(ctx, audit.Update), &previous, record); err != nil {
 		switch {
 		case errors.Is(err, repository.ErrFlavorNotFound):
 			return nil, ErrFlavorNotFound
@@ -235,6 +255,7 @@ func (s *catalogService) Update(ctx context.Context, id uuid.UUID, input UpdateF
 			return nil, fmt.Errorf("update flavor: %w", err)
 		}
 	}
+	audit.LogCommitted(ctx, audit.Update, record.ID)
 	return record, nil
 }
 
@@ -269,9 +290,10 @@ func (s *catalogService) Replace(ctx context.Context, id uuid.UUID, input Replac
 		now = previous.UpdatedAt.Add(time.Millisecond)
 	}
 	replacement.UpdatedAt = now
-	if err := s.repository.Update(ctx, previous, replacement); err != nil {
+	if err := s.repository.Update(audit.WithAction(ctx, audit.Replace), previous, replacement); err != nil {
 		return nil, fmt.Errorf("replace flavor: %w", err)
 	}
+	audit.LogCommitted(ctx, audit.Replace, replacement.ID)
 	return replacement, nil
 }
 
@@ -290,12 +312,13 @@ func (s *catalogService) Archive(ctx context.Context, id uuid.UUID) error {
 		now = previous.UpdatedAt.Add(time.Millisecond)
 	}
 	record.UpdatedAt = now
-	if err := s.repository.Update(ctx, &previous, record); err != nil {
+	if err := s.repository.Update(audit.WithAction(ctx, audit.Archive), &previous, record); err != nil {
 		if errors.Is(err, repository.ErrFlavorNotFound) {
 			return ErrFlavorNotFound
 		}
 		return fmt.Errorf("archive flavor: %w", err)
 	}
+	audit.LogCommitted(ctx, audit.Archive, record.ID)
 	return nil
 }
 

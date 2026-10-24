@@ -23,14 +23,14 @@ func main() {
 	defer cancel()
 	pool, err := pgxpool.New(ctx, databaseURL)
 	if err != nil {
-		log.Fatalf("configure PostgreSQL: %v", err)
+		log.Fatalf("configure PostgreSQL failed: error_type=%T", err)
 	}
 	defer pool.Close()
 	if err := pool.Ping(ctx); err != nil {
-		log.Fatalf("connect to PostgreSQL: %v", err)
+		log.Fatalf("connect to PostgreSQL failed: error_type=%T", err)
 	}
 	if err := migrations.Up(ctx, pool); err != nil {
-		log.Fatal(err)
+		log.Fatalf("run migrations failed: error_type=%T", err)
 	}
 	log.Println("Auth Service migrations are up to date")
 }

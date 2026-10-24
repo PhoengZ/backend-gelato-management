@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -23,6 +26,103 @@ type mockAuthService struct {
 	signUpFunc       func(ctx context.Context, input service.SignUpInput) (*model.User, error)
 	loginFunc        func(ctx context.Context, input service.LoginInput) (*service.AuthResult, error)
 	getCurrentUserFn func(ctx context.Context, id uuid.UUID) (*model.User, error)
+}
+
+func TestSharedPeerFailuresDoNotLockIndependentAccount(t *testing.T) {
+	user := &model.User{ID: uuid.New(), Email: "innocent@example.com", Role: model.RoleCustomer, Status: model.UserStatusActive}
+	svc := &mockAuthService{loginFunc: func(_ context.Context, input service.LoginInput) (*service.AuthResult, error) {
+		if input.Password != "correct-password" {
+			return nil, service.ErrInvalidCredentials
+		}
+		return &service.AuthResult{AccessToken: "valid-token", User: user}, nil
+	}}
+	app := setupTestApp(svc, middleware.NewRateLimiter(5, 15*time.Minute), audit.NewInMemoryAuditLogger())
+	for i := 0; i < 5; i++ {
+		req := httptest.NewRequest("POST", "/login", strings.NewReader(fmt.Sprintf(`{"email":"account%d@example.com","password":"wrong-password"}`, i)))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Forwarded-For", fmt.Sprintf("198.51.100.%d", i+1))
+		resp, err := app.Test(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != 401 {
+			t.Fatalf("failure %d returned %d", i, resp.StatusCode)
+		}
+	}
+	req := httptest.NewRequest("POST", "/login", strings.NewReader(`{"email":"innocent@example.com","password":"correct-password"}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("shared peer locked innocent account: %d", resp.StatusCode)
+	}
+}
+
+func TestOperationalFailuresDoNotConsumeCredentialLockout(t *testing.T) {
+	ops := true
+	user := &model.User{ID: uuid.New(), Email: "recover@example.com", Role: model.RoleCustomer, Status: model.UserStatusActive}
+	svc := &mockAuthService{loginFunc: func(context.Context, service.LoginInput) (*service.AuthResult, error) {
+		if ops {
+			return nil, errors.New("private-database-secret")
+		}
+		return &service.AuthResult{AccessToken: "valid-token", User: user}, nil
+	}}
+	logger := audit.NewInMemoryAuditLogger()
+	app := setupTestApp(svc, middleware.NewRateLimiter(5, 15*time.Minute), logger)
+	call := func(expected int) {
+		req := httptest.NewRequest("POST", "/login", strings.NewReader(`{"email":"recover@example.com","password":"correct-password"}`))
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := app.Test(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != expected {
+			t.Fatalf("want %d got %d", expected, resp.StatusCode)
+		}
+	}
+	for i := 0; i < 5; i++ {
+		call(500)
+	}
+	for _, record := range logger.Records() {
+		if record.EventType != audit.EventLoginError {
+			t.Fatalf("operational failure recorded as credentials: %+v", record)
+		}
+	}
+	ops = false
+	call(200)
+}
+
+type failingAuditLogger struct{ *audit.InMemoryAuditLogger }
+
+func (l failingAuditLogger) LogLoginSuccess(context.Context, uuid.UUID, string, string, map[string]any) error {
+	return errors.New("private-audit-secret")
+}
+
+func TestAuditWriteFailureHasBoundedOperationalDiagnostic(t *testing.T) {
+	var output bytes.Buffer
+	previous := log.Writer()
+	log.SetOutput(&output)
+	defer log.SetOutput(previous)
+	user := &model.User{ID: uuid.New(), Role: model.RoleCustomer}
+	svc := &mockAuthService{loginFunc: func(context.Context, service.LoginInput) (*service.AuthResult, error) {
+		return &service.AuthResult{AccessToken: "valid-token", User: user}, nil
+	}}
+	app := setupTestApp(svc, nil, failingAuditLogger{audit.NewInMemoryAuditLogger()})
+	req := httptest.NewRequest("POST", "/login", strings.NewReader(`{"email":"person@example.com","password":"correct-password"}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 200 || !strings.Contains(output.String(), "auth audit write failed: event=LOGIN_SUCCESS") || strings.Contains(output.String(), "private-audit-secret") {
+		t.Fatalf("audit failure not safely observed: %d %s", resp.StatusCode, output.String())
+	}
 }
 
 func (m *mockAuthService) SignUp(ctx context.Context, input service.SignUpInput) (*model.User, error) {

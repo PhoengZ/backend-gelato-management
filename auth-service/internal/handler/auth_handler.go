@@ -83,16 +83,15 @@ func (h *AuthHandler) SignUp(c *fiber.Ctx) error {
 
 	user, err := h.service.SignUp(c.UserContext(), input)
 	if err != nil {
-		h.rateLimiter.RecordFailure(ip, email)
 		return handleServiceError(c, err)
 	}
 
 	h.rateLimiter.Reset(ip, email)
-	_ = h.auditLogger.LogUserRegistered(c.UserContext(), user.ID, ip, userAgent, map[string]any{
+	h.reportAuditFailure(audit.EventUserRegistered, h.auditLogger.LogUserRegistered(c.UserContext(), user.ID, ip, userAgent, map[string]any{
 		"email":        user.Email,
 		"display_name": user.DisplayName,
 		"role":         string(user.Role),
-	})
+	}))
 
 	return c.Status(fiber.StatusCreated).JSON(user)
 }
@@ -108,8 +107,7 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 
 	email, err := service.NormalizeEmail(fields["email"])
 	if err != nil {
-		h.rateLimiter.RecordFailure(ip, "")
-		_ = h.auditLogger.LogLoginFailed(c.UserContext(), fields["email"], nil, ip, userAgent, "invalid_email_format")
+		h.reportAuditFailure(audit.EventLoginFailed, h.auditLogger.LogLoginFailed(c.UserContext(), "", nil, ip, userAgent, "invalid_email_format"))
 		return invalidCredentials(c)
 	}
 
@@ -134,19 +132,23 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 
 	result, err := h.service.Login(c.UserContext(), input)
 	if err != nil {
-		h.rateLimiter.RecordFailure(ip, email)
-		_ = h.auditLogger.LogLoginFailed(c.UserContext(), email, nil, ip, userAgent, "invalid_credentials")
 		if errors.Is(err, service.ErrInvalidCredentials) {
+			h.rateLimiter.RecordFailure(ip, email)
+			h.reportAuditFailure(audit.EventLoginFailed, h.auditLogger.LogLoginFailed(c.UserContext(), email, nil, ip, userAgent, "invalid_credentials"))
 			return invalidCredentials(c)
 		}
+		h.reportAuditFailure(audit.EventLoginError, h.auditLogger.Log(c.UserContext(), audit.AuditRecord{
+			EventType: audit.EventLoginError, IPAddress: ip, UserAgent: userAgent,
+			Metadata: map[string]any{"reason": "authentication_service_unavailable"},
+		}))
 		return handleServiceError(c, err)
 	}
 
 	h.rateLimiter.Reset(ip, email)
-	_ = h.auditLogger.LogLoginSuccess(c.UserContext(), result.User.ID, ip, userAgent, map[string]any{
+	h.reportAuditFailure(audit.EventLoginSuccess, h.auditLogger.LogLoginSuccess(c.UserContext(), result.User.ID, ip, userAgent, map[string]any{
 		"email": result.User.Email,
 		"role":  string(result.User.Role),
-	})
+	}))
 
 	return c.Status(fiber.StatusOK).JSON(result)
 }
@@ -172,11 +174,15 @@ func (h *AuthHandler) Me(c *fiber.Ctx) error {
 }
 
 func clientIP(c *fiber.Ctx) string {
-	ip := c.Context().RemoteIP().String()
-	if ip == "" {
-		ip = c.IP()
+	return middleware.PeerIP(c)
+}
+
+// Keep committed signup/login response semantics while explicitly surfacing
+// best-effort audit failures, without logging headers, email or raw DB errors.
+func (h *AuthHandler) reportAuditFailure(event string, err error) {
+	if err != nil {
+		log.Printf("auth audit write failed: event=%s error_type=%T", event, err)
 	}
-	return ip
 }
 
 // Credentials are a flat object of required strings. Token decoding avoids the
@@ -238,7 +244,7 @@ func handleServiceError(c *fiber.Ctx, err error) error {
 			"message": "An account with this email already exists",
 		})
 	default:
-		log.Printf("auth request failed: %v", err)
+		log.Printf("auth request failed: error_type=%T", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"code":    "INTERNAL_ERROR",
 			"message": "The request could not be completed",

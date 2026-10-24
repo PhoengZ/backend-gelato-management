@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"auth-service/internal/audit"
 	"auth-service/internal/auth"
 	"auth-service/internal/model"
 	"auth-service/internal/repository"
@@ -274,6 +275,49 @@ func TestAuthHTTPPostgresAccountLifecycle(t *testing.T) {
 	response, payload = doHardeningJSON(t, client, http.MethodGet, baseURL+"/me", "", "Bearer "+token)
 	if response.StatusCode != http.StatusUnauthorized || payload["code"] != "UNAUTHORIZED" {
 		t.Fatalf("disabled account retained me access: status=%d payload=%+v", response.StatusCode, payload)
+	}
+}
+
+func TestLongUserAgentsRetainSuccessAndFailureAuditRows(t *testing.T) {
+	pool := hardeningDatabase(t)
+	tokens := auth.NewTokenManager("test_secret_that_is_longer_than_32_bytes", "gelatoflow-auth", "gelatoflow-api", 15*time.Minute)
+	svc, err := service.NewAuthService(repository.NewPostgresUserRepository(pool), tokens, bcrypt.MinCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.SignUp(context.Background(), service.SignUpInput{Email: "audit-agent@example.com", Password: "correct-password", DisplayName: "Audit test"}); err != nil {
+		t.Fatal(err)
+	}
+	app := fiber.New()
+	router.Setup(app, svc, tokens, router.Options{AuditLogger: audit.NewPostgresAuditLogger(pool)})
+	base, client := serveHardeningHTTP(t, app)
+	for _, agent := range []string{strings.Repeat("A", 513), strings.Repeat("ก", 513)} {
+		for _, password := range []string{"correct-password", "wrong-password"} {
+			body := fmt.Sprintf(`{"email":"audit-agent@example.com","password":%q}`, password)
+			req, err := http.NewRequest("POST", base+"/api/v1/auth/login", strings.NewReader(body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("User-Agent", agent)
+			req.Header.Set("X-Forwarded-For", "203.0.113.10")
+			resp, err := client.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp.Body.Close()
+			expected := 200
+			if password == "wrong-password" {
+				expected = 401
+			}
+			if resp.StatusCode != expected {
+				t.Fatalf("long agent login failed: %d", resp.StatusCode)
+			}
+		}
+	}
+	var count int
+	if err := pool.QueryRow(context.Background(), "SELECT count(*) FROM auth_audit_logs WHERE event_type IN ('LOGIN_SUCCESS','LOGIN_FAILED') AND char_length(user_agent)=512 AND metadata->>'user_agent_truncated'='true' AND ip_address<>'203.0.113.10'").Scan(&count); err != nil || count != 4 {
+		t.Fatalf("audit rows lost or trusted spoofed IP: count=%d err=%v", count, err)
 	}
 }
 
