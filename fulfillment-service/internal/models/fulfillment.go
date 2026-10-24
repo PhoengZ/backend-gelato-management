@@ -52,6 +52,7 @@ type Item struct {
 type Fulfillment struct {
 	ID           uuid.UUID  `json:"id"`
 	OrderID      uuid.UUID  `json:"order_id"`
+	CustomerID   *uuid.UUID `json:"-"` // ownership check only; not part of the response contract
 	QueueNumber  string     `json:"queue_number"`
 	PickupSlotID uuid.UUID  `json:"pickup_slot_id"`
 	PickupAt     time.Time  `json:"pickup_at"`
@@ -74,7 +75,15 @@ type FulfillmentStatusHistory struct {
 	OldStatus     *Status    `json:"old_status,omitempty"`
 	NewStatus     Status     `json:"new_status"`
 	ActorID       *uuid.UUID `json:"actor_id,omitempty"`
+	SourceEventID *uuid.UUID `json:"source_event_id,omitempty"`
 	CreatedAt     time.Time  `json:"created_at"`
+}
+
+// ListFilter narrows the kitchen queue. Nil or empty fields do not filter.
+type ListFilter struct {
+	Statuses   []Status
+	PickupFrom *time.Time // inclusive
+	PickupTo   *time.Time // exclusive
 }
 
 // SlotCapacityResponse represents active ticket capacity for a 15-minute slot window.

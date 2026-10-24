@@ -110,7 +110,7 @@ Current topology:
 | `inventory_service` | Publish Inventory events | `inventory` exchange |
 | `order_service` | Publish Order events | `order` exchange |
 | `analytics_service` | Consume Order and Inventory events | `order`, `inventory`, `analytics_queue` |
-| `fulfillment_service` | Consume Order events, publish Fulfillment events | `order`, `fulfillment`, `fulfillment_queue` |
+| `fulfillment_service` | Consume Order events, publish Fulfillment events | `order`, `fulfillment`, `fulfillment_queue`, `fulfillment_queue_retry`, `fulfillment.dlx`, `fulfillment_queue_dlq` |
 | `notification_service` | Consume Order, Fulfillment and Inventory events | read `order`, `fulfillment`, `inventory`; own `notification_queue` |
 
 Analytics Service declares the topic exchanges and its queue at startup. Batch

@@ -25,18 +25,23 @@ func NewRelay(db *pgxpool.Pool, broker *Broker) *Relay {
 	return &Relay{db: db, broker: broker}
 }
 
-// Run flushes the outbox until ctx is cancelled.
-func (r *Relay) Run(ctx context.Context) {
+// Run flushes the outbox until ctx is cancelled. It returns an error once the
+// publish channel is closed so the caller can reconnect; other failures (such
+// as the database being unavailable) are retried on the next tick.
+func (r *Relay) Run(ctx context.Context) error {
 	ticker := time.NewTicker(relayInterval)
 	defer ticker.Stop()
 
 	for {
 		if err := r.flush(ctx); err != nil && ctx.Err() == nil {
+			if r.broker.pubCh.IsClosed() {
+				return err
+			}
 			log.Printf("[outbox] flush failed: %v", err)
 		}
 		select {
 		case <-ctx.Done():
-			return
+			return nil
 		case <-ticker.C:
 		}
 	}

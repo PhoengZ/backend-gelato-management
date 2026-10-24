@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -30,7 +31,43 @@ var slotNamespace = uuid.MustParse("6f1d3a52-7c0e-4b3e-9a55-2d1c8e4f7b10")
 
 const uniqueViolation = "23505"
 
-const selectCols = `id, order_id, queue_number, pickup_slot_id, pickup_at, status, items, picked_up_at, created_at, updated_at`
+// IsTransient reports whether err comes from the database being unreachable or
+// briefly unable to serve (connection loss, shutdown, overload, lock conflicts),
+// so retrying later can succeed without any change to the request.
+func IsTransient(err error) bool {
+	if err == nil {
+		return false
+	}
+	var connErr *pgconn.ConnectError
+	if errors.As(err, &connErr) || errors.Is(err, context.DeadlineExceeded) ||
+		pgconn.Timeout(err) || pgconn.SafeToRetry(err) {
+		return true
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		switch {
+		case strings.HasPrefix(pgErr.Code, "08"), // connection exception
+			strings.HasPrefix(pgErr.Code, "53"),                                 // insufficient resources
+			pgErr.Code == "57P01", pgErr.Code == "57P02", pgErr.Code == "57P03", // shutdown or not ready
+			pgErr.Code == "40001", pgErr.Code == "40P01": // serialization failure, deadlock
+			return true
+		}
+	}
+	return false
+}
+
+const selectCols = `id, order_id, customer_id, queue_number, pickup_slot_id, pickup_at, status, items, picked_up_at, created_at, updated_at`
+
+// listCols is selectCols qualified for queries that join pickup_slots (which also has id).
+const listCols = `f.id, f.order_id, f.customer_id, f.queue_number, f.pickup_slot_id, f.pickup_at, f.status, f.items, f.picked_up_at, f.created_at, f.updated_at`
+
+// Retention windows for PurgeExpired. The dedupe window is far longer than any
+// broker redelivery, so dropping older processed_events rows keeps idempotency.
+const (
+	OutboxRetention    = 7 * 24 * time.Hour
+	DedupeRetention    = 30 * 24 * time.Hour
+	TombstoneRetention = 30 * 24 * time.Hour
+)
 
 type contextKey string
 
@@ -60,7 +97,7 @@ func NewFulfillmentRepository(db *pgxpool.Pool) *FulfillmentRepository {
 func scanFulfillment(row pgx.Row) (models.Fulfillment, error) {
 	var f models.Fulfillment
 	var items []byte
-	err := row.Scan(&f.ID, &f.OrderID, &f.QueueNumber, &f.PickupSlotID, &f.PickupAt,
+	err := row.Scan(&f.ID, &f.OrderID, &f.CustomerID, &f.QueueNumber, &f.PickupSlotID, &f.PickupAt,
 		&f.Status, &items, &f.PickedUpAt, &f.CreatedAt, &f.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return models.Fulfillment{}, ErrNotFound
@@ -83,18 +120,21 @@ func (r *FulfillmentRepository) GetByOrderID(ctx context.Context, orderID uuid.U
 		`SELECT `+selectCols+` FROM fulfillments WHERE order_id = $1`, orderID))
 }
 
-// List returns tickets ordered by pickup slot then queue number. A nil or empty
-// statuses slice returns every status.
-func (r *FulfillmentRepository) List(ctx context.Context, statuses []models.Status) ([]models.Fulfillment, error) {
-	var filter []string
-	for _, s := range statuses {
-		filter = append(filter, string(s))
+// List returns tickets ordered by pickup slot then queue number. Empty filter
+// fields do not filter, so a zero ListFilter returns every ticket.
+func (r *FulfillmentRepository) List(ctx context.Context, filter models.ListFilter) ([]models.Fulfillment, error) {
+	var statuses []string
+	for _, s := range filter.Statuses {
+		statuses = append(statuses, string(s))
 	}
 
 	rows, err := r.db.Query(ctx, `
-		SELECT `+selectCols+` FROM fulfillments
-		WHERE ($1::text[] IS NULL OR status = ANY($1))
-		ORDER BY (SELECT starts_at FROM pickup_slots WHERE id = pickup_slot_id), queue_seq`, filter)
+		SELECT `+listCols+` FROM fulfillments f
+		JOIN pickup_slots s ON s.id = f.pickup_slot_id
+		WHERE ($1::text[] IS NULL OR f.status = ANY($1))
+		  AND ($2::timestamptz IS NULL OR f.pickup_at >= $2)
+		  AND ($3::timestamptz IS NULL OR f.pickup_at < $3)
+		ORDER BY s.starts_at, f.queue_seq`, statuses, filter.PickupFrom, filter.PickupTo)
 	if err != nil {
 		return nil, err
 	}
@@ -121,17 +161,43 @@ func markProcessed(ctx context.Context, tx pgx.Tx, eventID uuid.UUID) (duplicate
 	return tag.RowsAffected() == 0, nil
 }
 
-// CreateFromOrderPlaced creates the ticket for a paid order. It is idempotent:
-// a repeated event id, or a second event for the same order, is a no-op.
-func (r *FulfillmentRepository) CreateFromOrderPlaced(ctx context.Context, eventID uuid.UUID, d events.OrderPlacedData) error {
+// lockOrder serialises order.placed and order.cancelled for one order across
+// consumer replicas, so a ticket and a tombstone are never both written.
+func lockOrder(ctx context.Context, tx pgx.Tx, orderID uuid.UUID) error {
+	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))`, orderID)
+	return err
+}
+
+// CreateFromOrderPlaced creates the ticket for a paid order and reports whether
+// it did. It is idempotent: a repeated event id, a second event for the same
+// order, or an order already cancelled (tombstoned) is a no-op.
+func (r *FulfillmentRepository) CreateFromOrderPlaced(ctx context.Context, eventID uuid.UUID, d events.OrderPlacedData) (created bool, err error) {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer tx.Rollback(ctx)
 
 	if dup, err := markProcessed(ctx, tx, eventID); err != nil || dup {
-		return err
+		return false, err
+	}
+	if err := lockOrder(ctx, tx, d.OrderID); err != nil {
+		return false, err
+	}
+
+	var cancelled bool
+	if err := tx.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM cancelled_orders WHERE order_id = $1)`, d.OrderID).Scan(&cancelled); err != nil {
+		return false, err
+	}
+	if cancelled {
+		// order.cancelled overtook this event; keep the event marked as processed.
+		return false, tx.Commit(ctx)
+	}
+
+	var customerID *uuid.UUID
+	if d.CustomerID != uuid.Nil {
+		customerID = &d.CustomerID
 	}
 
 	startsAt := d.PickupAt.UTC().Truncate(SlotLength)
@@ -145,7 +211,7 @@ func (r *FulfillmentRepository) CreateFromOrderPlaced(ctx context.Context, event
 		ON CONFLICT (starts_at) DO UPDATE SET next_queue = pickup_slots.next_queue + 1
 		RETURNING next_queue - 1`, slotID, startsAt).Scan(&seq)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	items := make([]models.Item, 0, len(d.Items))
@@ -154,38 +220,39 @@ func (r *FulfillmentRepository) CreateFromOrderPlaced(ctx context.Context, event
 	}
 	itemsJSON, err := json.Marshal(items)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	var fulfillmentID uuid.UUID
 	err = tx.QueryRow(ctx, `
-		INSERT INTO fulfillments (order_id, pickup_slot_id, queue_seq, queue_number, pickup_at, status, items)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO fulfillments (order_id, customer_id, pickup_slot_id, queue_seq, queue_number, pickup_at, status, items)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		RETURNING id`,
-		d.OrderID, slotID, seq, fmt.Sprintf("%02d", seq), d.PickupAt.UTC(), models.StatusPreparing, itemsJSON).Scan(&fulfillmentID)
+		d.OrderID, customerID, slotID, seq, fmt.Sprintf("%02d", seq), d.PickupAt.UTC(), models.StatusPreparing, itemsJSON).Scan(&fulfillmentID)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
 			// Ticket for this order already exists; roll back so the queue
 			// number taken above is not wasted.
-			return nil
+			return false, nil
 		}
-		return err
+		return false, err
 	}
 
 	_, err = tx.Exec(ctx, `
-		INSERT INTO fulfillment_status_history (id, fulfillment_id, old_status, new_status, actor_id, created_at)
-		VALUES (gen_random_uuid(), $1, NULL, $2, NULL, now())`,
-		fulfillmentID, models.StatusPreparing)
+		INSERT INTO fulfillment_status_history (id, fulfillment_id, old_status, new_status, actor_id, source_event_id, created_at)
+		VALUES (gen_random_uuid(), $1, NULL, $2, NULL, $3, now())`,
+		fulfillmentID, models.StatusPreparing, eventID)
 	if err != nil {
-		return err
+		return false, err
 	}
 
-	return tx.Commit(ctx)
+	return true, tx.Commit(ctx)
 }
 
 // CancelByOrder cancels a ticket that is still PREPARING. Tickets that are
-// already ready or picked up, or unknown orders, are left unchanged.
+// already ready or picked up are left unchanged. For an order with no ticket
+// yet, a tombstone stops a late order.placed from creating one.
 func (r *FulfillmentRepository) CancelByOrder(ctx context.Context, eventID, orderID uuid.UUID) (cancelled bool, err error) {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
@@ -196,6 +263,9 @@ func (r *FulfillmentRepository) CancelByOrder(ctx context.Context, eventID, orde
 	if dup, err := markProcessed(ctx, tx, eventID); err != nil || dup {
 		return false, err
 	}
+	if err := lockOrder(ctx, tx, orderID); err != nil {
+		return false, err
+	}
 
 	var fID uuid.UUID
 	err = tx.QueryRow(ctx, `
@@ -203,22 +273,49 @@ func (r *FulfillmentRepository) CancelByOrder(ctx context.Context, eventID, orde
 		WHERE order_id = $1 AND status = $3
 		RETURNING id`,
 		orderID, models.StatusCancelled, models.StatusPreparing).Scan(&fID)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return false, tx.Commit(ctx)
+	if errors.Is(err, pgx.ErrNoRows) {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO cancelled_orders (order_id, event_id)
+			SELECT $1, $2 WHERE NOT EXISTS (SELECT 1 FROM fulfillments WHERE order_id = $1)
+			ON CONFLICT (order_id) DO NOTHING`, orderID, eventID); err != nil {
+			return false, err
 		}
+		return false, tx.Commit(ctx)
+	}
+	if err != nil {
 		return false, err
 	}
 
 	_, err = tx.Exec(ctx, `
-		INSERT INTO fulfillment_status_history (id, fulfillment_id, old_status, new_status, actor_id, created_at)
-		VALUES (gen_random_uuid(), $1, $2, $3, NULL, now())`,
-		fID, models.StatusPreparing, models.StatusCancelled)
+		INSERT INTO fulfillment_status_history (id, fulfillment_id, old_status, new_status, actor_id, source_event_id, created_at)
+		VALUES (gen_random_uuid(), $1, $2, $3, NULL, $4, now())`,
+		fID, models.StatusPreparing, models.StatusCancelled, eventID)
 	if err != nil {
 		return false, err
 	}
 
 	return true, tx.Commit(ctx)
+}
+
+// PurgeExpired deletes published outbox rows, dedupe records and tombstones
+// older than their retention window and returns how many rows were removed.
+func (r *FulfillmentRepository) PurgeExpired(ctx context.Context, now time.Time) (int64, error) {
+	var total int64
+	for _, q := range []struct {
+		sql    string
+		cutoff time.Time
+	}{
+		{`DELETE FROM outbox WHERE published_at IS NOT NULL AND published_at < $1`, now.Add(-OutboxRetention)},
+		{`DELETE FROM processed_events WHERE processed_at < $1`, now.Add(-DedupeRetention)},
+		{`DELETE FROM cancelled_orders WHERE cancelled_at < $1`, now.Add(-TombstoneRetention)},
+	} {
+		tag, err := r.db.Exec(ctx, q.sql, q.cutoff)
+		if err != nil {
+			return total, err
+		}
+		total += tag.RowsAffected()
+	}
+	return total, nil
 }
 
 // UpdateStatus moves a ticket to READY_FOR_PICKUP or PICKED_UP and writes the
@@ -320,7 +417,7 @@ func (r *FulfillmentRepository) GetSlotCapacity(ctx context.Context, slotTime ti
 // GetHistory returns the immutable audit history entries for a fulfillment ticket.
 func (r *FulfillmentRepository) GetHistory(ctx context.Context, fulfillmentID uuid.UUID) ([]models.FulfillmentStatusHistory, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT id, fulfillment_id, old_status, new_status, actor_id, created_at
+		SELECT id, fulfillment_id, old_status, new_status, actor_id, source_event_id, created_at
 		FROM fulfillment_status_history
 		WHERE fulfillment_id = $1
 		ORDER BY created_at ASC, id ASC`, fulfillmentID)
@@ -329,11 +426,11 @@ func (r *FulfillmentRepository) GetHistory(ctx context.Context, fulfillmentID uu
 	}
 	defer rows.Close()
 
-	var history []models.FulfillmentStatusHistory
+	history := []models.FulfillmentStatusHistory{}
 	for rows.Next() {
 		var h models.FulfillmentStatusHistory
 		var oldStatus *string
-		if err := rows.Scan(&h.ID, &h.FulfillmentID, &oldStatus, &h.NewStatus, &h.ActorID, &h.CreatedAt); err != nil {
+		if err := rows.Scan(&h.ID, &h.FulfillmentID, &oldStatus, &h.NewStatus, &h.ActorID, &h.SourceEventID, &h.CreatedAt); err != nil {
 			return nil, err
 		}
 		if oldStatus != nil {

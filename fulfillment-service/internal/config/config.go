@@ -1,17 +1,21 @@
 package config
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/joho/godotenv"
 )
+
+// MinimumJWTSecretBytes matches the HS256 secret length the API Gateway requires.
+const MinimumJWTSecretBytes = 32
 
 // Config holds every environment-driven setting the service needs.
 type Config struct {
 	Port        string
 	DatabaseURL string
 	RabbitMQURL string // optional: leave empty to run without a broker
-	JWTSecret   string
+	JWTSecret   string // required: no default so a shared, public secret is never used
 	JWTIssuer   string
 	JWTAudience string
 }
@@ -24,10 +28,18 @@ func Load() Config {
 		Port:        getEnv("PORT", "8080"),
 		DatabaseURL: getEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/fulfillment?sslmode=disable"),
 		RabbitMQURL: getEnv("RABBITMQ_URL", ""), // empty = messaging disabled
-		JWTSecret:   getEnv("JWT_SECRET", "development_only_change_this_secret_32_bytes"),
+		JWTSecret:   os.Getenv("JWT_SECRET"),
 		JWTIssuer:   getEnv("JWT_ISSUER", "gelatoflow-auth"),
 		JWTAudience: getEnv("JWT_AUDIENCE", "gelatoflow-api"),
 	}
+}
+
+// Validate rejects settings the service must not start with.
+func (c Config) Validate() error {
+	if len([]byte(c.JWTSecret)) < MinimumJWTSecretBytes {
+		return fmt.Errorf("JWT_SECRET must contain at least %d bytes", MinimumJWTSecretBytes)
+	}
+	return nil
 }
 
 func getEnv(key, fallback string) string {

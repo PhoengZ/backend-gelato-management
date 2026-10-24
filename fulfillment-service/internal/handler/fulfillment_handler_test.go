@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -20,19 +21,32 @@ import (
 type fakeStore struct {
 	updateErr     error
 	gotStatus     []models.Status
+	gotFilter     models.ListFilter
 	capacityCount int
 	capacityErr   error
 	gotSlotTime   time.Time
 	gotActorID    *uuid.UUID
+	ticket        *models.Fulfillment // nil means not found
+	history       []models.FulfillmentStatusHistory
+	gotHistoryFor uuid.UUID
 }
 
-func (f *fakeStore) List(_ context.Context, s []models.Status) ([]models.Fulfillment, error) {
-	f.gotStatus = s
+func (f *fakeStore) List(_ context.Context, filter models.ListFilter) ([]models.Fulfillment, error) {
+	f.gotFilter = filter
+	f.gotStatus = filter.Statuses
 	return []models.Fulfillment{}, nil
 }
 
 func (f *fakeStore) GetByOrderID(context.Context, uuid.UUID) (models.Fulfillment, error) {
-	return models.Fulfillment{}, repository.ErrNotFound
+	if f.ticket == nil {
+		return models.Fulfillment{}, repository.ErrNotFound
+	}
+	return *f.ticket, nil
+}
+
+func (f *fakeStore) GetHistory(_ context.Context, id uuid.UUID) ([]models.FulfillmentStatusHistory, error) {
+	f.gotHistoryFor = id
+	return f.history, nil
 }
 
 func (f *fakeStore) UpdateStatus(ctx context.Context, id uuid.UUID, to models.Status) (models.Fulfillment, error) {
@@ -120,6 +134,129 @@ func TestListStatusFilter(t *testing.T) {
 	rec = do(t, &fakeStore{}, http.MethodGet, "/fulfillments?status=BOGUS", "")
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("bad filter status = %d, want 400", rec.Code)
+	}
+}
+
+func TestListPickupWindow(t *testing.T) {
+	store := &fakeStore{}
+	rec := do(t, store, http.MethodGet, "/fulfillments?pickup_from=2026-10-13T00:00:00Z&pickup_to=2026-10-14T00:00:00Z", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d (%s)", rec.Code, rec.Body.String())
+	}
+	from, to := store.gotFilter.PickupFrom, store.gotFilter.PickupTo
+	if from == nil || to == nil || from.Format(time.RFC3339) != "2026-10-13T00:00:00Z" || to.Format(time.RFC3339) != "2026-10-14T00:00:00Z" {
+		t.Fatalf("filter = %+v", store.gotFilter)
+	}
+
+	for name, query := range map[string]string{
+		"bad format":     "pickup_from=yesterday",
+		"empty window":   "pickup_from=2026-10-14T00:00:00Z&pickup_to=2026-10-14T00:00:00Z",
+		"reverse window": "pickup_from=2026-10-14T00:00:00Z&pickup_to=2026-10-13T00:00:00Z",
+	} {
+		t.Run(name, func(t *testing.T) {
+			rec := do(t, &fakeStore{}, http.MethodGet, "/fulfillments?"+query, "")
+			if rec.Code != http.StatusBadRequest || errCode(t, rec) != "VALIDATION_ERROR" {
+				t.Fatalf("status = %d (%s), want 400 VALIDATION_ERROR", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
+// getAs calls Get with an authenticated identity already in the context, as the
+// auth middleware would leave it.
+func getAs(t *testing.T, store Store, role middleware.Role, userID uuid.UUID) *httptest.ResponseRecorder {
+	t.Helper()
+	e := echo.New()
+	id := uuid.New().String()
+	rec := httptest.NewRecorder()
+	c := e.NewContext(httptest.NewRequest(http.MethodGet, "/fulfillments/"+id, nil), rec)
+	c.SetParamNames("order_id")
+	c.SetParamValues(id)
+	c.Set(middleware.ContextUserID, userID.String())
+	c.Set(middleware.ContextUserRole, role)
+	if err := NewFulfillmentHandler(store).Get(c); err != nil {
+		t.Fatal(err)
+	}
+	return rec
+}
+
+func TestGetCustomerOwnership(t *testing.T) {
+	owner, stranger := uuid.New(), uuid.New()
+	owned := &fakeStore{ticket: &models.Fulfillment{OrderID: uuid.New(), CustomerID: &owner, QueueNumber: "01"}}
+	legacy := &fakeStore{ticket: &models.Fulfillment{OrderID: uuid.New(), QueueNumber: "02"}}
+
+	for _, tc := range []struct {
+		name  string
+		store *fakeStore
+		role  middleware.Role
+		user  uuid.UUID
+		want  int
+	}{
+		{"owner sees ticket", owned, middleware.RoleCustomer, owner, http.StatusOK},
+		{"other customer gets 404", owned, middleware.RoleCustomer, stranger, http.StatusNotFound},
+		{"ticket without customer_id is hidden from customers", legacy, middleware.RoleCustomer, owner, http.StatusNotFound},
+		{"staff sees any ticket", legacy, middleware.RoleStaff, stranger, http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := getAs(t, tc.store, tc.role, tc.user)
+			if rec.Code != tc.want {
+				t.Fatalf("status = %d, want %d (%s)", rec.Code, tc.want, rec.Body.String())
+			}
+			if strings.Contains(rec.Body.String(), "customer_id") {
+				t.Error("customer_id must not appear in the response")
+			}
+		})
+	}
+}
+
+func TestHistory(t *testing.T) {
+	ticketID := uuid.New()
+	store := &fakeStore{
+		ticket:  &models.Fulfillment{ID: ticketID},
+		history: []models.FulfillmentStatusHistory{{FulfillmentID: ticketID, NewStatus: models.StatusPreparing}},
+	}
+	e := echo.New()
+	h := NewFulfillmentHandler(store)
+	e.GET("/fulfillments/:order_id/history", h.History)
+
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/fulfillments/"+uuid.New().String()+"/history", nil))
+	if rec.Code != http.StatusOK || store.gotHistoryFor != ticketID {
+		t.Fatalf("status = %d, history for %s (%s)", rec.Code, store.gotHistoryFor, rec.Body.String())
+	}
+	var body struct {
+		Items []models.FulfillmentStatusHistory `json:"items"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || len(body.Items) != 1 {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+
+	store.ticket = nil
+	rec = httptest.NewRecorder()
+	e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/fulfillments/"+uuid.New().String()+"/history", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("missing order status = %d, want 404", rec.Code)
+	}
+}
+
+func TestHealthDatabaseCheck(t *testing.T) {
+	for name, tc := range map[string]struct {
+		ping func(context.Context) error
+		want int
+	}{
+		"database up":   {func(context.Context) error { return nil }, http.StatusOK},
+		"database down": {func(context.Context) error { return errors.New("refused") }, http.StatusServiceUnavailable},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := NewFulfillmentHandler(&fakeStore{}).WithDBCheck(tc.ping)
+			e := echo.New()
+			e.GET("/health", h.Health)
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
+			if rec.Code != tc.want {
+				t.Fatalf("status = %d, want %d", rec.Code, tc.want)
+			}
+		})
 	}
 }
 

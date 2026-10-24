@@ -28,6 +28,22 @@ paths:
             type: array
             items:
               $ref: '#/components/schemas/FulfillmentStatus'
+        - name: pickup_from
+          in: query
+          required: false
+          description: Include tickets with `pickup_at` at or after this time. Defaults to no lower bound.
+          schema:
+            type: string
+            format: date-time
+        - name: pickup_to
+          in: query
+          required: false
+          description: >-
+            Include tickets with `pickup_at` before this time. Defaults to no
+            upper bound. Must be after `pickup_from` when both are given.
+          schema:
+            type: string
+            format: date-time
       responses:
         '200':
           description: Fulfillment tickets ordered by pickup time, then queue number
@@ -54,10 +70,14 @@ paths:
     get:
       operationId: getFulfillment
       summary: Get the fulfillment ticket for an order
+      description: >-
+        Staff and managers can read any ticket. A customer can read only the
+        ticket for their own order, so the queue number stays available when
+        real-time notifications fail. Other tickets return 404 to customers.
       tags: [Fulfillment]
       security:
         - bearerAuth: []
-      x-required-roles: [STAFF, MANAGER]
+      x-required-roles: [CUSTOMER, STAFF, MANAGER]
       responses:
         '200':
           description: Fulfillment ticket found
@@ -65,6 +85,39 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Fulfillment'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/v1/fulfillments/{order_id}/history:
+    parameters:
+      - $ref: '#/components/parameters/OrderId'
+    get:
+      operationId: getFulfillmentHistory
+      summary: Get the immutable status history of a fulfillment ticket
+      description: >-
+        Audit trail of every status change, oldest first. `actor_id` is set for
+        staff actions; `source_event_id` is set for changes caused by an event.
+      tags: [Fulfillment]
+      security:
+        - bearerAuth: []
+      x-required-roles: [MANAGER]
+      responses:
+        '200':
+          description: Status history of the ticket
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/FulfillmentStatusHistory'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -208,6 +261,32 @@ components:
     FulfillmentStatus:
       type: string
       enum: [PREPARING, READY_FOR_PICKUP, PICKED_UP, CANCELLED]
+    FulfillmentStatusHistory:
+      type: object
+      additionalProperties: false
+      required: [id, fulfillment_id, new_status, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        fulfillment_id:
+          type: string
+          format: uuid
+        old_status:
+          $ref: '#/components/schemas/FulfillmentStatus'
+        new_status:
+          $ref: '#/components/schemas/FulfillmentStatus'
+        actor_id:
+          type: string
+          format: uuid
+          description: User who made the change; omitted for event-driven changes.
+        source_event_id:
+          type: string
+          format: uuid
+          description: CloudEvent id that caused the change; omitted for staff actions.
+        created_at:
+          type: string
+          format: date-time
     UpdateFulfillmentStatusRequest:
       type: object
       additionalProperties: false

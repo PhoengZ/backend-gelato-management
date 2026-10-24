@@ -2,6 +2,7 @@ package messaging
 
 import (
 	"context"
+	"errors"
 	"log"
 
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -9,6 +10,9 @@ import (
 
 // ExchangeName is the topic exchange Fulfillment owns and publishes to.
 const ExchangeName = "fulfillment"
+
+// errPublishNacked means the broker refused a message; the channel is still usable.
+var errPublishNacked = errors.New("broker nacked the published message")
 
 // Broker wraps the RabbitMQ connection and the confirm-mode channel used for
 // publishing. Publishing is single-goroutine (the outbox relay).
@@ -49,11 +53,16 @@ func Connect(url string) (*Broker, error) {
 
 // Publish sends a persistent JSON message and waits for the broker's confirm.
 func (b *Broker) Publish(ctx context.Context, routingKey string, body []byte) error {
-	conf, err := b.pubCh.PublishWithDeferredConfirmWithContext(ctx, ExchangeName, routingKey, false, false, amqp.Publishing{
+	return publishConfirmed(ctx, b.pubCh, ExchangeName, routingKey, amqp.Publishing{
 		ContentType:  "application/json",
 		DeliveryMode: amqp.Persistent,
 		Body:         body,
 	})
+}
+
+// publishConfirmed publishes on a confirm-mode channel and waits for the ack.
+func publishConfirmed(ctx context.Context, ch *amqp.Channel, exchange, key string, msg amqp.Publishing) error {
+	conf, err := ch.PublishWithDeferredConfirmWithContext(ctx, exchange, key, false, false, msg)
 	if err != nil {
 		return err
 	}
@@ -62,7 +71,7 @@ func (b *Broker) Publish(ctx context.Context, routingKey string, body []byte) er
 		return err
 	}
 	if !ok {
-		return amqp.ErrClosed
+		return errPublishNacked
 	}
 	return nil
 }

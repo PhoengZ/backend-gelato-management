@@ -154,7 +154,10 @@ services:
     environment:
       PORT: "8080"
       DATABASE_URL: postgres://${FULFILLMENT_POSTGRES_USER}:${FULFILLMENT_POSTGRES_PASSWORD}@fulfillment-postgres:5432/${FULFILLMENT_POSTGRES_DB}?sslmode=disable
-      # Empty keeps messaging disabled until a fulfillment broker user exists.
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      JWT_ISSUER: ${JWT_ISSUER:-gelatoflow-auth}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-gelatoflow-api}
+      # Empty keeps messaging disabled; when set, the service reconnects on its own.
       RABBITMQ_URL: ${FULFILLMENT_RABBITMQ_URL:-}
     networks:
       - gelato_network
@@ -162,6 +165,11 @@ services:
       fulfillment-postgres:
         condition: service_healthy
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
 
   notification-service:
     build:

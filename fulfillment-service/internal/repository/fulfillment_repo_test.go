@@ -2,11 +2,36 @@ package repository
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 )
+
+func TestIsTransient(t *testing.T) {
+	for name, tc := range map[string]struct {
+		err  error
+		want bool
+	}{
+		"connection failure":    {&pgconn.ConnectError{}, true},
+		"connection exception":  {&pgconn.PgError{Code: "08006"}, true},
+		"database starting up":  {&pgconn.PgError{Code: "57P03"}, true},
+		"serialization failure": {&pgconn.PgError{Code: "40001"}, true},
+		"deadline exceeded":     {fmt.Errorf("begin: %w", context.DeadlineExceeded), true},
+		"unique violation":      {&pgconn.PgError{Code: "23505"}, false},
+		"plain error":           {errors.New("x"), false},
+		"nil":                   {nil, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := IsTransient(tc.err); got != tc.want {
+				t.Fatalf("IsTransient(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}
 
 func TestActorIDContext(t *testing.T) {
 	ctx := context.Background()
