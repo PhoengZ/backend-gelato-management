@@ -20,6 +20,8 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/redis/go-redis/v9"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/grpclog"
 )
 
@@ -74,6 +76,10 @@ func run(ctx context.Context) error {
 
 	router.Setup(app, catalogService, verifier, cfg.RequestTimeout, redisClient)
 
-	grpcServer := cataloggrpc.NewServer(catalogService, verifier, cfg.RequestTimeout)
-	return server.ListenAndServe(ctx, ":"+cfg.Port, cfg.GRPCAddr, app, grpcServer, 5*time.Second)
+	var options []grpc.ServerOption
+	if cfg.GRPCTLS != nil {
+		options = append(options, grpc.Creds(credentials.NewTLS(cfg.GRPCTLS)))
+	}
+	grpcServer := cataloggrpc.NewServer(catalogService, verifier, cfg.RequestTimeout, options...)
+	return server.ListenAndServeTLS(ctx, ":"+cfg.Port, cfg.GRPCAddr, app, grpcServer, 5*time.Second, cfg.HTTPTLS)
 }

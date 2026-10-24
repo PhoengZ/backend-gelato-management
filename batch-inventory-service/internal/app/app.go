@@ -8,12 +8,14 @@ import (
 	"batch-inventory-service/internal/logging"
 	"batch-inventory-service/internal/messaging"
 	"batch-inventory-service/internal/transport"
+	"batch-inventory-service/internal/transportsecurity"
 	"batch-inventory-service/migrations"
 	"context"
 	"errors"
 	"fmt"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"log"
 	"net"
@@ -37,15 +39,24 @@ func Run(ctx context.Context, c config.Config) error {
 	if err = migrations.CheckReady(startup, db); err != nil {
 		return err
 	}
-	cc, err := grpc.NewClient(c.CatalogAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	var peerCredentials credentials.TransportCredentials = insecure.NewCredentials()
+	if c.CatalogTLS != nil {
+		peerCredentials = credentials.NewTLS(c.CatalogTLS)
+	}
+	cc, err := grpc.NewClient(c.CatalogAddr, grpc.WithTransportCredentials(peerCredentials))
 	if err != nil {
 		return err
 	}
 	defer cc.Close()
 	svc := inventory.New(db, catalog.New(cc, c.RequestTimeout), c.ReservationTTL)
 	h := &http.Server{Handler: transport.NewHTTP(svc, auth.NewVerifier(c.JWTSecret, c.JWTIssuer, c.JWTAudience), c.RequestTimeout), ReadHeaderTimeout: 3 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: c.RequestTimeout + time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10}
+	h.TLSConfig = c.HTTPTLS
 	h.ErrorLog = logging.NewHTTPErrorLogger(os.Stderr)
-	g := transport.NewGRPC(svc, c.OrderToken, c.RequestTimeout)
+	var options []grpc.ServerOption
+	if c.GRPCTLS != nil {
+		options = append(options, grpc.Creds(credentials.NewTLS(c.GRPCTLS)))
+	}
+	g := transport.NewGRPC(svc, c.OrderToken, c.RequestTimeout, options...)
 	return Serve(ctx, c.HTTPAddr, c.GRPCAddr, h, g, func(workerCtx context.Context) {
 		var workers sync.WaitGroup
 		workers.Add(1)
@@ -105,7 +116,7 @@ func serve(ctx context.Context, httpAddr, grpcAddr string, h *http.Server, g *gr
 	workerDone := make(chan struct{})
 	go func() { defer close(workerDone); workers(workCtx) }()
 	errs := make(chan error, 2)
-	go func() { errs <- h.Serve(hl) }()
+	go func() { errs <- h.Serve(transportsecurity.HTTP(hl, h.TLSConfig)) }()
 	go func() { errs <- g.Serve(gl) }()
 	var result error
 	select {

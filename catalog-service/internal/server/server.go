@@ -2,7 +2,9 @@
 package server
 
 import (
+	"catalog-service/internal/transportsecurity"
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"net"
@@ -16,6 +18,10 @@ import (
 // ListenAndServe binds both sockets before serving either transport. The caller
 // closes storage only after this returns. Shutdown drains requests up to timeout.
 func ListenAndServe(ctx context.Context, httpAddr, grpcAddr string, httpServer *fiber.App, grpcServer *grpc.Server, timeout time.Duration) error {
+	return ListenAndServeTLS(ctx, httpAddr, grpcAddr, httpServer, grpcServer, timeout, nil)
+}
+
+func ListenAndServeTLS(ctx context.Context, httpAddr, grpcAddr string, httpServer *fiber.App, grpcServer *grpc.Server, timeout time.Duration, httpTLS *tls.Config) error {
 	httpListener, err := net.Listen("tcp", httpAddr)
 	if err != nil {
 		return fmt.Errorf("listen HTTP: %w", err)
@@ -26,7 +32,7 @@ func ListenAndServe(ctx context.Context, httpAddr, grpcAddr string, httpServer *
 		return fmt.Errorf("listen gRPC: %w", err)
 	}
 	defer grpcListener.Close()
-	return Serve(ctx, httpListener, grpcListener, httpServer, grpcServer, timeout)
+	return Serve(ctx, transportsecurity.HTTP(httpListener, httpTLS), grpcListener, httpServer, grpcServer, timeout)
 }
 
 // Serve takes ownership of already-bound listeners, which also permits tests to

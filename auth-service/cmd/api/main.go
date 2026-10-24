@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"net"
 	"os"
 	"os/signal"
 	"syscall"
@@ -15,6 +16,7 @@ import (
 	"auth-service/internal/repository"
 	"auth-service/internal/router"
 	"auth-service/internal/service"
+	"auth-service/internal/transportsecurity"
 	"auth-service/migrations"
 
 	"github.com/gofiber/fiber/v2"
@@ -74,8 +76,14 @@ func main() {
 	})
 
 	serverErrors := make(chan error, 1)
+	listener, err := net.Listen("tcp", ":"+cfg.Port)
+	if err != nil {
+		log.Fatalf("bind HTTP failed: error_type=%T", err)
+	}
+	defer listener.Close()
+	listener = transportsecurity.HTTP(listener, cfg.HTTPTLS)
 	go func() {
-		serverErrors <- app.Listen(":" + cfg.Port)
+		serverErrors <- app.Listener(listener)
 	}()
 
 	shutdownSignal, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -87,7 +95,9 @@ func main() {
 			log.Fatalf("serve HTTP failed: error_type=%T", err)
 		}
 	case <-shutdownSignal.Done():
-		if err := app.Shutdown(); err != nil {
+		drain, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := app.ShutdownWithContext(drain); err != nil {
 			log.Printf("graceful shutdown failed: error_type=%T", err)
 		}
 	}

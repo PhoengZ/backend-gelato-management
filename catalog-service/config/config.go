@@ -1,6 +1,8 @@
 package config
 
 import (
+	"catalog-service/internal/transportsecurity"
+	"crypto/tls"
 	"fmt"
 	"net"
 	"net/url"
@@ -15,14 +17,15 @@ import (
 const minimumJWTSecretBytes = 32
 
 type Config struct {
-	Port           string
-	GRPCAddr       string
-	RedisURL       string
-	RedisKeyPrefix string
-	JWTSecret      string
-	JWTIssuer      string
-	JWTAudience    string
-	RequestTimeout time.Duration
+	HTTPTLS, GRPCTLS *tls.Config
+	Port             string
+	GRPCAddr         string
+	RedisURL         string
+	RedisKeyPrefix   string
+	JWTSecret        string
+	JWTIssuer        string
+	JWTAudience      string
+	RequestTimeout   time.Duration
 }
 
 func Load() (Config, error) {
@@ -56,6 +59,12 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("REQUEST_TIMEOUT must be a positive duration")
 	}
 	cfg.RequestTimeout = timeout
+	if cfg.HTTPTLS, err = transportsecurity.ServerFromEnv("HTTP_TLS"); err != nil {
+		return Config{}, err
+	}
+	if cfg.GRPCTLS, err = transportsecurity.ServerFromEnv("GRPC_TLS"); err != nil {
+		return Config{}, err
+	}
 
 	return cfg, nil
 }

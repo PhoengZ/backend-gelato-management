@@ -19,8 +19,8 @@ type grpcHandler struct {
 	svc *inventory.Service
 }
 
-func NewGRPC(svc *inventory.Service, orderToken string, timeout time.Duration) *grpc.Server {
-	server := grpc.NewServer(grpc.MaxRecvMsgSize(1<<20), grpc.MaxSendMsgSize(4<<20), grpc.MaxHeaderListSize(16<<10), grpc.UnaryInterceptor(func(ctx context.Context, req any, info *grpc.UnaryServerInfo, next grpc.UnaryHandler) (any, error) {
+func NewGRPC(svc *inventory.Service, orderToken string, timeout time.Duration, options ...grpc.ServerOption) *grpc.Server {
+	options = append(options, grpc.MaxRecvMsgSize(1<<20), grpc.MaxSendMsgSize(4<<20), grpc.MaxHeaderListSize(16<<10), grpc.UnaryInterceptor(func(ctx context.Context, req any, info *grpc.UnaryServerInfo, next grpc.UnaryHandler) (any, error) {
 		md, _ := metadata.FromIncomingContext(ctx)
 		values := md.Get("authorization")
 		if len(values) != 1 {
@@ -38,6 +38,7 @@ func NewGRPC(svc *inventory.Service, orderToken string, timeout time.Duration) *
 		}
 		return res, err
 	}))
+	server := grpc.NewServer(options...)
 	pb.RegisterInventoryServiceServer(server, &grpcHandler{svc: svc})
 	return server
 }
