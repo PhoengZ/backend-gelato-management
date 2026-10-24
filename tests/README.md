@@ -16,12 +16,14 @@ tests/
 │   ├── __init__.py
 │   ├── api_client.py               # ApiClient, Actor models, pure-Python HS256 JWT minting
 │   ├── sse_listener.py             # Thread-safe Server-Sent Events client for /notifications/stream
-│   └── stripe_simulator.py         # HMAC-SHA256 Stripe webhook generator & signature calculator
+│   ├── stripe_simulator.py         # HMAC-SHA256 Stripe webhook generator & signature calculator
+│   └── event_publisher.py          # Publishes order.* CloudEvents via the RabbitMQ management API
 ├── test_uc01_preorder_checkout.py  # UC-01: Preorder, inventory hold, Stripe checkout, SSE & analytics
 ├── test_uc02_kitchen_pickup.py     # UC-02: Kitchen queue, staff RBAC, ticket lifecycle progression
 ├── test_uc03_batch_inventory.py    # UC-03: Manager batch creation, waste deduction, RBAC isolation
 ├── test_nfr02_concurrency.py       # NFR-02: 20 concurrent orders on 1 portion (prevent overselling)
-└── test_nfr_slot_capacity.py       # NFR: 15-minute pickup time slot capacity limits
+├── test_nfr_slot_capacity.py       # NFR: 15-minute pickup time slot capacity limits
+└── test_fulfillment_nfr.py         # Fulfillment: customer ownership, audit history, filters, event ordering
 ```
 
 ---
@@ -86,6 +88,9 @@ pytest -m nfr02 -v
 | `JWT_ISSUER` | `gelatoflow-auth` | JWT issuer claim (`iss`) |
 | `JWT_AUDIENCE` | `gelatoflow-api` | JWT audience claim (`aud`) |
 | `STRIPE_WEBHOOK_SECRET` | `whsec_test_secret_for_integration_testing_12345` | Stripe webhook signing secret |
+| `RABBITMQ_MGMT_URL` | `http://localhost:15672` | RabbitMQ management API used to publish `order.*` events (fulfillment tests skip when unreachable) |
+| `RABBITMQ_MGMT_USER` / `RABBITMQ_MGMT_PASS` | `admin` / `secure_admin_password` | Management credentials (matches `infra/.env.example`) |
+| `RABBITMQ_VHOST` | `gelato_vhost` | Virtual host of the order exchange |
 
 ---
 
@@ -119,6 +124,13 @@ pytest -m nfr02 -v
   - Exactly 1 request succeeds (HTTP 201).
   - Remaining 19 requests rejected with HTTP 409 `INSUFFICIENT_STOCK`.
   - Inventory balance strictly non-negative ($\ge 0$).
+
+- **Fulfillment NFR** (events published straight to the `order` exchange, so no payment is needed):
+  - A customer reads only their own ticket on `GET /api/v1/fulfillments/{order_id}`; other customers get 404.
+  - `GET /api/v1/fulfillments/{order_id}/history` is MANAGER-only and records `source_event_id` and the staff `actor_id`.
+  - Optional `pickup_from` / `pickup_to` window on the kitchen queue; malformed values return 400.
+  - `order.cancelled` processed before `order.placed` leaves no ticket.
+  - Duplicate `order.placed` deliveries create a single ticket with an unchanged queue number.
 
 - **NFR (Time-Slot Capacity Protection)**:
   - Enforces 15-minute pickup time slot capacity (default: 10 orders/slot).
