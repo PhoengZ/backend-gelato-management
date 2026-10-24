@@ -153,6 +153,9 @@ The upgrade does not delete legacy keys or refresh their original retention.
 
 ## Configuration
 
+See [owned NFR evidence and TLS setup](NFR.md) for requirement provenance,
+optional HTTPS/gRPC TLS and the remaining caller/deployment boundary.
+
 Copy `.env.example` to `.env` for host-based development.
 
 | Variable | Purpose |

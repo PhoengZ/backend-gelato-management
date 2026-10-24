@@ -21,6 +21,9 @@ client-supplied role.
 
 ## Configuration
 
+See [owned NFR evidence and TLS setup](NFR.md) for requirement provenance,
+service-local verification and deployment work requiring other owners.
+
 Copy `.env.example` to `.env` for host-based development. Required security
 settings are validated at startup:
 
