@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"notification-service/internal/auth"
 	"notification-service/internal/hub"
 )
 
@@ -266,4 +267,50 @@ func TestReplayBufferConcurrency(t *testing.T) {
 	}
 
 	wg.Wait()
+}
+
+func TestReplayBufferAllocatesSlotsLazily(t *testing.T) {
+	buf := NewReplayBuffer(500, 5*time.Minute)
+	customer := uuid.New()
+	buf.Add(customer, makeNotification(uuid.New(), "order.confirmed", "Only"))
+
+	if got := cap(buf.customers[customer].items); got >= 500 {
+		t.Errorf("one notification allocated %d slots, want far fewer than 500", got)
+	}
+}
+
+func TestReplayBufferRoleBroadcastsMergeWithUserEvents(t *testing.T) {
+	now := time.Now()
+	clock := func() time.Time { return now }
+	buf := newReplayBufferWithClock(10, 5*time.Minute, clock)
+	manager := uuid.New()
+
+	userEvt, roleEvt1, roleEvt2 := uuid.New(), uuid.New(), uuid.New()
+	buf.AddForRoles(makeNotification(roleEvt1, "inventory.low_stock", "Low"), auth.RoleStaff, auth.RoleManager)
+	now = now.Add(time.Second)
+	buf.Add(manager, makeNotification(userEvt, "order.confirmed", "Mine"))
+	now = now.Add(time.Second)
+	buf.AddForRoles(makeNotification(roleEvt2, "inventory.expiring", "Expiring"), auth.RoleManager)
+
+	got := buf.ReplayFor(manager, auth.RoleManager, uuid.Nil)
+	if len(got) != 3 || got[0].ID != roleEvt1 || got[1].ID != userEvt || got[2].ID != roleEvt2 {
+		t.Fatalf("merged replay = %v, want [role1, user, role2] in dispatch order", got)
+	}
+	if after := buf.ReplayFor(manager, auth.RoleManager, userEvt); len(after) != 1 || after[0].ID != roleEvt2 {
+		t.Errorf("replay after user event = %v, want [role2]", after)
+	}
+
+	// Customers never see staff broadcasts, and Replay stays user-only.
+	if got := buf.ReplayFor(uuid.New(), auth.RoleCustomer, uuid.Nil); len(got) != 0 {
+		t.Errorf("customer replay = %v, want none", got)
+	}
+	if got := buf.Replay(manager, uuid.Nil); len(got) != 1 {
+		t.Errorf("user-only replay = %d events, want 1", len(got))
+	}
+
+	now = now.Add(10 * time.Minute)
+	buf.CleanExpired()
+	if len(buf.roles) != 0 || len(buf.customers) != 0 {
+		t.Errorf("CleanExpired left %d role and %d customer buffers", len(buf.roles), len(buf.customers))
+	}
 }

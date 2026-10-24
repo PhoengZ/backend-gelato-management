@@ -62,7 +62,7 @@ func (h *Handler) stream(w http.ResponseWriter, r *http.Request) {
 
 	if lastEventIDStr != "" && h.buffer != nil {
 		if lastEventID, err := uuid.Parse(strings.TrimSpace(lastEventIDStr)); err == nil {
-			missed := h.buffer.Replay(claims.UserID(), lastEventID)
+			missed := h.buffer.ReplayFor(claims.UserID(), claims.Role, lastEventID)
 			for _, n := range missed {
 				if err := writeFrame(w, n); err != nil {
 					log.Printf("[sse] replay write failed, closing: %v", err)
@@ -77,6 +77,11 @@ func (h *Handler) stream(w http.ResponseWriter, r *http.Request) {
 	ticker := time.NewTicker(h.heartbeat)
 	defer ticker.Stop()
 
+	// The token is only checked on connect, so end the stream when it expires;
+	// the client reconnects with a fresh token and Last-Event-ID.
+	expiry := time.NewTimer(time.Until(claims.ExpiresAt.Time))
+	defer expiry.Stop()
+
 	for {
 		select {
 		case <-r.Context().Done():
@@ -90,6 +95,10 @@ func (h *Handler) stream(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			flusher.Flush()
+		case <-expiry.C:
+			_, _ = fmt.Fprint(w, ": token-expired\n\n")
+			flusher.Flush()
+			return
 		case <-ticker.C:
 			if _, err := fmt.Fprint(w, ": keep-alive\n\n"); err != nil {
 				return

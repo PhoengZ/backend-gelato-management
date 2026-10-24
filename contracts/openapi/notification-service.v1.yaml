@@ -34,9 +34,12 @@ paths:
         Holds the connection open and writes one SSE frame per notification,
         plus `: keep-alive` comment lines. Each frame has `id` (the source
         event id), `event` (the notification `type`) and `data` (a JSON
-        `Notification`, described by the schema below). `GET /health` is also
-        served for liveness but is not part of the public contract. The gateway
-        route for this path is not yet defined.
+        `Notification`, described by the schema below). The stream ends with a
+        `: token-expired` comment when the access token expires; reconnect with
+        a fresh token and `Last-Event-ID` to replay notifications from the last
+        five minutes. `GET /health` is also served for liveness but is not part
+        of the public contract. The API Gateway routes this path to the
+        service through its streaming proxy.
       tags: [Notifications]
       security:
         - bearerAuth: []

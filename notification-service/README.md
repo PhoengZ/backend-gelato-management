@@ -14,11 +14,14 @@ Service นี้ **stateless**: ไม่มี database ไม่ถือข�
 | `GET /api/v1/notifications/stream` (SSE, Bearer JWT, keep-alive) | ทำแล้ว (unit/httptest ผ่าน) |
 | Consumer `order.placed`, `order.cancelled`, `fulfillment.order_ready`, `inventory.low_stock`, `inventory.expiring` + dedupe ด้วย event `id` (in-memory) | ทำแล้ว (unit test ผ่าน) |
 | RabbitMQ user `notification_service` + permission ใน `infra/rabbitmq/definitions.json`, compose, `.env.example` | เพิ่มแล้ว |
-| ทดสอบกับ RabbitMQ จริงและ publisher จริงของ Order/Fulfillment | ยังไม่ทำ (ดูหัวข้อ "ทดลองกับ broker") |
-| Route ใน API Gateway | ยังไม่ทำ — Gateway ใช้ `proxy.Do` ซึ่งไม่รองรับ stream ต้องแก้และให้เจ้าของ Gateway รีวิว |
-| Publisher ของ `inventory.low_stock` / `inventory.expiring` | ยังไม่มีฝั่ง Inventory และยังไม่มี JSON schema (service รับแบบ tolerant ตาม `docs/event-schema-spec.md` §3.4) |
-| DLQ | ไม่มีทั้ง repo; message ที่ผิดรูปจะถูก `Nack(requeue=false)` |
-| Persistence / replay / WebSocket | นอกขอบเขต |
+| Reconnect RabbitMQ อัตโนมัติ (backoff 1s → 30s) และ `/health` ตอบ 503 เมื่อ broker หลุด | ทำแล้ว (unit test ผ่าน) |
+| ปิด SSE stream เมื่อ JWT หมดอายุ (ส่ง `: token-expired` แล้วปิด) | ทำแล้ว (unit test ผ่าน) |
+| Replay ผ่าน `Last-Event-ID` จาก buffer ใน memory (500 รายการต่อ user/role, เก็บ 5 นาที, ล้างทุก 1 นาที) รวม alert ของ STAFF/MANAGER | ทำแล้ว (unit test ผ่าน) |
+| DLQ: `notification.dlx` → `notification_dlq`, message ที่ผิดรูปถูก `Nack(requeue=false)` | ทำแล้ว (unit test ผ่าน) |
+| Route ใน API Gateway (`GET /api/v1/notifications/stream` ผ่าน `api-gateway/internal/proxy/sse.go`) | ทำแล้ว |
+| ทดสอบกับ RabbitMQ จริงและ publisher จริงของ Order/Fulfillment | ดู `tests/test_uc01_preorder_checkout.py` และหัวข้อ "ทดลองกับ broker" |
+| Publisher ของ `inventory.low_stock` / `inventory.expiring` | Inventory publish ผ่าน outbox แล้ว schema อยู่ที่ `contracts/events/inventory-low-stock.v1.schema.json` และ `inventory-expiring.v1.schema.json` (ทดสอบ E2E แล้ว) |
+| Persistence / WebSocket | นอกขอบเขต |
 
 ## ใครได้รับอะไร
 
@@ -34,7 +37,9 @@ Service นี้ **stateless**: ไม่มี database ไม่ถือข�
 
 - **ไม่มี queue number ใน confirmation**: `order.placed` ไม่มี queue number (Fulfillment เป็นคนออกให้ภายหลัง) ลูกค้าจะเห็นเลขคิวใน notification `order.ready` แทน
 - **การหาว่า order เป็นของใคร**: `order.ready` และ `order.cancelled` ไม่มี `customer_id` service จึงจำ `order_id → customer_id` จาก `order.placed` ไว้ใน memory (หมดอายุตาม `ORDER_OWNER_TTL`, จำกัดจำนวน) ถ้า service restart หรือ order เก่ากว่า TTL จะไม่ส่ง popup (log `no known owner`) ทางแก้ถาวรคือเรียก Order gRPC `GetOrderDetails` หรือเพิ่ม `customer_id` ใน thin event — ต้องคุยกับเจ้าของ Order
-- **ส่งแบบ best effort**: ผู้ใช้ที่ไม่ได้เชื่อมต่ออยู่ตอนนั้นจะไม่ได้รับ และไม่มี replay ตอน reconnect ฝั่ง frontend ควรยัง poll `GET /api/v1/orders/{id}/status` เป็น fallback
+- **ส่งแบบ best effort**: ถ้า reconnect ภายใน 5 นาทีพร้อม `Last-Event-ID` จะได้ notification ที่พลาดไป แต่ถ้านานกว่านั้นหรือ service restart จะหาย ฝั่ง frontend ควรยัง poll `GET /api/v1/orders/{id}/status` เป็น fallback
+- **รันได้ 1 replica เท่านั้น**: ทุก instance ใช้ `notification_queue` ร่วมกัน (competing consumers) event หนึ่งจะไปถึงแค่ instance เดียว และ order owner map กับ replay buffer อยู่ใน memory ของแต่ละ process ถ้าจะ scale ต้องเปลี่ยนเป็น queue ต่อ instance ก่อน
+- **Stream ปิดเมื่อ token หมดอายุ**: client ต้องต่อใหม่ด้วย token ใหม่ และส่ง `Last-Event-ID` เพื่อรับสิ่งที่พลาด
 - **Dedupe**: เก็บ event id ล่าสุดใน memory เท่านั้น หลัง restart อาจเห็น popup ซ้ำได้หนึ่งครั้ง
 - `EventSource` ของเบราว์เซอร์ส่ง `Authorization` header ไม่ได้ ให้ใช้ fetch-based SSE (เช่น `@microsoft/fetch-event-source`)
 
@@ -43,7 +48,7 @@ Service นี้ **stateless**: ไม่มี database ไม่ถือข�
 | Method | Path | หมายเหตุ |
 | --- | --- | --- |
 | GET | `/api/v1/notifications/stream` | ต้องมี `Authorization: Bearer <jwt>` (CUSTOMER / STAFF / MANAGER); ไม่ผ่าน → 401 `UNAUTHORIZED` |
-| GET | `/health` | `{"status":"ok"}` ไม่ได้เช็ค broker |
+| GET | `/health` | `200 {"status":"ok"}`; ถ้าตั้ง `RABBITMQ_URL` แต่ broker ยังไม่เชื่อมต่อ → `503 {"status":"degraded","broker":"disconnected"}` |
 
 แต่ละ frame:
 
@@ -53,7 +58,7 @@ event: order.ready
 data: {"id":"5b0c1f1e-...","type":"order.ready","message":"Your gelato order is ready for pickup!","occurred_at":"2026-09-02T14:55:00Z","data":{"order_id":"...","queue_number":"01","pickup_slot_id":"..."}}
 ```
 
-บรรทัดที่ขึ้นต้นด้วย `:` (`: connected`, `: keep-alive`) เป็น comment ให้ client ข้ามได้
+บรรทัดที่ขึ้นต้นด้วย `:` (`: connected`, `: keep-alive`, `: token-expired`) เป็น comment ให้ client ข้ามได้
 
 ## Configuration
 
@@ -106,6 +111,7 @@ internal/events     CloudEvents envelope และ payload ที่รับ
 internal/auth       ตรวจ JWT (รูปแบบเดียวกับ batch-inventory-service)
 internal/hub        registry ของ SSE connection, PushToUser / PushToRoles (= pushInAppNotification)
 internal/notify     event -> notification, order owner map, dedupe
-internal/messaging  RabbitMQ consumer และ Dispatch
+internal/messaging  RabbitMQ consumer, Dispatch และ reconnect loop (Run)
+internal/stream     replay buffer สำหรับ Last-Event-ID
 internal/handler    /health และ SSE stream
 ```

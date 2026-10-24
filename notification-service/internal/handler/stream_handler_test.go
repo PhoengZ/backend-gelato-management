@@ -2,11 +2,13 @@ package handler
 
 import (
 	"bufio"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 
 	"notification-service/internal/auth"
@@ -251,5 +253,55 @@ func TestStreamDeduplicatesReplayedAndLiveEvents(t *testing.T) {
 
 	if nextFrame["id"] != evt3.String() {
 		t.Fatalf("expected evt3 after deduplication, got %v", nextFrame)
+	}
+}
+
+func TestStreamClosesWhenTokenExpires(t *testing.T) {
+	srv, _ := newServer(t)
+	// JWT exp has second precision, so allow up to 2s before the stream must close.
+	tok := token(t, uuid.New(), auth.RoleCustomer, func(c *auth.Claims) {
+		c.ExpiresAt = jwt.NewNumericDate(time.Now().Add(2 * time.Second))
+	})
+	resp := open(t, srv, "Bearer "+tok)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	reader := bufio.NewReader(resp.Body)
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if f := readFrame(t, reader); f["comment"] == ": token-expired" {
+			_, _ = reader.ReadString('\n') // blank line that ends the comment frame
+			if _, err := reader.ReadString('\n'); err != io.EOF {
+				t.Fatalf("stream still open after token-expired, err = %v", err)
+			}
+			return
+		}
+	}
+	t.Fatal("stream was not closed after the token expired")
+}
+
+func TestStreamReplaysRoleBroadcasts(t *testing.T) {
+	srv, h, buf := newServerWithBuffer(t)
+	h.OnPushToRoles(buf.AddForRoles)
+	staff := uuid.New()
+
+	first, second := uuid.New(), uuid.New()
+	h.PushToRoles(hub.Notification{ID: first, Type: "inventory.low_stock", OccurredAt: time.Now().UTC()}, auth.RoleStaff, auth.RoleManager)
+	h.PushToRoles(hub.Notification{ID: second, Type: "inventory.expiring", OccurredAt: time.Now().UTC()}, auth.RoleStaff, auth.RoleManager)
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/v1/notifications/stream", nil)
+	req.Header.Set("Authorization", "Bearer "+token(t, staff, auth.RoleStaff, nil))
+	req.Header.Set("Last-Event-ID", first.String())
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	reader := bufio.NewReader(resp.Body)
+	readFrame(t, reader) // : connected
+	if f := readFrame(t, reader); f["id"] != second.String() {
+		t.Fatalf("expected replayed role broadcast %s, got %v", second, f)
 	}
 }
