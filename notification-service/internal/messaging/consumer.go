@@ -169,6 +169,11 @@ func HandleDelivery(d amqp.Delivery, h Events) error {
 // Consume declares the exchanges and queue (including DLX/DLQ), binds the routing keys,
 // and processes messages until ctx is cancelled or the channel closes.
 func (b *Broker) Consume(ctx context.Context, h Events) error {
+	return b.consume(ctx, h, func() {})
+}
+
+// consume is Consume with a hook that runs once deliveries have started.
+func (b *Broker) consume(ctx context.Context, h Events, ready func()) error {
 	ch, err := b.conn.Channel()
 	if err != nil {
 		return err
@@ -187,6 +192,7 @@ func (b *Broker) Consume(ctx context.Context, h Events) error {
 		return err
 	}
 	log.Printf("[consumer] consuming %s", ConsumerQueue)
+	ready()
 
 	for {
 		select {

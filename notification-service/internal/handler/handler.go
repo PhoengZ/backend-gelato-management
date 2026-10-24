@@ -17,6 +17,7 @@ type Handler struct {
 	hub       *hub.Hub
 	heartbeat time.Duration
 	buffer    *stream.ReplayBuffer
+	brokerUp  func() bool // nil when no broker is configured
 }
 
 // New creates a new Handler. An optional ReplayBuffer can be provided for replaying missed events.
@@ -34,6 +35,13 @@ func (h *Handler) WithReplayBuffer(b *stream.ReplayBuffer) *Handler {
 	return h
 }
 
+// WithBrokerStatus makes /health report 503 while connected() is false. Leave it
+// unset when the service runs without a broker.
+func (h *Handler) WithBrokerStatus(connected func() bool) *Handler {
+	h.brokerUp = connected
+	return h
+}
+
 // Routes returns the service router.
 func (h *Handler) Routes() http.Handler {
 	mux := http.NewServeMux()
@@ -43,6 +51,10 @@ func (h *Handler) Routes() http.Handler {
 }
 
 func (h *Handler) health(w http.ResponseWriter, _ *http.Request) {
+	if h.brokerUp != nil && !h.brokerUp() {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "degraded", "broker": "disconnected"})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 

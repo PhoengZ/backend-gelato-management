@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -31,25 +32,35 @@ func main() {
 	replayBuffer := stream.NewReplayBuffer(500, 5*time.Minute)
 	connections := hub.New(cfg.SubscriberBuffer)
 	connections.OnPushToUser(replayBuffer.Add)
+	connections.OnPushToRoles(replayBuffer.AddForRoles)
+
+	// Drop per-user buffers once everything in them has expired.
+	go func() {
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				replayBuffer.CleanExpired()
+			}
+		}
+	}()
 
 	service := notify.New(connections, cfg.OrderOwnerTTL)
 
-	// RabbitMQ is optional: without it the SSE endpoint still serves, but nothing is pushed.
-	broker, err := messaging.Connect(cfg.RabbitMQURL)
-	if err != nil {
-		log.Printf("[messaging] could not connect to RabbitMQ, continuing without it: %v", err)
-		broker = nil
-	}
-	if broker != nil {
-		defer broker.Close()
-		go func() {
-			if err := broker.Consume(ctx, service); err != nil && ctx.Err() == nil {
-				log.Printf("[consumer] stopped: %v", err)
-			}
-		}()
-	}
-
 	h := handler.New(auth.NewVerifier(cfg.JWTSecret, cfg.JWTIssuer, cfg.JWTAudience), connections, cfg.HeartbeatInterval, replayBuffer)
+
+	// RabbitMQ is optional: without it the SSE endpoint still serves, but nothing is pushed.
+	// When configured, the consumer reconnects on its own and /health reports 503 while it is down.
+	if cfg.RabbitMQURL == "" {
+		log.Println("[messaging] RABBITMQ_URL not set, running without a message broker")
+	} else {
+		var brokerUp atomic.Bool
+		h.WithBrokerStatus(brokerUp.Load)
+		go messaging.Run(ctx, cfg.RabbitMQURL, service, &brokerUp)
+	}
 
 	srv := &http.Server{
 		Addr:    ":" + cfg.Port,

@@ -230,3 +230,29 @@ func TestHealth(t *testing.T) {
 		t.Errorf("health = %d %v", resp.StatusCode, body)
 	}
 }
+
+func TestHealthReportsBrokerDown(t *testing.T) {
+	var up bool
+	h := New(auth.NewVerifier(secret, issuer, audience), hub.New(8), 50*time.Millisecond).
+		WithBrokerStatus(func() bool { return up })
+	srv := httptest.NewServer(h.Routes())
+	t.Cleanup(srv.Close)
+
+	check := func(wantStatus int, wantBody string) {
+		t.Helper()
+		resp, err := http.Get(srv.URL + "/health")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var body map[string]string
+		_ = json.NewDecoder(resp.Body).Decode(&body)
+		if resp.StatusCode != wantStatus || body["status"] != wantBody {
+			t.Errorf("health = %d %v, want %d %q", resp.StatusCode, body, wantStatus, wantBody)
+		}
+	}
+
+	check(http.StatusServiceUnavailable, "degraded")
+	up = true
+	check(http.StatusOK, "ok")
+}

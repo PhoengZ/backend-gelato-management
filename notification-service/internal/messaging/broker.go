@@ -1,7 +1,10 @@
 package messaging
 
 import (
+	"context"
 	"log"
+	"sync/atomic"
+	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )
@@ -31,4 +34,38 @@ func (b *Broker) Close() {
 		return
 	}
 	b.conn.Close()
+}
+
+const (
+	minBackoff = time.Second
+	maxBackoff = 30 * time.Second
+)
+
+// Run keeps a consumer attached to the broker until ctx is cancelled. A failed dial
+// or a dropped connection is retried with capped exponential backoff; messages wait
+// in the durable queue meanwhile. connected is true only while deliveries flow.
+func Run(ctx context.Context, url string, h Events, connected *atomic.Bool) {
+	backoff := minBackoff
+	for ctx.Err() == nil {
+		b, err := Connect(url)
+		if err == nil {
+			err = b.consume(ctx, h, func() {
+				connected.Store(true)
+				backoff = minBackoff
+			})
+			connected.Store(false)
+			b.Close()
+		}
+		if ctx.Err() != nil {
+			return
+		}
+		log.Printf("[messaging] broker unavailable, retrying in %s: %v", backoff, err)
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(backoff):
+		}
+		backoff = min(backoff*2, maxBackoff)
+	}
 }

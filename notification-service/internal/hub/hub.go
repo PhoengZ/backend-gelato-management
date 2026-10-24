@@ -33,10 +33,11 @@ type Subscriber struct {
 func (s *Subscriber) C() <-chan Notification { return s.ch }
 
 type Hub struct {
-	mu           sync.RWMutex
-	subs         map[*Subscriber]struct{}
-	buffer       int
-	onPushToUser func(uuid.UUID, Notification)
+	mu            sync.RWMutex
+	subs          map[*Subscriber]struct{}
+	buffer        int
+	onPushToUser  func(uuid.UUID, Notification)
+	onPushToRoles func(Notification, ...auth.Role)
 }
 
 // New creates a Hub whose subscribers each buffer up to buffer notifications.
@@ -52,6 +53,13 @@ func (h *Hub) OnPushToUser(fn func(uuid.UUID, Notification)) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.onPushToUser = fn
+}
+
+// OnPushToRoles registers an optional hook invoked whenever PushToRoles is called.
+func (h *Hub) OnPushToRoles(fn func(Notification, ...auth.Role)) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.onPushToRoles = fn
 }
 
 // Subscribe registers a connection and returns it with a cancel func that must
@@ -83,6 +91,12 @@ func (h *Hub) PushToUser(userID uuid.UUID, n Notification) int {
 
 // PushToRoles delivers n to every connection whose role is in roles.
 func (h *Hub) PushToRoles(n Notification, roles ...auth.Role) int {
+	h.mu.RLock()
+	hook := h.onPushToRoles
+	h.mu.RUnlock()
+	if hook != nil {
+		hook(n, roles...)
+	}
 	return h.push(n, func(s *Subscriber) bool {
 		for _, r := range roles {
 			if s.role == r {

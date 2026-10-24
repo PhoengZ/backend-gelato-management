@@ -2,11 +2,13 @@
 package stream
 
 import (
+	"sort"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 
+	"notification-service/internal/auth"
 	"notification-service/internal/hub"
 )
 
@@ -25,11 +27,12 @@ type bufferedItem struct {
 	addedAt      time.Time
 }
 
-// customerRingBuffer is a circular ring buffer storing up to cap notifications for a single customer.
+// customerRingBuffer is a circular ring buffer storing up to cap notifications for a single
+// customer (or role). Slots are allocated as they are used, so a user with one notification
+// costs one slot rather than cap.
 type customerRingBuffer struct {
 	items []bufferedItem
-	head  int // next write position
-	count int // number of elements currently stored
+	head  int // oldest element once the buffer is full
 	cap   int // maximum capacity
 }
 
@@ -37,68 +40,52 @@ func newCustomerRingBuffer(capacity int) *customerRingBuffer {
 	if capacity <= 0 {
 		capacity = DefaultMaxEventsPerCustomer
 	}
-	return &customerRingBuffer{
-		items: make([]bufferedItem, capacity),
-		cap:   capacity,
-	}
+	return &customerRingBuffer{cap: capacity}
 }
 
 // add stores a notification in the circular ring buffer, overwriting the oldest item if full.
 func (rb *customerRingBuffer) add(n hub.Notification, now time.Time) {
 	it := bufferedItem{notification: n, addedAt: now}
-	if rb.count < rb.cap {
-		rb.items[rb.head] = it
-		rb.head = (rb.head + 1) % rb.cap
-		rb.count++
-	} else {
-		// Overwrite the oldest element at head
-		rb.items[rb.head] = it
-		rb.head = (rb.head + 1) % rb.cap
+	if len(rb.items) < rb.cap {
+		rb.items = append(rb.items, it)
+		return
 	}
+	rb.items[rb.head] = it
+	rb.head = (rb.head + 1) % rb.cap
+}
+
+// at returns the i-th item in chronological order (oldest first).
+func (rb *customerRingBuffer) at(i int) bufferedItem {
+	return rb.items[(rb.head+i)%len(rb.items)]
 }
 
 // contains checks if a notification with the given ID is already in the buffer.
 func (rb *customerRingBuffer) contains(id uuid.UUID) bool {
-	for i := 0; i < rb.count; i++ {
-		idx := i
-		if rb.count == rb.cap {
-			idx = (rb.head + i) % rb.cap
-		}
-		if rb.items[idx].notification.ID == id {
+	for i := range rb.items {
+		if rb.items[i].notification.ID == id {
 			return true
 		}
 	}
 	return false
 }
 
-// events returns all non-expired notifications in chronological order (oldest to newest).
-func (rb *customerRingBuffer) events(now time.Time, ttl time.Duration) []hub.Notification {
-	if rb.count == 0 {
-		return nil
-	}
-	var valid []hub.Notification
-	for i := 0; i < rb.count; i++ {
-		idx := i
-		if rb.count == rb.cap {
-			idx = (rb.head + i) % rb.cap
-		}
-		it := rb.items[idx]
+// valid returns all non-expired items in chronological order (oldest to newest).
+func (rb *customerRingBuffer) valid(now time.Time, ttl time.Duration) []bufferedItem {
+	var out []bufferedItem
+	for i := range rb.items {
+		it := rb.at(i)
 		if now.Sub(it.addedAt) > ttl {
 			continue // expired
 		}
-		valid = append(valid, it.notification)
+		out = append(out, it)
 	}
-	return valid
+	return out
 }
 
 // hasValid checks if there are any non-expired items in the buffer.
 func (rb *customerRingBuffer) hasValid(now time.Time, ttl time.Duration) bool {
-	for i := 0; i < rb.count; i++ {
-		idx := i
-		if rb.count == rb.cap {
-			idx = (rb.head + i) % rb.cap
-		}
-		if now.Sub(rb.items[idx].addedAt) <= ttl {
+	for i := range rb.items {
+		if now.Sub(rb.items[i].addedAt) <= ttl {
 			return true
 		}
 	}
@@ -106,10 +93,11 @@ func (rb *customerRingBuffer) hasValid(now time.Time, ttl time.Duration) bool {
 }
 
 // ReplayBuffer is a thread-safe, bounded in-memory ring buffer storing dispatched notifications
-// partitioned by customer ID with a maximum event capacity and TTL.
+// partitioned by customer ID (and by role for broadcast alerts) with a maximum event capacity and TTL.
 type ReplayBuffer struct {
 	mu        sync.RWMutex
 	customers map[uuid.UUID]*customerRingBuffer
+	roles     map[auth.Role]*customerRingBuffer
 	maxEvents int
 	ttl       time.Duration
 	now       func() time.Time
@@ -139,6 +127,7 @@ func newReplayBufferWithClock(maxEvents int, ttl time.Duration, clock func() tim
 	}
 	return &ReplayBuffer{
 		customers: make(map[uuid.UUID]*customerRingBuffer),
+		roles:     make(map[auth.Role]*customerRingBuffer),
 		maxEvents: maxEvents,
 		ttl:       ttl,
 		now:       clock,
@@ -169,6 +158,28 @@ func (b *ReplayBuffer) Add(customerID uuid.UUID, n hub.Notification) {
 	crb.add(n, b.now())
 }
 
+// AddForRoles appends a notification broadcast to roles (e.g. low-stock alerts for STAFF and
+// MANAGER) so those users can replay it after reconnecting.
+func (b *ReplayBuffer) AddForRoles(n hub.Notification, roles ...auth.Role) {
+	if n.ID == uuid.Nil {
+		return
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	for _, r := range roles {
+		rrb, ok := b.roles[r]
+		if !ok {
+			rrb = newCustomerRingBuffer(b.maxEvents)
+			b.roles[r] = rrb
+		}
+		if !rrb.contains(n.ID) {
+			rrb.add(n, b.now())
+		}
+	}
+}
+
 // Replay returns all non-expired notifications for customerID that occurred after lastEventID.
 //   - If lastEventID is uuid.Nil, all valid non-expired notifications for that customer are returned.
 //   - If lastEventID is found in the buffer, only subsequent valid notifications are returned.
@@ -176,38 +187,44 @@ func (b *ReplayBuffer) Add(customerID uuid.UUID, n hub.Notification) {
 //     non-expired notifications are returned to maximize delivery.
 //   - If lastEventID matches the latest notification, an empty slice is returned.
 func (b *ReplayBuffer) Replay(customerID uuid.UUID, lastEventID uuid.UUID) []hub.Notification {
+	return b.ReplayFor(customerID, "", lastEventID)
+}
+
+// ReplayFor is Replay for a connection that also receives broadcasts for role. Notifications
+// addressed to the user and to the role are merged in the order they were dispatched.
+func (b *ReplayBuffer) ReplayFor(userID uuid.UUID, role auth.Role, lastEventID uuid.UUID) []hub.Notification {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
-	crb, ok := b.customers[customerID]
-	if !ok {
+	now := b.now()
+	var items []bufferedItem
+	if crb, ok := b.customers[userID]; ok {
+		items = append(items, crb.valid(now, b.ttl)...)
+	}
+	if rrb, ok := b.roles[role]; ok && role != "" {
+		items = append(items, rrb.valid(now, b.ttl)...)
+		sort.SliceStable(items, func(i, j int) bool { return items[i].addedAt.Before(items[j].addedAt) })
+	}
+	if len(items) == 0 {
 		return nil
 	}
 
-	all := crb.events(b.now(), b.ttl)
-	if len(all) == 0 {
-		return nil
+	all := make([]hub.Notification, len(items))
+	for i, it := range items {
+		all[i] = it.notification
 	}
 
 	if lastEventID == uuid.Nil {
 		return all
 	}
 
-	foundIdx := -1
 	for i, n := range all {
 		if n.ID == lastEventID {
-			foundIdx = i
-			break
+			if i+1 < len(all) {
+				return all[i+1:]
+			}
+			return nil
 		}
-	}
-
-	if foundIdx >= 0 {
-		if foundIdx+1 < len(all) {
-			res := make([]hub.Notification, len(all)-(foundIdx+1))
-			copy(res, all[foundIdx+1:])
-			return res
-		}
-		return nil
 	}
 
 	// lastEventID was not found (evicted/older than buffer retention window): return all available
@@ -228,10 +245,11 @@ func (b *ReplayBuffer) Size(customerID uuid.UUID) int {
 	if !ok {
 		return 0
 	}
-	return len(crb.events(b.now(), b.ttl))
+	return len(crb.valid(b.now(), b.ttl))
 }
 
-// CleanExpired removes customer entries that contain no valid non-expired events.
+// CleanExpired removes customer and role entries that contain no valid non-expired events.
+// Call it periodically; without it the map keeps one entry per user ever notified.
 func (b *ReplayBuffer) CleanExpired() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -242,6 +260,11 @@ func (b *ReplayBuffer) CleanExpired() {
 			delete(b.customers, id)
 		}
 	}
+	for r, rrb := range b.roles {
+		if !rrb.hasValid(now, b.ttl) {
+			delete(b.roles, r)
+		}
+	}
 }
 
 // Clear removes all stored notifications across all customers.
@@ -249,4 +272,5 @@ func (b *ReplayBuffer) Clear() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.customers = make(map[uuid.UUID]*customerRingBuffer)
+	b.roles = make(map[auth.Role]*customerRingBuffer)
 }
