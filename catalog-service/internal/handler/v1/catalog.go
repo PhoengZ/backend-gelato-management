@@ -8,7 +8,7 @@ import (
 	"log"
 
 	"catalog-service/internal/auth"
-	"catalog-service/internal/handler"
+	"catalog-service/internal/idempotency"
 	"catalog-service/internal/middleware"
 	"catalog-service/internal/repository"
 	"catalog-service/internal/service"
@@ -77,7 +77,9 @@ func (h *CatalogHandler) Create(c *fiber.Ctx) error {
 	if err != nil {
 		return handleServiceError(c, err)
 	}
-	handler.LogAudit(c, "CREATE", flavor.ID.String(), flavor.Name)
+	if flavor.IdempotentReplay {
+		c.Set("X-Idempotent-Replay", "true")
+	}
 	return c.Status(fiber.StatusCreated).JSON(flavor)
 }
 
@@ -94,7 +96,6 @@ func (h *CatalogHandler) Update(c *fiber.Ctx) error {
 	if err != nil {
 		return handleServiceError(c, err)
 	}
-	handler.LogAudit(c, "UPDATE", flavor.ID.String(), flavor.Name)
 	return c.Status(fiber.StatusOK).JSON(flavor)
 }
 
@@ -111,7 +112,6 @@ func (h *CatalogHandler) Replace(c *fiber.Ctx) error {
 	if err != nil {
 		return handleServiceError(c, err)
 	}
-	handler.LogAudit(c, "REPLACE", flavor.ID.String(), flavor.Name)
 	return c.Status(fiber.StatusOK).JSON(flavor)
 }
 
@@ -123,7 +123,6 @@ func (h *CatalogHandler) Archive(c *fiber.Ctx) error {
 	if err := h.service.Archive(c.UserContext(), id); err != nil {
 		return handleServiceError(c, err)
 	}
-	handler.LogAudit(c, "DELETE", id.String(), "archived")
 	return c.SendStatus(fiber.StatusNoContent)
 }
 
@@ -272,6 +271,10 @@ func containsNull(value any) bool {
 
 func handleServiceError(c *fiber.Ctx, err error) error {
 	switch {
+	case errors.Is(err, idempotency.ErrConflict):
+		return c.Status(409).JSON(fiber.Map{"code": "IDEMPOTENCY_CONFLICT", "message": "Idempotency key already used with different payload"})
+	case errors.Is(err, idempotency.ErrUnavailable):
+		return c.Status(503).JSON(fiber.Map{"code": "IDEMPOTENCY_UNAVAILABLE", "message": "Catalog request replay storage is unavailable"})
 	case errors.Is(err, service.ErrInvalidInput):
 		return badRequest(c, "INVALID_INPUT", err.Error())
 	case errors.Is(err, service.ErrFlavorNotFound):

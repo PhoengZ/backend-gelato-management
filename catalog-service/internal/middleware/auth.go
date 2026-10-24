@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"catalog-service/internal/audit"
 	"catalog-service/internal/auth"
 
 	"github.com/gofiber/fiber/v2"
@@ -70,6 +71,7 @@ func authenticate(c *fiber.Ctx, verifier *auth.Verifier, required bool) (bool, e
 	}
 	c.Locals(LocalUserID, claims.Subject)
 	c.Locals(LocalUserRole, string(claims.Role))
+	c.SetUserContext(audit.WithActor(c.UserContext(), claims.Subject, string(claims.Role)))
 	return true, nil
 }
 

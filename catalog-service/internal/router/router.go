@@ -17,20 +17,13 @@ func Setup(app *fiber.App, catalogService service.CatalogService, verifier *auth
 	managerOnly := middleware.RequireManager(verifier)
 	optionalAuth := middleware.AuthenticateIfPresent(verifier)
 
-	var idempotency fiber.Handler
-	if len(redisClient) > 0 && redisClient[0] != nil {
-		idempotency = middleware.Idempotency(redisClient[0])
-	} else {
-		idempotency = middleware.Idempotency(nil)
-	}
-
 	app.Get("/health", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{"status": "ok"})
 	})
 
 	flavors := app.Group("/api/v1/flavors", middleware.PreventCaching, middleware.RequestTimeout(requestTimeout))
 	flavors.Get("/", optionalAuth, handler.List)
-	flavors.Post("/", managerOnly, idempotency, handler.Create)
+	flavors.Post("/", managerOnly, middleware.Idempotency(), handler.Create)
 	flavors.Get("/:flavor_id/recipe", managerOnly, handler.GetRecipe)
 	flavors.Get("/:flavor_id", optionalAuth, handler.Get)
 	flavors.Put("/:flavor_id", managerOnly, handler.Replace)

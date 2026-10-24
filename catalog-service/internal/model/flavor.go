@@ -45,7 +45,8 @@ type Flavor struct {
 
 type FlavorAdmin struct {
 	Flavor
-	Recipe string `json:"recipe"`
+	Recipe           string `json:"recipe"`
+	IdempotentReplay bool   `json:"-"`
 }
 
 type FlavorRecipe struct {

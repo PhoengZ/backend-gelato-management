@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
@@ -17,6 +19,7 @@ import (
 	pb "catalog-service/gen/catalog/v1"
 	"catalog-service/internal/auth"
 	"catalog-service/internal/model"
+	"github.com/google/uuid"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -27,7 +30,7 @@ import (
 // This complements transport tests: a contract and test-only server are not a
 // runnable service. Redis cleanup remains scoped to the random test namespace.
 func TestCatalogProcessRestartRetainsGRPCData(t *testing.T) {
-	_, _, prefix := redisRepositoryForTest(t)
+	_, redisClient, prefix := redisRepositoryForTest(t)
 	bin := filepath.Join(t.TempDir(), "catalog-service")
 	buildCtx, cancelBuild := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancelBuild()
@@ -37,6 +40,10 @@ func TestCatalogProcessRestartRetainsGRPCData(t *testing.T) {
 	}
 
 	var id string
+	key := uuid.NewString()
+	cacheKey := "idempotency:" + key
+	t.Cleanup(func() { _ = redisClient.Del(context.Background(), cacheKey).Err() })
+	var original string
 	for cycle := range 2 {
 		httpAddr, grpcAddr := availableAddress(t), availableAddress(t)
 		_, httpPort, _ := net.SplitHostPort(httpAddr)
@@ -61,8 +68,57 @@ func TestCatalogProcessRestartRetainsGRPCData(t *testing.T) {
 			if err != nil || got.Flavor.Name != "Survives restart" {
 				t.Fatalf("restart lost data: %v %v", got, err)
 			}
+			if history := readAuditDocuments(t, redisClient, prefix, id); len(history) != 1 || history[0]["action"] != "CREATE" {
+				t.Fatalf("Catalog restart lost durable audit history: %v", history)
+			}
 		}
 		httpClient := &http.Client{Timeout: time.Second}
+		request, err := http.NewRequest("POST", "http://"+httpAddr+"/api/v1/flavors", strings.NewReader(flavorBody("Lost response before restart")))
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Authorization", "Bearer "+handlerToken(t, auth.RoleManager))
+		request.Header.Set("Idempotency-Key", key)
+		if cycle == 0 {
+			// Send over a real TCP connection and deliberately never read the reply.
+			// Wait for the commit before dropping the connection and restarting.
+			connection, err := net.DialTimeout("tcp", httpAddr, time.Second)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer connection.Close()
+			_ = connection.SetWriteDeadline(time.Now().Add(time.Second))
+			if err := request.Write(connection); err != nil {
+				t.Fatal(err)
+			}
+			deadline := time.Now().Add(3 * time.Second)
+			for redisClient.Exists(context.Background(), cacheKey).Val() == 0 && time.Now().Before(deadline) {
+				time.Sleep(10 * time.Millisecond)
+			}
+			var cached struct {
+				Body string `json:"body"`
+			}
+			if err := json.Unmarshal([]byte(redisClient.Get(context.Background(), cacheKey).Val()), &cached); err != nil {
+				t.Fatal("lost-response create never committed", err)
+			}
+			original = cached.Body
+			connection.Close()
+		} else {
+			replayed, err := httpClient.Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, err := io.ReadAll(replayed.Body)
+			replayed.Body.Close()
+			if err != nil || replayed.StatusCode != 201 || replayed.Header.Get("X-Idempotent-Replay") != "true" || string(body) != original {
+				t.Fatalf("restart lost idempotent result: status=%d body=%s error=%v", replayed.StatusCode, body, err)
+			}
+			var created model.FlavorAdmin
+			if err := json.Unmarshal(body, &created); err != nil || len(readAuditDocuments(t, redisClient, prefix, created.ID.String())) != 1 {
+				t.Fatal("restart replay created a duplicate mutation", err)
+			}
+		}
 		response, err := httpClient.Get("http://" + httpAddr + "/api/v1/flavors/" + id)
 		if err != nil {
 			t.Fatal(err)
@@ -86,6 +142,9 @@ func TestCatalogProcessRestartRetainsGRPCData(t *testing.T) {
 		if err := stop(); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if history := readAuditDocuments(t, redisClient, prefix, id); len(history) != 2 || history[1]["action"] != "DELETE" {
+		t.Fatalf("process mutation audit missing after shutdown: %v", history)
 	}
 }
 

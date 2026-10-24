@@ -55,6 +55,9 @@ func run(ctx context.Context) error {
 
 	verifier := auth.NewVerifier(cfg.JWTSecret, cfg.JWTIssuer, cfg.JWTAudience)
 	flavors := repository.NewRedisFlavorRepository(redisClient, cfg.RedisKeyPrefix)
+	if err := flavors.PrepareIdempotency(startupCtx); err != nil {
+		return errors.New("prepare Catalog idempotency storage failed; check storage access")
+	}
 	catalogService := service.NewCatalogService(flavors)
 
 	app := fiber.New(fiber.Config{

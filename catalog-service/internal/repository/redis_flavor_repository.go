@@ -9,7 +9,10 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 
+	"catalog-service/internal/audit"
+	"catalog-service/internal/idempotency"
 	"catalog-service/internal/model"
 
 	"github.com/google/uuid"
@@ -20,19 +23,52 @@ var (
 	ErrFlavorNotFound = errors.New("flavor not found")
 	ErrNameConflict   = errors.New("flavor name already exists")
 	ErrUpdateConflict = errors.New("flavor changed during update")
+	ErrAuditStorage   = errors.New("Catalog mutation audit storage is unavailable")
 )
 
 var createFlavorScript = redis.NewScript(`
+if ARGV[4] ~= "" then
+  for _, key in ipairs({KEYS[5], KEYS[6]}) do
+    local actual = redis.call("TYPE", key).ok
+    if actual ~= "none" and actual ~= "string" then return -4 end
+    local previous = redis.call("GET", key)
+    if previous then
+      local ok, record = pcall(cjson.decode, previous)
+      if not ok or type(record) ~= "table" or type(record.payload_hash) ~= "string" or
+         type(record.body) ~= "string" or record.status_code ~= 201 then return -4 end
+      if record.payload_hash ~= ARGV[4] then return -5 end
+      return {2, record.body}
+    end
+  end
+  if not redis.acl_check_cmd("SET", KEYS[5], ARGV[5], "PX", ARGV[6]) then return -4 end
+end
+local expected = {"string", "string", "set", "list"}
+for i, kind in ipairs(expected) do
+  local actual = redis.call("TYPE", KEYS[i]).ok
+  if actual ~= "none" and actual ~= kind then return -3 end
+end
 if redis.call("EXISTS", KEYS[2]) == 1 then
   return 0
 end
+if redis.call("EXISTS", KEYS[1]) == 1 then return -2 end
+if not redis.acl_check_cmd("SET", KEYS[1], ARGV[1]) or
+   not redis.acl_check_cmd("SET", KEYS[2], ARGV[2]) or
+   not redis.acl_check_cmd("SADD", KEYS[3], ARGV[2]) or
+   not redis.acl_check_cmd("RPUSH", KEYS[4], ARGV[3]) then return -3 end
 redis.call("SET", KEYS[1], ARGV[1])
 redis.call("SET", KEYS[2], ARGV[2])
 redis.call("SADD", KEYS[3], ARGV[2])
-return 1
+redis.call("RPUSH", KEYS[4], ARGV[3])
+if ARGV[4] ~= "" then redis.call("SET", KEYS[5], ARGV[5], "PX", ARGV[6]) end
+return {1, ARGV[1]}
 `)
 
 var updateFlavorScript = redis.NewScript(`
+local expected = {"string", "string", "string", "list"}
+for i, kind in ipairs(expected) do
+  local actual = redis.call("TYPE", KEYS[i]).ok
+  if actual ~= "none" and actual ~= kind then return -3 end
+end
 local current = redis.call("GET", KEYS[1])
 if not current then
   return -1
@@ -44,19 +80,26 @@ local owner = redis.call("GET", KEYS[3])
 if owner and owner ~= ARGV[2] then
   return 0
 end
+if not redis.acl_check_cmd("SET", KEYS[1], ARGV[1]) or
+   not redis.acl_check_cmd("SET", KEYS[3], ARGV[2]) or
+   not redis.acl_check_cmd("RPUSH", KEYS[4], ARGV[4]) then return -3 end
 if KEYS[2] ~= KEYS[3] then
   if redis.call("GET", KEYS[2]) == ARGV[2] then
+    if not redis.acl_check_cmd("DEL", KEYS[2]) then return -3 end
     redis.call("DEL", KEYS[2])
   end
 end
 redis.call("SET", KEYS[3], ARGV[2])
 redis.call("SET", KEYS[1], ARGV[1])
+redis.call("RPUSH", KEYS[4], ARGV[4])
 return 1
 `)
 
 type RedisFlavorRepository struct {
-	client *redis.Client
-	prefix string
+	client      *redis.Client
+	prefix      string
+	legacyMu    sync.Mutex
+	legacyReady bool
 }
 
 func NewRedisFlavorRepository(client *redis.Client, prefix string) *RedisFlavorRepository {
@@ -67,24 +110,101 @@ func NewRedisFlavorRepository(client *redis.Client, prefix string) *RedisFlavorR
 }
 
 func (r *RedisFlavorRepository) Create(ctx context.Context, flavor *model.FlavorAdmin) error {
+	_, _, err := r.create(ctx, flavor, nil)
+	return err
+}
+
+func (r *RedisFlavorRepository) CreateIdempotent(ctx context.Context, flavor *model.FlavorAdmin, request idempotency.Request) (*model.FlavorAdmin, bool, error) {
+	return r.create(ctx, flavor, &request)
+}
+
+func (r *RedisFlavorRepository) create(ctx context.Context, flavor *model.FlavorAdmin, request *idempotency.Request) (*model.FlavorAdmin, bool, error) {
+	record, err := audit.NewRecord(ctx, audit.Create, nil, flavor)
+	if err != nil {
+		return nil, false, err
+	}
+	history, err := json.Marshal(record)
+	if err != nil {
+		return nil, false, fmt.Errorf("encode Catalog audit: %w", err)
+	}
 	payload, err := json.Marshal(flavor)
 	if err != nil {
-		return fmt.Errorf("encode flavor: %w", err)
+		return nil, false, fmt.Errorf("encode flavor: %w", err)
+	}
+	key, legacyKey := r.prefix+":unused_idempotency:"+flavor.ID.String(), r.prefix+":unused_idempotency:"+flavor.ID.String()
+	hash, cached := "", []byte{}
+	if request != nil {
+		if len(request.PayloadHash) != 64 {
+			return nil, false, idempotency.ErrUnavailable
+		}
+		if _, err := hex.DecodeString(request.PayloadHash); err != nil {
+			return nil, false, idempotency.ErrUnavailable
+		}
+		parsed, err := uuid.Parse(request.RawKey)
+		if err != nil || parsed != request.Key {
+			return nil, false, idempotency.ErrUnavailable
+		}
+		key, legacyKey = "idempotency:"+request.Key.String(), "idempotency:"+request.RawKey
+		if err := r.PrepareIdempotency(ctx); err != nil {
+			return nil, false, idempotency.ErrUnavailable
+		}
+		hash = request.PayloadHash
+		cached, err = json.Marshal(struct {
+			PayloadHash string            `json:"payload_hash"`
+			StatusCode  int               `json:"status_code"`
+			Headers     map[string]string `json:"headers"`
+			Body        string            `json:"body"`
+		}{hash, 201, map[string]string{"Content-Type": "application/json"}, string(payload)})
+		if err != nil {
+			return nil, false, idempotency.ErrUnavailable
+		}
 	}
 	result, err := createFlavorScript.Run(
 		ctx,
 		r.client,
-		[]string{r.flavorKey(flavor.ID), r.nameKey(flavor.Name), r.idsKey()},
+		[]string{r.flavorKey(flavor.ID), r.nameKey(flavor.Name), r.idsKey(), r.auditKey(flavor.ID), key, legacyKey},
 		payload,
 		flavor.ID.String(),
-	).Int()
+		history,
+		hash, cached, idempotency.TTL.Milliseconds(),
+	).Result()
 	if err != nil {
-		return fmt.Errorf("create flavor in Redis: %w", err)
+		if request != nil {
+			return nil, false, fmt.Errorf("%w: Redis create failed", idempotency.ErrUnavailable)
+		}
+		return nil, false, fmt.Errorf("create flavor in Redis: %w", err)
 	}
-	if result == 0 {
-		return ErrNameConflict
+	if code, ok := result.(int64); ok {
+		switch code {
+		case -5:
+			return nil, false, idempotency.ErrConflict
+		case -4:
+			return nil, false, idempotency.ErrUnavailable
+		case -3:
+			return nil, false, ErrAuditStorage
+		case -2:
+			return nil, false, ErrUpdateConflict
+		case 0:
+			return nil, false, ErrNameConflict
+		}
+		return nil, false, idempotency.ErrUnavailable
 	}
-	return nil
+	values, ok := result.([]interface{})
+	if !ok || len(values) != 2 {
+		return nil, false, idempotency.ErrUnavailable
+	}
+	if values[0] == int64(1) {
+		return flavor, false, nil
+	}
+	body, ok := values[1].(string)
+	if values[0] != int64(2) || !ok {
+		return nil, false, idempotency.ErrUnavailable
+	}
+	var original model.FlavorAdmin
+	if err := json.Unmarshal([]byte(body), &original); err != nil || original.ID == uuid.Nil {
+		return nil, false, idempotency.ErrUnavailable
+	}
+	return &original, true, nil
 }
 
 func (r *RedisFlavorRepository) FindByID(ctx context.Context, id uuid.UUID) (*model.FlavorAdmin, error) {
@@ -154,6 +274,14 @@ func (r *RedisFlavorRepository) List(ctx context.Context) ([]*model.FlavorAdmin,
 }
 
 func (r *RedisFlavorRepository) Update(ctx context.Context, previous, flavor *model.FlavorAdmin) error {
+	record, err := audit.NewRecord(ctx, audit.MutationAction(ctx), previous, flavor)
+	if err != nil {
+		return err
+	}
+	history, err := json.Marshal(record)
+	if err != nil {
+		return fmt.Errorf("encode Catalog audit: %w", err)
+	}
 	payload, err := json.Marshal(flavor)
 	if err != nil {
 		return fmt.Errorf("encode flavor: %w", err)
@@ -165,15 +293,18 @@ func (r *RedisFlavorRepository) Update(ctx context.Context, previous, flavor *mo
 	result, err := updateFlavorScript.Run(
 		ctx,
 		r.client,
-		[]string{r.flavorKey(flavor.ID), r.nameKey(previous.Name), r.nameKey(flavor.Name)},
+		[]string{r.flavorKey(flavor.ID), r.nameKey(previous.Name), r.nameKey(flavor.Name), r.auditKey(flavor.ID)},
 		payload,
 		flavor.ID.String(),
 		expected,
+		history,
 	).Int()
 	if err != nil {
 		return fmt.Errorf("update flavor in Redis: %w", err)
 	}
 	switch result {
+	case -3:
+		return ErrAuditStorage
 	case -2:
 		return ErrUpdateConflict
 	case -1:
@@ -183,6 +314,10 @@ func (r *RedisFlavorRepository) Update(ctx context.Context, previous, flavor *mo
 	default:
 		return nil
 	}
+}
+
+func (r *RedisFlavorRepository) auditKey(id uuid.UUID) string {
+	return r.prefix + ":flavor_audit:" + id.String()
 }
 
 func (r *RedisFlavorRepository) flavorKey(id uuid.UUID) string {

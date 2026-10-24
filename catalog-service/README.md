@@ -85,7 +85,7 @@ headers or putting Manager tokens into customer-facing clients. Review the read
 policy with Gateway/frontend owners before merging the shared Catalog contract.
 See [the security audit](SECURITY.md) for verification scope and remaining limits.
 
-## Request and transport logging (NFR-07)
+## Privacy and mutation audit (NFR-07 and NFR-08)
 
 Request logs contain only an allowlisted HTTP method, registered Catalog route
 template, status, and duration. Raw URLs/IDs in paths, query strings, headers,
@@ -98,6 +98,59 @@ enabled; unauthenticated metadata and unsupported content subtypes are excluded.
 HTTP/2 frame diagnostics enabled with `GODEBUG=http2debug=1/2` are reduced to a
 timestamped transport event without decoded headers or protocol payloads.
 
+REST and gRPC bind the actor from the locally verified Manager JWT into a private
+typed context. Client-supplied identity headers/metadata never determine audit
+attribution. Direct repository writers must also supply an explicit trusted
+Manager context; otherwise the write fails.
+
+Each committed CREATE, PATCH (`UPDATE`), PUT (`REPLACE`), or archive (`DELETE`)
+appends a JSON record to the Catalog-owned Redis list
+`<REDIS_KEY_PREFIX>:flavor_audit:<flavor_uuid>` in the same Lua operation as the
+flavor/index mutation. Records have a unique ID, actor UUID/role, resource UUID,
+UTC time, changed field names, and before/after allergens and active status.
+Freeform text, recipes, URLs, JWTs, and credentials are not copied into the
+ledger or diagnostic audit receipts. Inspect history through authorized Catalog
+storage administration, for example `LRANGE <audit_key> 0 99`; no public history
+endpoint is introduced.
+
+The scripts check key types and Redis 7 command/key ACL permissions before any
+writes. If audit storage is unavailable or `RPUSH` is denied, the mutation fails
+without changing the flavor/name indexes. The Catalog Redis identity therefore
+needs `TYPE`, `RPUSH`, and access to the audit namespace in addition to its
+existing scripting/read/write permissions. Conflicts, denied/invalid requests,
+identical PUTs, repeated archives, and POST idempotency replays do not append
+additional committed-mutation records.
+
+Audit keys have no automatic expiry and the application only appends to them.
+They use the same Redis AOF/volume durability as Catalog data, and survive a
+Catalog process restart. Deployment must preserve Redis persistence/backups and
+restrict privileged access; application append-only behavior does not protect
+against a Redis administrator changing storage. Existing flavors require no
+JSON migration. Historical events from before this version cannot be recovered;
+their first subsequent mutation begins a new history with its prior safety
+state captured.
+
+## Atomic REST create idempotency
+
+Manager `POST /api/v1/flavors` accepts one optional UUID `Idempotency-Key`.
+Equivalent UUID spellings share a canonical key. The Redis Lua create operation
+checks the raw-body SHA-256 hash and commits the flavor, indexes, audit record and
+original `201` response together. Same-key/same-body retries return that original
+body with `X-Idempotent-Replay: true` for 24 hours, including after rename, archive,
+lost replies or a process restart. A different body returns
+`409 IDEMPOTENCY_CONFLICT`; unavailable/corrupt response storage fails closed with
+`503 IDEMPOTENCY_UNAVAILABLE`. There is no in-memory fallback or post-create cache
+write. gRPC has no idempotency-key field in its current contract.
+
+For upgrade, stop old Catalog writers before starting this binary. Startup uses
+`SCAN` to reconcile every legacy UUID spelling in the existing `idempotency:`
+namespace into its canonical key before opening listeners, retaining original
+responses and expiry times. Conflicting historical results block that UUID with
+`503` until expiry or explicit administrator reconciliation. Existing duplicate
+flavors created by the old implementation need separate review. Redis permissions
+must include `SCAN`, `PTTL`, scripting and read/write access to `idempotency:*`.
+The upgrade does not delete legacy keys or refresh their original retention.
+
 ## Configuration
 
 Copy `.env.example` to `.env` for host-based development.
@@ -105,7 +158,7 @@ Copy `.env.example` to `.env` for host-based development.
 | Variable | Purpose |
 | --- | --- |
 | `REDIS_URL` | Catalog Redis connection URL |
-| `REDIS_KEY_PREFIX` | Namespace for all Catalog keys, default `catalog:v1` |
+| `REDIS_KEY_PREFIX` | Namespace for flavor/index/audit keys, default `catalog:v1`; replay keys retain `idempotency:` for compatibility |
 | `JWT_SECRET` | Shared JWT secret with at least 32 bytes |
 | `JWT_ISSUER` | Expected `iss` claim |
 | `JWT_AUDIENCE` | Expected `aud` claim |
