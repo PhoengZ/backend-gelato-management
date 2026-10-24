@@ -17,18 +17,52 @@ import (
 
 // Store is the persistence the handler needs; *repository.FulfillmentRepository implements it.
 type Store interface {
-	List(ctx context.Context, statuses []models.Status) ([]models.Fulfillment, error)
+	List(ctx context.Context, filter models.ListFilter) ([]models.Fulfillment, error)
 	GetByOrderID(ctx context.Context, orderID uuid.UUID) (models.Fulfillment, error)
 	UpdateStatus(ctx context.Context, orderID uuid.UUID, to models.Status) (models.Fulfillment, error)
 	GetSlotCapacity(ctx context.Context, slotTime time.Time) (int, error)
+	GetHistory(ctx context.Context, fulfillmentID uuid.UUID) ([]models.FulfillmentStatusHistory, error)
 }
 
+// healthCheckTimeout bounds the database ping done by /health.
+const healthCheckTimeout = 2 * time.Second
+
 type FulfillmentHandler struct {
-	store Store
+	store    Store
+	brokerUp func() bool                     // nil when no broker is configured
+	dbPing   func(ctx context.Context) error // nil skips the database check
 }
 
 func NewFulfillmentHandler(store Store) *FulfillmentHandler {
 	return &FulfillmentHandler{store: store}
+}
+
+// WithBrokerStatus makes /health report 503 while connected() is false. Leave it
+// unset when the service runs without a broker.
+func (h *FulfillmentHandler) WithBrokerStatus(connected func() bool) *FulfillmentHandler {
+	h.brokerUp = connected
+	return h
+}
+
+// WithDBCheck makes /health report 503 while ping fails.
+func (h *FulfillmentHandler) WithDBCheck(ping func(ctx context.Context) error) *FulfillmentHandler {
+	h.dbPing = ping
+	return h
+}
+
+// GET /health
+func (h *FulfillmentHandler) Health(c echo.Context) error {
+	if h.dbPing != nil {
+		ctx, cancel := context.WithTimeout(c.Request().Context(), healthCheckTimeout)
+		defer cancel()
+		if err := h.dbPing(ctx); err != nil {
+			return c.JSON(http.StatusServiceUnavailable, map[string]string{"status": "degraded", "database": "unreachable"})
+		}
+	}
+	if h.brokerUp != nil && !h.brokerUp() {
+		return c.JSON(http.StatusServiceUnavailable, map[string]string{"status": "degraded", "broker": "disconnected"})
+	}
+	return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
 }
 
 type errorResponse struct {
@@ -42,7 +76,7 @@ func fail(c echo.Context, status int, code, message string, details map[string]s
 }
 
 func internalError(c echo.Context, err error) error {
-	c.Logger().Errorf("internal error: %v", err)
+	c.Logger().Errorf("internal error (request %s): %v", c.Response().Header().Get(echo.HeaderXRequestID), err)
 	return fail(c, http.StatusInternalServerError, "INTERNAL_ERROR", "unexpected error", nil)
 }
 
@@ -50,9 +84,29 @@ func parseOrderID(c echo.Context) (uuid.UUID, error) {
 	return uuid.Parse(c.Param("order_id"))
 }
 
-// GET /api/v1/fulfillments?status=PREPARING,READY_FOR_PICKUP
+// parseTimeParam reads an optional RFC 3339 query parameter.
+func parseTimeParam(c echo.Context, name string) (*time.Time, error) {
+	raw := strings.TrimSpace(c.QueryParam(name))
+	if raw == "" {
+		return nil, nil
+	}
+	t, err := time.Parse(time.RFC3339Nano, raw)
+	if err != nil {
+		return nil, err
+	}
+	t = t.UTC()
+	return &t, nil
+}
+
+// isStaff reports whether the caller may see every ticket.
+func isStaff(c echo.Context) bool {
+	role, ok := middleware.GetUserRole(c)
+	return ok && (role == middleware.RoleStaff || role == middleware.RoleManager)
+}
+
+// GET /api/v1/fulfillments?status=PREPARING,READY_FOR_PICKUP&pickup_from=...&pickup_to=...
 func (h *FulfillmentHandler) List(c echo.Context) error {
-	var statuses []models.Status
+	var filter models.ListFilter
 	if raw := c.QueryParam("status"); raw != "" {
 		for _, part := range strings.Split(raw, ",") {
 			s := models.Status(strings.TrimSpace(part))
@@ -60,11 +114,25 @@ func (h *FulfillmentHandler) List(c echo.Context) error {
 				return fail(c, http.StatusBadRequest, "VALIDATION_ERROR", "invalid status filter",
 					map[string]string{"status": "unknown status " + string(s)})
 			}
-			statuses = append(statuses, s)
+			filter.Statuses = append(filter.Statuses, s)
 		}
 	}
 
-	items, err := h.store.List(c.Request().Context(), statuses)
+	var err error
+	if filter.PickupFrom, err = parseTimeParam(c, "pickup_from"); err != nil {
+		return fail(c, http.StatusBadRequest, "VALIDATION_ERROR", "invalid pickup time filter",
+			map[string]string{"pickup_from": "must be RFC3339 format, e.g. 2026-10-13T00:00:00Z"})
+	}
+	if filter.PickupTo, err = parseTimeParam(c, "pickup_to"); err != nil {
+		return fail(c, http.StatusBadRequest, "VALIDATION_ERROR", "invalid pickup time filter",
+			map[string]string{"pickup_to": "must be RFC3339 format, e.g. 2026-10-13T00:00:00Z"})
+	}
+	if filter.PickupFrom != nil && filter.PickupTo != nil && !filter.PickupFrom.Before(*filter.PickupTo) {
+		return fail(c, http.StatusBadRequest, "VALIDATION_ERROR", "invalid pickup time filter",
+			map[string]string{"pickup_to": "must be after pickup_from"})
+	}
+
+	items, err := h.store.List(c.Request().Context(), filter)
 	if err != nil {
 		return internalError(c, err)
 	}
@@ -72,6 +140,8 @@ func (h *FulfillmentHandler) List(c echo.Context) error {
 }
 
 // GET /api/v1/fulfillments/:order_id
+// Staff and managers see every ticket. A customer sees only tickets for their
+// own orders; anything else is reported as not found so order ids do not leak.
 func (h *FulfillmentHandler) Get(c echo.Context) error {
 	orderID, err := parseOrderID(c)
 	if err != nil {
@@ -85,7 +155,36 @@ func (h *FulfillmentHandler) Get(c echo.Context) error {
 	if err != nil {
 		return internalError(c, err)
 	}
+	if !isStaff(c) {
+		userID, ok := middleware.GetUserID(c)
+		if !ok || f.CustomerID == nil || *f.CustomerID != userID {
+			return fail(c, http.StatusNotFound, "NOT_FOUND", "fulfillment not found", nil)
+		}
+	}
 	return c.JSON(http.StatusOK, f)
+}
+
+// GET /api/v1/fulfillments/:order_id/history
+func (h *FulfillmentHandler) History(c echo.Context) error {
+	orderID, err := parseOrderID(c)
+	if err != nil {
+		return fail(c, http.StatusBadRequest, "VALIDATION_ERROR", "order_id must be a valid UUID", nil)
+	}
+
+	ctx := c.Request().Context()
+	f, err := h.store.GetByOrderID(ctx, orderID)
+	if errors.Is(err, repository.ErrNotFound) {
+		return fail(c, http.StatusNotFound, "NOT_FOUND", "fulfillment not found", nil)
+	}
+	if err != nil {
+		return internalError(c, err)
+	}
+
+	items, err := h.store.GetHistory(ctx, f.ID)
+	if err != nil {
+		return internalError(c, err)
+	}
+	return c.JSON(http.StatusOK, map[string]any{"items": items})
 }
 
 // PATCH /api/v1/fulfillments/:order_id/status

@@ -19,14 +19,19 @@ import (
 type mockStore struct {
 	capacityCount int
 	gotStatus     models.Status
+	customerID    *uuid.UUID
 }
 
-func (m *mockStore) List(_ context.Context, _ []models.Status) ([]models.Fulfillment, error) {
+func (m *mockStore) List(_ context.Context, _ models.ListFilter) ([]models.Fulfillment, error) {
 	return []models.Fulfillment{}, nil
 }
 
 func (m *mockStore) GetByOrderID(_ context.Context, id uuid.UUID) (models.Fulfillment, error) {
-	return models.Fulfillment{OrderID: id, Status: models.StatusPreparing}, nil
+	return models.Fulfillment{OrderID: id, CustomerID: m.customerID, Status: models.StatusPreparing}, nil
+}
+
+func (m *mockStore) GetHistory(context.Context, uuid.UUID) ([]models.FulfillmentStatusHistory, error) {
+	return []models.FulfillmentStatusHistory{}, nil
 }
 
 func (m *mockStore) UpdateStatus(_ context.Context, id uuid.UUID, to models.Status) (models.Fulfillment, error) {
@@ -149,18 +154,89 @@ func TestRouterWithAuth(t *testing.T) {
 	})
 }
 
-func TestRouterWithoutVerifier(t *testing.T) {
-	store := &mockStore{}
-	h := handler.NewFulfillmentHandler(store)
-	e := New(h)
+func TestRouterRoleAccess(t *testing.T) {
+	secret := "secret-key-for-router-test-at-least-32-bytes"
+	issuer, audience := "gelatoflow-auth", "gelatoflow-api"
+	customerID := uuid.New()
+	e := New(handler.NewFulfillmentHandler(&mockStore{customerID: &customerID}), middleware.NewVerifier(secret, issuer, audience))
 
-	orderID := uuid.New().String()
-	req := httptest.NewRequest(http.MethodPatch, "/api/v1/fulfillments/"+orderID+"/status", strings.NewReader(`{"status":"READY_FOR_PICKUP"}`))
-	req.Header.Set("Content-Type", "application/json")
+	customer := makeToken(t, secret, issuer, audience, customerID.String(), middleware.RoleCustomer)
+	staff := makeToken(t, secret, issuer, audience, uuid.New().String(), middleware.RoleStaff)
+	manager := makeToken(t, secret, issuer, audience, uuid.New().String(), middleware.RoleManager)
+	orderPath := "/api/v1/fulfillments/" + uuid.New().String()
+
+	for _, tc := range []struct {
+		name, method, path, token, body string
+		want                            int
+	}{
+		{"customer reads own ticket", http.MethodGet, orderPath, customer, "", http.StatusOK},
+		{"customer cannot list the queue", http.MethodGet, "/api/v1/fulfillments", customer, "", http.StatusForbidden},
+		{"customer cannot change status", http.MethodPatch, orderPath + "/status", customer, `{"status":"READY_FOR_PICKUP"}`, http.StatusForbidden},
+		{"staff cannot read history", http.MethodGet, orderPath + "/history", staff, "", http.StatusForbidden},
+		{"manager reads history", http.MethodGet, orderPath + "/history", manager, "", http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Authorization", "Bearer "+tc.token)
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+			if rec.Code != tc.want {
+				t.Fatalf("status = %d, want %d (body: %s)", rec.Code, tc.want, rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestRouterSetsRequestID(t *testing.T) {
+	e := New(handler.NewFulfillmentHandler(&mockStore{}),
+		middleware.NewVerifier("secret-key-for-router-test-at-least-32-bytes", "gelatoflow-auth", "gelatoflow-api"))
+
 	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
+	e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
+	if rec.Header().Get("X-Request-ID") == "" {
+		t.Fatal("response has no X-Request-ID")
+	}
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	req.Header.Set("X-Request-ID", "from-gateway")
+	rec = httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if got := rec.Header().Get("X-Request-ID"); got != "from-gateway" {
+		t.Fatalf("X-Request-ID = %q, want the incoming id", got)
+	}
+}
+
+func TestRouterRequiresVerifier(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Fatal("New without a verifier must panic instead of serving unauthenticated routes")
+		}
+	}()
+	New(handler.NewFulfillmentHandler(&mockStore{}), nil)
+}
+
+func TestHealthReportsBrokerStatus(t *testing.T) {
+	verifier := middleware.NewVerifier("secret-key-for-router-test-at-least-32-bytes", "gelatoflow-auth", "gelatoflow-api")
+
+	for name, tc := range map[string]struct {
+		brokerUp func() bool
+		want     int
+	}{
+		"no broker configured": {nil, http.StatusOK},
+		"broker connected":     {func() bool { return true }, http.StatusOK},
+		"broker disconnected":  {func() bool { return false }, http.StatusServiceUnavailable},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := handler.NewFulfillmentHandler(&mockStore{})
+			if tc.brokerUp != nil {
+				h.WithBrokerStatus(tc.brokerUp)
+			}
+			rec := httptest.NewRecorder()
+			New(h, verifier).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
+			if rec.Code != tc.want {
+				t.Fatalf("health status = %d, want %d", rec.Code, tc.want)
+			}
+		})
 	}
 }

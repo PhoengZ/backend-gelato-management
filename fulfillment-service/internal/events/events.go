@@ -53,9 +53,10 @@ type OrderPickedUpData struct {
 // OrderPlacedData is the subset of the order.placed payload Fulfillment needs.
 // Unknown fields are ignored so compatible additions do not break the consumer.
 type OrderPlacedData struct {
-	OrderID  uuid.UUID `json:"order_id"`
-	PickupAt time.Time `json:"pickup_at"`
-	Items    []struct {
+	OrderID    uuid.UUID `json:"order_id"`
+	CustomerID uuid.UUID `json:"customer_id"` // uuid.Nil when an older producer omits it
+	PickupAt   time.Time `json:"pickup_at"`
+	Items      []struct {
 		FlavorID   uuid.UUID `json:"flavor_id"`
 		FlavorName string    `json:"flavor_name"`
 		Portions   int       `json:"portions"`

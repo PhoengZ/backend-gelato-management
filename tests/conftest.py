@@ -23,6 +23,7 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "uc03: Mark test as Use Case 3 Batch Inventory Management")
     config.addinivalue_line("markers", "nfr02: Mark test as NFR-02 Concurrency and Overselling Prevention")
     config.addinivalue_line("markers", "nfr_slot: Mark test as Time-Slot Capacity Protection")
+    config.addinivalue_line("markers", "fulfillment: Mark test as Fulfillment NFR (ownership, audit, ordering)")
     config.addinivalue_line("markers", "e2e: Mark test as End-to-End full system test")
     config.addinivalue_line("markers", "no_gateway_check: Test runs offline without gateway health check")
 
