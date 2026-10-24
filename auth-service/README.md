@@ -86,6 +86,22 @@ Sufficient traffic can still exhaust the generous shared transport or work cap.
 Gateway must apply its own abuse limits, and deployment capacity determines
 whether distributed limiting and higher transport/work capacity are needed.
 
+Separately, five invalid-credential results lock only the normalized account for
+15 minutes (`429` with `Retry-After` up to 900 seconds). A successful login resets
+that account's failure count. Database/timeouts/internal errors and corrupt stored
+password hashes return `500` without adding a credential failure. Audit records
+distinguish `LOGIN_ERROR` from `LOGIN_FAILED`. Both admission and audit IPs use
+the actual TCP peer; Auth never trusts `X-Forwarded-For` or similar headers. A
+Gateway peer may represent many users, so it is never the 15-minute lockout key.
+
+Audit User-Agent values are normalized to valid PostgreSQL text and bounded to
+512 Unicode characters. Metadata explicitly marks truncation, invalid UTF-8 or
+NUL replacement and includes the original character count when truncated.
+Audit remains best effort: write failures emit a bounded event/error-type
+diagnostic, preserving the original login result and signup's already committed
+user/outbox result. Durable auditing during a database outage requires additional
+transaction/outbox work; this change prevents long headers from dropping rows.
+
 Malformed credential objects return `400 INVALID_REQUEST`, unsupported media or
 compression returns `415 UNSUPPORTED_MEDIA_TYPE`, and an oversized body returns
 `413 REQUEST_TOO_LARGE`. Database operations receive a request deadline; bcrypt

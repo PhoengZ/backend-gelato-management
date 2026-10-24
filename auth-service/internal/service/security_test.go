@@ -70,3 +70,15 @@ func TestPasswordCharacterMinimumAndByteMaximum(t *testing.T) {
 		t.Fatal("unsafe bcrypt cost accepted")
 	}
 }
+
+func TestCorruptStoredHashIsAnOperationalError(t *testing.T) {
+	tokens := auth.NewTokenManager("test_secret_that_is_longer_than_32_bytes", "gelatoflow-auth", "gelatoflow-api", time.Minute)
+	user := &model.User{ID: uuid.New(), Email: "user@example.com", Role: model.RoleCustomer, Status: model.UserStatusActive, PasswordHash: "corrupt-hash"}
+	svc, err := NewAuthService(identityRepo{user}, tokens, bcrypt.MinCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Login(context.Background(), LoginInput{Email: user.Email, Password: "correct-password"}); err == nil || errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("corrupt storage was counted as a bad password: %v", err)
+	}
+}

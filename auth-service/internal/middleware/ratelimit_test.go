@@ -42,10 +42,10 @@ func TestRateLimiterBlocksAfterMaxFailures(t *testing.T) {
 		t.Fatal("account should be blocked regardless of IP")
 	}
 
-	// Same IP attempting another account should also be blocked
+	// A shared Gateway peer must not lock another account.
 	blockedIP, _ := limiter.IsBlocked(ip, "other@example.com")
-	if !blockedIP {
-		t.Fatal("IP should be blocked regardless of account")
+	if blockedIP {
+		t.Fatal("one account locked an unrelated account sharing its peer")
 	}
 
 	// Unrelated IP and account should not be blocked
@@ -102,7 +102,7 @@ func TestRateLimiterExpiry(t *testing.T) {
 func TestRateLimiterMiddleware(t *testing.T) {
 	limiter := NewRateLimiter(2, 5*time.Minute)
 	app := fiber.New()
-	app.Post("/login", limiter.Middleware(), func(c *fiber.Ctx) error {
+	app.Post("/login", limiter.Middleware("test@example.com"), func(c *fiber.Ctx) error {
 		return c.SendStatus(fiber.StatusOK)
 	})
 
@@ -112,7 +112,7 @@ func TestRateLimiterMiddleware(t *testing.T) {
 		t.Fatalf("first request should succeed, got status=%d err=%v", resp.StatusCode, err)
 	}
 
-	// Record failures for client IP (in app.Test, IP is 0.0.0.0 or 127.0.0.1 or "")
+	// Account failures are independent of which peer submitted them.
 	limiter.RecordFailure("0.0.0.0", "test@example.com")
 	limiter.RecordFailure("0.0.0.0", "test@example.com")
 	limiter.RecordFailure("", "test@example.com")
