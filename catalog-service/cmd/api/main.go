@@ -29,7 +29,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if err := run(ctx); err != nil {
-		log.Fatal(err)
+		log.Fatalf("Catalog startup/serving failed: error_type=%T", err)
 	}
 }
 

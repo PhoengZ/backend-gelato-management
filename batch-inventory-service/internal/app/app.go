@@ -5,6 +5,7 @@ import (
 	"batch-inventory-service/internal/catalog"
 	"batch-inventory-service/internal/config"
 	"batch-inventory-service/internal/inventory"
+	"batch-inventory-service/internal/logging"
 	"batch-inventory-service/internal/messaging"
 	"batch-inventory-service/internal/transport"
 	"batch-inventory-service/migrations"
@@ -17,6 +18,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 )
@@ -42,6 +44,7 @@ func Run(ctx context.Context, c config.Config) error {
 	defer cc.Close()
 	svc := inventory.New(db, catalog.New(cc, c.RequestTimeout), c.ReservationTTL)
 	h := &http.Server{Handler: transport.NewHTTP(svc, auth.NewVerifier(c.JWTSecret, c.JWTIssuer, c.JWTAudience), c.RequestTimeout), ReadHeaderTimeout: 3 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: c.RequestTimeout + time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10}
+	h.ErrorLog = logging.NewHTTPErrorLogger(os.Stderr)
 	g := transport.NewGRPC(svc, c.OrderToken, c.RequestTimeout)
 	return Serve(ctx, c.HTTPAddr, c.GRPCAddr, h, g, func(workerCtx context.Context) {
 		var workers sync.WaitGroup

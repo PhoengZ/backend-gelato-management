@@ -32,14 +32,14 @@ func main() {
 
 	pool, err := pgxpool.New(startupCtx, cfg.DatabaseURL)
 	if err != nil {
-		log.Fatalf("configure PostgreSQL: %v", err)
+		log.Fatalf("configure PostgreSQL failed: error_type=%T", err)
 	}
 	defer pool.Close()
 	if err := pool.Ping(startupCtx); err != nil {
-		log.Fatalf("connect to PostgreSQL: %v", err)
+		log.Fatalf("connect to PostgreSQL failed: error_type=%T", err)
 	}
 	if err := migrations.Up(startupCtx, pool); err != nil {
-		log.Fatalf("run migrations: %v", err)
+		log.Fatalf("run migrations failed: error_type=%T", err)
 	}
 
 	tokens := auth.NewTokenManager(cfg.JWTSecret, cfg.JWTIssuer, cfg.JWTAudience, cfg.JWTTTL)
@@ -84,11 +84,11 @@ func main() {
 	select {
 	case err := <-serverErrors:
 		if err != nil {
-			log.Fatalf("serve HTTP: %v", err)
+			log.Fatalf("serve HTTP failed: error_type=%T", err)
 		}
 	case <-shutdownSignal.Done():
 		if err := app.Shutdown(); err != nil {
-			log.Printf("graceful shutdown failed: %v", err)
+			log.Printf("graceful shutdown failed: error_type=%T", err)
 		}
 	}
 }

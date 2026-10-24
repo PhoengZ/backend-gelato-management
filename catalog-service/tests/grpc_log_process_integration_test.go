@@ -70,3 +70,28 @@ func TestCatalogGRPCDiagnosticLogsExcludeUnauthenticatedMetadata(t *testing.T) {
 		t.Errorf("gRPC operational diagnostics are missing: %s", output)
 	}
 }
+
+func TestCatalogStartupDiagnosticsExcludeListenerValues(t *testing.T) {
+	_, _, prefix := redisRepositoryForTest(t)
+	bin := filepath.Join(t.TempDir(), "catalog-service")
+	if output, err := exec.Command("go", "build", "-race", "-o", bin, "../cmd/api").CombinedOutput(); err != nil {
+		t.Fatalf("build: %v %s", err, output)
+	}
+	_, port, _ := net.SplitHostPort(availableAddress(t))
+	for _, addresses := range [][2]string{{"private-person@example.invalid", "127.0.0.1:50052"}, {port, "private-person@example.invalid:50052"}} {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		command := exec.CommandContext(ctx, bin)
+		command.Env = append(os.Environ(), "PORT="+addresses[0], "GRPC_ADDR="+addresses[1],
+			"REDIS_URL="+os.Getenv("TEST_REDIS_URL"), "REDIS_KEY_PREFIX="+prefix,
+			"JWT_SECRET="+handlerTestSecret, "JWT_ISSUER=gelatoflow-auth", "JWT_AUDIENCE=gelatoflow-api",
+			"HTTP_TLS_CERT_FILE=", "HTTP_TLS_KEY_FILE=", "GRPC_TLS_CERT_FILE=", "GRPC_TLS_KEY_FILE=")
+		output, err := command.CombinedOutput()
+		cancel()
+		if err == nil || ctx.Err() == context.DeadlineExceeded {
+			t.Fatal("invalid listener configuration did not fail promptly", err)
+		}
+		if strings.Contains(string(output), "private-person") || strings.Contains(string(output), "example.invalid") || !strings.Contains(string(output), "error_type=") {
+			t.Fatalf("unsafe/missing startup diagnostics: %s", output)
+		}
+	}
+}
