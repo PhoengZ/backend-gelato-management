@@ -142,7 +142,11 @@ func movement(ctx context.Context, tx pgx.Tx, batch, res, kind string, n int64, 
 	if res != "" {
 		rid = res
 	}
-	_, err := tx.Exec(ctx, "INSERT INTO inventory_movements(id,batch_id,reservation_id,kind,portions,occurred_at) VALUES($1,$2,$3,$4,$5,$6)", uuid.NewString(), batch, rid, kind, n, t)
+	var actorID, actorRole any
+	if who := currentActor(ctx); who.id != "" {
+		actorID, actorRole = who.id, who.role
+	}
+	_, err := tx.Exec(ctx, "INSERT INTO inventory_movements(id,batch_id,reservation_id,kind,portions,occurred_at,actor_id,actor_role) VALUES($1,$2,$3,$4,$5,$6,$7,$8)", uuid.NewString(), batch, rid, kind, n, t, actorID, actorRole)
 	return err
 }
 func loadReservation(ctx context.Context, tx pgx.Tx, id string) (Reservation, error) {

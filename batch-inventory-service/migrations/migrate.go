@@ -34,13 +34,15 @@ func CheckReady(ctx context.Context, pool *pgxpool.Pool) error {
 	if err := pool.QueryRow(ctx, "SELECT count(*)=$2 FROM inventory_schema_migrations WHERE version=ANY($1::text[])", required, len(required)).Scan(&complete); err != nil || !complete {
 		return ErrNotReady
 	}
-	rows, err := pool.Query(ctx, "SELECT batch_code,low_stock_notified_at,expiring_notified_at FROM batches LIMIT 0")
-	if err != nil {
-		return ErrNotReady
-	}
-	rows.Close()
-	if rows.Err() != nil {
-		return ErrNotReady
+	for _, query := range []string{"SELECT batch_code,low_stock_notified_at,expiring_notified_at FROM batches LIMIT 0", "SELECT actor_id,actor_role FROM inventory_movements LIMIT 0"} {
+		rows, err := pool.Query(ctx, query)
+		if err != nil {
+			return ErrNotReady
+		}
+		rows.Close()
+		if rows.Err() != nil {
+			return ErrNotReady
+		}
 	}
 	return nil
 }

@@ -13,6 +13,9 @@ import (
 
 func (s *Service) Create(ctx context.Context, in CreateInput) (Batch, error) {
 	var b Batch
+	if who := currentActor(ctx); who.id == "" || who.role != "MANAGER" {
+		return b, wrapInvalid("trusted Manager actor required")
+	}
 	var err error
 	in.FlavorID, err = ID(in.FlavorID)
 	if err != nil {

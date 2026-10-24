@@ -93,7 +93,7 @@ func (activeCatalog) CheckActive(context.Context, string) error { return nil }
 func batch(t *testing.T, s *inventory.Service, flavor string, n int64, expiry time.Time) inventory.Batch {
 	t.Helper()
 	cost := int64(125)
-	b, err := s.Create(context.Background(), inventory.CreateInput{FlavorID: flavor, ProductionDate: time.Now().UTC().Format("2006-01-02"), ExpiresAt: expiry, Initial: n, UnitCost: &cost, Currency: "THB"})
+	b, err := s.Create(inventory.WithActor(context.Background(), uuid.NewString(), "MANAGER"), inventory.CreateInput{FlavorID: flavor, ProductionDate: time.Now().UTC().Format("2006-01-02"), ExpiresAt: expiry, Initial: n, UnitCost: &cost, Currency: "THB"})
 	if err != nil {
 		t.Fatal(err)
 	}

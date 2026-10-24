@@ -80,7 +80,7 @@ func TestBatchCodeMigrationPreservesExistingStock(t *testing.T) {
 		t.Fatal("upgrade changed existing identifiers/stock/timestamp", actualID, actualFlavor, code, initial, available, reserved, sold, wasted, updated)
 	}
 	var versions int
-	if err = db.QueryRow(ctx, "SELECT count(*) FROM inventory_schema_migrations").Scan(&versions); err != nil || versions != 3 {
+	if err = db.QueryRow(ctx, "SELECT count(*) FROM inventory_schema_migrations").Scan(&versions); err != nil || versions != 4 {
 		t.Fatal("upgrade not recorded exactly once", err, versions)
 	}
 	// A second row cannot adopt the backfilled label, proving database uniqueness

@@ -171,6 +171,7 @@ func NewHTTP(svc *inventory.Service, v *auth.Verifier, timeout time.Duration) ht
 				authFailure(w, 403)
 				return
 			}
+			r = r.WithContext(inventory.WithActor(r.Context(), claims.Subject, string(claims.Role)))
 			fn(w, r, claims)
 		}
 	}
