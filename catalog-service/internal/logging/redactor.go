@@ -1,7 +1,6 @@
 package logging
 
 import (
-	"fmt"
 	"io"
 	"log"
 	"regexp"
@@ -79,6 +78,12 @@ func NewRedactorWriter(out io.Writer) *RedactorWriter {
 // Write sanitizes sensitive content before passing it to the underlying writer.
 func (w *RedactorWriter) Write(p []byte) (n int, err error) {
 	redacted := Redact(string(p))
+	// x/net/http2's GODEBUG frame logger uses the standard logger directly and
+	// can include decoded unauthenticated HPACK fields or raw protocol payloads.
+	// Keep the diagnostic event without copying any of its protocol contents.
+	if strings.Contains(string(p), "http2:") {
+		redacted = time.Now().UTC().Format(time.RFC3339Nano) + " [HTTP2] event=transport_diagnostic\n"
+	}
 	_, err = w.out.Write([]byte(redacted))
 	if err != nil {
 		return 0, err
@@ -86,7 +91,7 @@ func (w *RedactorWriter) Write(p []byte) (n int, err error) {
 	return len(p), nil
 }
 
-// RedactorLoggerMiddleware logs incoming HTTP requests with sanitized tokens and secrets.
+// RedactorLoggerMiddleware logs only bounded operational request metadata.
 func RedactorLoggerMiddleware() fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		start := time.Now()
@@ -95,20 +100,28 @@ func RedactorLoggerMiddleware() fiber.Handler {
 
 		duration := time.Since(start)
 		status := c.Response().StatusCode()
-		method := c.Method()
-		path := c.Path()
-
-		authHeader := Redact(c.Get(fiber.HeaderAuthorization))
-		query := string(c.Request().URI().QueryString())
-		if query != "" {
-			query = "?" + Redact(query)
-		}
-
-		logMsg := fmt.Sprintf("[%s] %s%s status=%d duration=%v auth=%s",
-			method, path, query, status, duration, authHeader,
-		)
-		log.Println(Redact(logMsg))
+		// Registered templates are bounded operational data; raw paths, queries,
+		// headers and bodies can contain PII even on rejected/unknown requests.
+		log.Printf("[%s] route=%s status=%d duration=%v", safeMethod(c.Method()), safeRoute(c.Route().Path), status, duration)
 
 		return err
+	}
+}
+
+func safeMethod(method string) string {
+	switch method {
+	case "GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS":
+		return method
+	default:
+		return "OTHER"
+	}
+}
+
+func safeRoute(route string) string {
+	switch route {
+	case "/health", "/api/v1/flavors", "/api/v1/flavors/", "/api/v1/flavors/:flavor_id", "/api/v1/flavors/:flavor_id/recipe":
+		return route
+	default:
+		return "<unmatched>"
 	}
 }

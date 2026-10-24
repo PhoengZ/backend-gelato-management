@@ -85,6 +85,19 @@ headers or putting Manager tokens into customer-facing clients. Review the read
 policy with Gateway/frontend owners before merging the shared Catalog contract.
 See [the security audit](SECURITY.md) for verification scope and remaining limits.
 
+## Request and transport logging (NFR-07)
+
+Request logs contain only an allowlisted HTTP method, registered Catalog route
+template, status, and duration. Raw URLs/IDs in paths, query strings, headers,
+bodies, flavor names, recipes, and storage error values are not logged. The
+existing redactor remains defense in depth; safe logging does not depend on
+recognizing every spelling or encoding of a sensitive query/header.
+The gRPC library's independent logger also uses bounded severity/source-call-site
+records, including when its diagnostic severity/verbosity environment options are
+enabled; unauthenticated metadata and unsupported content subtypes are excluded.
+HTTP/2 frame diagnostics enabled with `GODEBUG=http2debug=1/2` are reduced to a
+timestamped transport event without decoded headers or protocol payloads.
+
 ## Configuration
 
 Copy `.env.example` to `.env` for host-based development.

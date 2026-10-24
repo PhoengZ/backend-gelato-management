@@ -290,7 +290,7 @@ func handleServiceError(c *fiber.Ctx, err error) error {
 			"message": "Flavor changed during this request; reload and retry",
 		})
 	default:
-		log.Printf("catalog request failed: %v", err)
+		log.Printf("catalog request failed: error_type=%T", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"code":    "INTERNAL_ERROR",
 			"message": "The request could not be completed",

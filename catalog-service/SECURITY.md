@@ -1,5 +1,20 @@
 # Catalog security review — 2026-09-09
 
+## Request and transport logging - 2026-10-24
+
+The request logger uses a bounded method/route/status/duration schema. It never
+copies raw paths, query parameters, Authorization contents, other headers, or
+bodies. This covers unknown/rejected routes, encoded query names/values and
+non-Bearer credentials without depending on a regex recognizing them.
+Runtime storage errors and Redis
+URL configuration failures do not echo underlying values into application logs.
+The separate gRPC library logger records only severity and source call site,
+including optional diagnostic modes that would otherwise log malformed metadata
+and unsupported content subtypes before authentication. A real-process HTTP/2
+regression test exercises both of those unauthenticated inputs.
+It also enables HTTP/2 frame debugging; standard-logger protocol dumps are
+reduced to bounded diagnostic events without retaining decoded header values.
+
 ## gRPC extension — 2026-09-27
 
 The gRPC transport reuses the JWT verifier and application rules. Unary

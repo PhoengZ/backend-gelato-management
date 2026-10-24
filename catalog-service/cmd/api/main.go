@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"log"
 	"os"
 	"os/signal"
@@ -20,10 +20,12 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/redis/go-redis/v9"
+	"google.golang.org/grpc/grpclog"
 )
 
 func main() {
 	log.SetOutput(logging.NewRedactorWriter(os.Stderr))
+	grpclog.SetLoggerV2(logging.NewGRPCLogger(os.Stderr))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if err := run(ctx); err != nil {
@@ -39,7 +41,7 @@ func run(ctx context.Context) error {
 
 	redisOptions, err := redis.ParseURL(cfg.RedisURL)
 	if err != nil {
-		return fmt.Errorf("configure Redis: %w", err)
+		return errors.New("configure Redis failed; check Redis URL configuration")
 	}
 	redisOptions.ContextTimeoutEnabled = true
 	redisClient := redis.NewClient(redisOptions)
@@ -48,7 +50,7 @@ func run(ctx context.Context) error {
 	startupCtx, cancelStartup := context.WithTimeout(ctx, 10*time.Second)
 	defer cancelStartup()
 	if err := redisClient.Ping(startupCtx).Err(); err != nil {
-		return fmt.Errorf("connect to Redis: %w", err)
+		return errors.New("connect to Redis failed; check storage connectivity")
 	}
 
 	verifier := auth.NewVerifier(cfg.JWTSecret, cfg.JWTIssuer, cfg.JWTAudience)

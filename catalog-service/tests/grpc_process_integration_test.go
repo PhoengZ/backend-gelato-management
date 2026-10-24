@@ -100,9 +100,13 @@ func availableAddress(t *testing.T) string {
 	return address
 }
 
-func startCatalogProcess(t *testing.T, binary string, env []string, httpAddr string) func() error {
+func startCatalogProcess(t *testing.T, binary string, env []string, httpAddr string, outputPath ...string) func() error {
 	t.Helper()
-	logFile, err := os.Create(filepath.Join(t.TempDir(), "process.log"))
+	path := filepath.Join(t.TempDir(), "process.log")
+	if len(outputPath) > 0 {
+		path = outputPath[0]
+	}
+	logFile, err := os.Create(path)
 	if err != nil {
 		t.Fatal(err)
 	}
