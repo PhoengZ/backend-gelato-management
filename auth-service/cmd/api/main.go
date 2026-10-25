@@ -88,6 +88,13 @@ func main() {
 	}()
 	workerCtx, stopWorker := context.WithCancel(context.Background())
 	workerDone := make(chan struct{})
+	cleanupDone := make(chan struct{})
+	go func() {
+		defer close(cleanupDone)
+		users.RunSignupReceiptCleanup(workerCtx, func(err error) {
+			log.Printf("auth signup receipt cleanup failed: error_type=%T", err)
+		})
+	}()
 	if cfg.Outbox.Enabled {
 		worker := outbox.NewWorker(pool, outbox.Rabbit{URL: cfg.Outbox.URL, Exchange: cfg.Outbox.Exchange, TLSConfig: cfg.Outbox.TLSConfig}, cfg.Outbox.PollInterval, cfg.Outbox.PublishTimeout)
 		go func() {
@@ -102,6 +109,7 @@ func main() {
 	defer func() {
 		stopWorker()
 		<-workerDone
+		<-cleanupDone
 	}()
 
 	shutdownSignal, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

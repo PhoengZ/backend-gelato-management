@@ -47,13 +47,22 @@ func (r *PostgresUserRepository) CreateWithOutbox(ctx context.Context, user *mod
 		return fmt.Errorf("begin transaction: %w", err)
 	}
 	defer tx.Rollback(ctx)
+	if err := insertUserAndOutbox(ctx, tx, user, event); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit transaction: %w", err)
+	}
+	return nil
+}
 
+func insertUserAndOutbox(ctx context.Context, tx pgx.Tx, user *model.User, event *model.OutboxEvent) error {
 	const query = `
 		INSERT INTO users (id, email, display_name, password_hash, role, status)
 		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING created_at, updated_at`
 
-	err = tx.QueryRow(
+	err := tx.QueryRow(
 		ctx,
 		query,
 		user.ID,
@@ -85,9 +94,6 @@ func (r *PostgresUserRepository) CreateWithOutbox(ctx context.Context, user *mod
 		}
 	}
 
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit transaction: %w", err)
-	}
 	return nil
 }
 
