@@ -18,9 +18,8 @@ same Docker network.
 | `order-postgres` | Order Service | 5432 | 5436 |
 | `catalog-redis` | Catalog Service | 6379 | 6380 |
 
-The default compose file references pre-built images for application services.
-Auth, Catalog, and Batch Inventory containers will be added only after those
-services have Dockerfiles and published images.
+The default compose file builds application services from their Dockerfiles,
+except Analytics, which uses the published `phoeng/analytics-service:1.1.0` image.
 
 ## Local setup
 
@@ -97,6 +96,61 @@ Analytics MongoDB:    analytics-mongodb:27017
 Host-based service processes use the development ports from
 `docker/compose.dev.yml` instead.
 
+## Service discovery and health checks
+
+Docker DNS resolves service names on `gelato_network`. Gateway upstream URLs
+and internal gRPC targets use those names and container ports, never container
+IP addresses. For example, Gateway uses `http://catalog-service:3002`, and Order
+uses `batch-inventory-service:50051`. Analytics explicitly listens on port 8080
+to match its Gateway URL, development mapping and health probe.
+
+All application health checks are configured in `docker/compose.yml`. Probes
+run inside each container against loopback and do not require published host
+ports or JWTs. Go application probes use Alpine's BusyBox `wget`, a 3-second
+request timeout, a 5-second Docker timeout, a 15-second interval and three
+consecutive failures. Auth and Inventory allow 60 seconds for startup/migrations;
+other Go application probes allow 30 seconds. Payment retains its existing settings
+(30-second interval, 5-second timeout, three failures, 45-second startup period).
+
+| Service | Probe | What success establishes |
+| --- | --- | --- |
+| API Gateway | `http://127.0.0.1:8080/health` | Gateway HTTP liveness |
+| Auth | `http://127.0.0.1:3001/health` | Auth HTTP response and owned PostgreSQL connectivity |
+| Catalog | `http://127.0.0.1:3002/health` | Catalog HTTP liveness |
+| Batch Inventory | `http://127.0.0.1:3004/ready` | Inventory HTTP response and owned database/schema readiness |
+| Order | `http://127.0.0.1:3003/health` | Order HTTP liveness |
+| Analytics | `http://127.0.0.1:8080/health` | Analytics HTTP liveness |
+| Fulfillment | `http://127.0.0.1:8080/health` | Owned PostgreSQL connectivity and broker connection when configured |
+| Notification | `http://127.0.0.1:8080/health` | HTTP response and broker connection when configured |
+| Payment | `http://127.0.0.1:3007/actuator/health/liveness` | Payment HTTP/process liveness |
+
+Gateway waits for all eight downstream services with `condition:
+service_healthy`. Order waits for Catalog, Inventory and Payment health checks;
+Inventory waits for Catalog. Existing database and broker health dependencies
+remain in place. Keep Payment independent of Order startup to avoid a dependency
+cycle through its reverse result callbacks.
+
+These gates apply at startup. HTTP liveness does not prove that gRPC, all
+dependencies or checkout are ready. An unhealthy status does not automatically
+restart a running container or remove its DNS record/Gateway route;
+`restart: unless-stopped` handles process exits. This is a single-host Compose
+setup without health-aware load balancing or automatic failover.
+
+Inspect health after starting the stack with your private environment file:
+
+```bash
+docker compose --env-file .env \
+  -f docker/compose.yml -f docker/compose.dev.yml ps -a
+docker inspect --format '{{json .State.Health}}' api-gateway
+docker inspect --format '{{json .State.Health}}' batch-inventory-service
+docker inspect --format '{{json .State.Health}}' analytics-service
+```
+
+For the published Analytics image, verify that `wget` and `/health` are present
+in the deployed version. Local source alone does not certify a registry image.
+Configuration validation does not establish runtime health; verify the actual
+images and startup sequence before claiming an end-to-end pass.
+
 ## RabbitMQ topology
 
 RabbitMQ virtual hosts are isolation boundaries. A publisher and consumer must
@@ -130,13 +184,12 @@ one vhost.
 
 ## Adding an application service
 
-The default compose file uses `image:` rather than local `build:` entries. After
-a service implementation is ready:
+After a service implementation is ready:
 
 1. Build and test the service image.
-2. Publish a versioned image to the team's registry.
-3. Add the image, service `.env`, health check, dependencies, and network entry to
-   `docker/compose.yml`.
+2. Choose a local `build:` entry or publish a versioned image to the team's registry.
+3. Add the build/image, service environment, health check, dependencies, and
+   network entry to `docker/compose.yml`.
 4. Add only development host ports to `docker/compose.dev.yml`.
 
 Local iteration may run the application process on the host while its database
