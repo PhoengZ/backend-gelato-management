@@ -14,7 +14,7 @@ The attached Project Progress 2 PDF (section 8, page 11) defines NFR-01 through 
 | 08 Auditability | Verified HTTP actor is bound privately and stored with new PRODUCED/WASTED movements in the same transaction. Shared Create rejects missing/non-Manager identity. Waste records retain their actor. | Historical actors remain NULL, never fabricated; trusted internal/background work without a human actor remains distinguishable. |
 | 09 Ownership | Only Inventory PostgreSQL is queried; active flavor facts come from Catalog gRPC before the DB transaction. | No cross-database FK/query or shadow table is added. |
 | 10 Money extension | int64 minor units, explicit THB and checked multiplication for batch/waste values. | Order totals/payment amounts are outside this service. |
-| 11 Idempotency extension | Reserve/Confirm/Release and manual Waste replay their persisted original result; hash conflicts reject duplicate keys. | Canonical CreateBatch has no replay key, and Waste uses its defined body key. A generic all-REST header requirement requires contract/consumer review; no new mandatory headers are imposed. |
+| 11 Idempotency extension | Reserve/Confirm/Release and manual Waste retain their persisted original result. Optional REST header keys additionally cover CreateBatch and Waste aliases using the existing idempotency table and stock transaction. Hash conflicts reject duplicate keys. | The Waste body key remains required. Headers remain optional; existing callers and RPCs retain their contracts. Auth credential-token replay is not introduced. |
 | 12/13 Deployment | Current operational state remains in owned PostgreSQL, not process memory. | Payment/Notification statelessness and public data-store/broker port policy require their owners/shared deployment. |
 
 ## Additive migration 005
@@ -38,3 +38,11 @@ Coordinate Order/Gateway/demo trust settings before enabling TLS; those callers 
 Use isolated PostgreSQL, Redis, RabbitMQ and real Catalog with `INTEGRATION_REQUIRED=1 go test -race ./...`. Tests cover stock/concurrency/FEFO/replay, real broker failure/recovery, migrations, actor attribution/spoof rejection, audit-write rollback, diagnostics, processes and restart.
 
 `tests/production_audit_test.go` checks actor identity and atomicity plus legacy upgrade/drift. `tests/grpc_log_process_integration_test.go` runs real HTTP2/protobuf diagnostics. TLS package tests verify configuration/trust/version floor; the owned process smoke verifies Auth -> Catalog -> Inventory, separate machine credentials, reserve/confirm and wrong-CA rejection over actual TLS.
+
+## Optional REST header keys
+
+`POST /api/v1/inventory/batches` accepts one non-nil UUID `Idempotency-Key`. Keys are scoped to the verified Manager and CreateBatch operation. A successful retry returns the original batch snapshot, even after stock changes or Catalog becomes unavailable. The validated input hash, batch, movement actor and response commit together in the existing `idempotency_records` transaction; no new migration is required.
+
+Waste keeps its required `idempotency_key` body field. An optional header is an additional alias: it need not equal the body UUID, and both records bind to the same input/result in one transaction. Legacy body-only retries and new header aliases cannot waste stock or publish events twice. Header/body claims use a deterministic lock order. A changed request under an existing key returns 409; malformed/multiple supplied headers return 400 after authorization. No-header behavior remains supported.
+
+See `tests/http_idempotency_test.go`, the [service-local ADR](docs/adr-optional-rest-replay.md), and [owned-service rollout/verification guide](docs/owned-nfr-handoff.md).

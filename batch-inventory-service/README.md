@@ -129,8 +129,11 @@ ports to loopback. Do not expose these credentials over an untrusted network.
 - Production dates use YYYY-MM-DD; event reporting dates are UTC, consistent
   with the current Analytics event-time aggregation. Timestamps are RFC3339 UTC.
 - Unit costs are THB minor units, with multiplication bounds checked on creation.
-- REST CreateBatch has no idempotency key in v1. Do not automatically retry after
-  an ambiguous timeout. No external dependency call is made under stock locks.
+- REST CreateBatch accepts an optional UUID `Idempotency-Key`; same-Manager/key/input
+  returns its persisted original result. Without a key, do not automatically retry
+  after an ambiguous timeout. Waste keeps its required body key and may add an
+  independent header alias in the same stock transaction. See [NFR.md](NFR.md).
+  No external dependency call is made under stock locks.
 - List endpoints are unpaginated v1 contracts. gRPC availability above int32
   capacity returns OUT_OF_RANGE instead of truncating/wrapping the value.
 
@@ -215,3 +218,7 @@ The Docker image includes `/app/inventory`, `/app/migrate` and `/app/demo`.
 Shared Compose and teammate service implementations are unchanged. Image
 publication, deployment, Order client integration, low-stock/expiring notification
 events and arbitrary batch adjustments are follow-up work.
+
+The [owned-service handoff](docs/owned-nfr-handoff.md) provides a repeatable private
+fixture for actual Gateway/Order clients, migration readiness, TLS trust and stock
+history, plus the service-local ADR, request diagram and progress-demo outline.

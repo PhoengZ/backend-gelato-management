@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"math"
 	"strings"
@@ -30,40 +31,57 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (Batch, error) {
 	if err != nil || in.ExpiresAt.IsZero() || in.ExpiresAt.Before(date) || in.Initial < 1 || in.Initial > MaxPortions || in.UnitCost == nil || *in.UnitCost < 0 || *in.UnitCost > math.MaxInt64/in.Initial || in.Currency != "THB" {
 		return b, ErrInvalid
 	}
+	key, keyed := restKey(ctx)
+	operation := "create_batch:" + currentActor(ctx).id
+	if keyed {
+		if original, replayed, err := lookupRESTMutation[Batch](ctx, s, operation, key, in); err != nil || replayed {
+			return original, err
+		}
+	}
 	if s.Catalog == nil {
 		return b, ErrDependency
 	}
 	if err = s.Catalog.CheckActive(ctx, in.FlavorID); err != nil {
 		return b, err
 	}
+	create := func(tx pgx.Tx) (Batch, error) {
+		if err = lockFlavors(ctx, tx, []string{in.FlavorID}); err != nil {
+			return b, err
+		}
+		t, err := now(ctx, tx)
+		if err != nil {
+			return b, err
+		}
+		if !in.ExpiresAt.After(t) {
+			return b, wrapInvalid("expires_at")
+		}
+		b = Batch{ID: batchID, BatchCode: code, FlavorID: in.FlavorID, ProductionDate: in.ProductionDate, ExpiresAt: in.ExpiresAt.UTC(), Initial: in.Initial, Available: in.Initial, UnitCost: *in.UnitCost, Currency: "THB", Status: "ACTIVE", CreatedAt: t, UpdatedAt: t}
+		_, err = tx.Exec(ctx, `INSERT INTO batches(id,batch_code,flavor_id,production_date,expires_at,initial_portions,available_portions,unit_cost_minor,currency,status,created_at,updated_at) VALUES($1,$2,$3,$4::text::date,$5,$6,$6,$7,'THB','ACTIVE',$8,$8)`, b.ID, b.BatchCode, b.FlavorID, b.ProductionDate, b.ExpiresAt, b.Initial, b.UnitCost, t)
+		if err != nil {
+			var pe *pgconn.PgError
+			if errors.As(err, &pe) && pe.Code == "23505" && pe.ConstraintName == "batches_batch_code_key" {
+				return Batch{}, ErrBatchCodeConflict
+			}
+			return Batch{}, err
+		}
+		if err = movement(ctx, tx, b.ID, "", "PRODUCED", b.Initial, t); err != nil {
+			return Batch{}, err
+		}
+		_ = service.ResetLowStockNotified(ctx, tx, b.FlavorID, t)
+		return b, nil
+	}
+	if keyed {
+		return mutate(ctx, s, operation, key, in, create)
+	}
 	tx, err := s.DB.Begin(ctx)
 	if err != nil {
 		return b, err
 	}
 	defer rollback(tx)
-	if err = lockFlavors(ctx, tx, []string{in.FlavorID}); err != nil {
-		return b, err
-	}
-	t, err := now(ctx, tx)
+	b, err = create(tx)
 	if err != nil {
 		return b, err
 	}
-	if !in.ExpiresAt.After(t) {
-		return b, wrapInvalid("expires_at")
-	}
-	b = Batch{ID: batchID, BatchCode: code, FlavorID: in.FlavorID, ProductionDate: in.ProductionDate, ExpiresAt: in.ExpiresAt.UTC(), Initial: in.Initial, Available: in.Initial, UnitCost: *in.UnitCost, Currency: "THB", Status: "ACTIVE", CreatedAt: t, UpdatedAt: t}
-	_, err = tx.Exec(ctx, `INSERT INTO batches(id,batch_code,flavor_id,production_date,expires_at,initial_portions,available_portions,unit_cost_minor,currency,status,created_at,updated_at) VALUES($1,$2,$3,$4::text::date,$5,$6,$6,$7,'THB','ACTIVE',$8,$8)`, b.ID, b.BatchCode, b.FlavorID, b.ProductionDate, b.ExpiresAt, b.Initial, b.UnitCost, t)
-	if err != nil {
-		var pe *pgconn.PgError
-		if errors.As(err, &pe) && pe.Code == "23505" && pe.ConstraintName == "batches_batch_code_key" {
-			return Batch{}, ErrBatchCodeConflict
-		}
-		return Batch{}, err
-	}
-	if err = movement(ctx, tx, b.ID, "", "PRODUCED", b.Initial, t); err != nil {
-		return Batch{}, err
-	}
-	_ = service.ResetLowStockNotified(ctx, tx, b.FlavorID, t)
 	return b, tx.Commit(ctx)
 }
 

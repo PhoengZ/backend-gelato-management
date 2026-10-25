@@ -27,7 +27,11 @@ func (s *Service) Waste(ctx context.Context, batchID, actor string, in WasteInpu
 		BatchID string
 		Input   WasteInput
 	}{batchID, in}
-	return mutate(ctx, s, "waste:"+actor, in.Key, payload, func(tx pgx.Tx) (WasteRecord, error) {
+	keys := []mutationKey{{"waste:" + actor, in.Key}}
+	if key, supplied := restKey(ctx); supplied {
+		keys = append(keys, mutationKey{"rest_waste:" + actor, key})
+	}
+	return mutateKeys(ctx, s, keys, payload, func(tx pgx.Tx) (WasteRecord, error) {
 		b, err := scanBatch(tx.QueryRow(ctx, "SELECT "+batchColumns+" FROM batches WHERE id=$1", batchID))
 		if err != nil {
 			return WasteRecord{}, err
