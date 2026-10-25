@@ -12,7 +12,7 @@ The attached Project Progress 2 PDF (section 8, page 11) defines NFR-01 through 
 | 08 Auditability | REST/gRPC writes atomically append verified-actor history with before/after allergen/active state. | Old missing history cannot be reconstructed; Redis persistence/backups and administrator access remain deployment responsibilities. |
 | 09 Ownership | Only Catalog Redis is accessed; other services use REST/gRPC. | Public contracts and teammate callers are unchanged. |
 | 10 Money extension | Integer minor units and explicit currency, with input validation. | No stock or Order totals are calculated here. |
-| 11 Idempotency extension | Optional POST key/hash/flavor/audit/original response commit in one Redis operation; concurrent/restart replay is verified. PUT and archive preserve documented no-op behavior. | The broader repo phrase about every mutation is not a new shared contract. Arbitrary PUT/PATCH/DELETE original-response replay and gRPC mutation retries require a separately reviewed contract; clients must not invent those guarantees. |
+| 11 Idempotency extension | Optional UUID header on POST/PUT/PATCH/DELETE. Flavor/audit/original response commit in one Redis operation. PUT/PATCH/DELETE additionally bind the verified Manager, method and canonical resource UUID. No-op PUT/archive results are remembered without extra history. | Existing callers do not need a header; POST keeps its existing key format. gRPC has no new replay contract and automatic mutation retries remain unsupported there. |
 | 12/13 Deployment | No new database/broker dependencies or network ports. | Other services' statelessness and production network isolation are external responsibilities. |
 
 ## Optional TLS
@@ -26,3 +26,11 @@ Inventory can opt into this Catalog TLS endpoint with `CATALOG_GRPC_TLS_ENABLED=
 ## Verification
 
 `go test -race ./...` with isolated `TEST_REDIS_URL` covers role/projection policies, Redis persistence, atomic audit/idempotency, diagnostics, restart and transport lifecycle. `internal/transportsecurity/tls_test.go` covers HTTP TLS trust/configuration. The actual owned-services smoke uses gRPC TLS and an Auth-issued Manager token; plaintext/untrusted/wrong-host requests are rejected.
+
+## Optional REST mutation replay
+
+Use one non-nil UUID `Idempotency-Key` for a PUT/PATCH/DELETE and resend the same body bytes for a retry. Retention is 24 hours from the original successful request; replay does not extend it. The original status/body is returned after later edits or a new process, without rolling the flavor back. Reusing a mutation key with different body bytes, method, target or Manager conflicts with HTTP 409. Authorization is checked before replay; access tokens are never cached.
+
+POST retains its earlier compatibility namespace/behavior. New mutation responses live in `<REDIS_KEY_PREFIX>:mutation_replay:<uuid>` as complete String records. Redis permissions must allow this prefix when using the optional feature. A failed replay-store/type/ACL check leaves both flavor and audit unchanged; requests without a key use the previous update path. Recipe-bearing responses remain in Catalog's own private Redis and are never logged.
+
+`tests/mutation_replay_integration_test.go` verifies concurrent requests across application instances, response snapshots after later writes, no-op retention, access control and replay-storage failure. See the [service-local ADR](../batch-inventory-service/docs/adr-optional-rest-replay.md) and [reusable handoff verification](../batch-inventory-service/docs/owned-nfr-handoff.md).

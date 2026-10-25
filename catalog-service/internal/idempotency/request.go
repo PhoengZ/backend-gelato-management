@@ -16,6 +16,9 @@ type Request struct {
 	Key         uuid.UUID
 	RawKey      string
 	PayloadHash string
+	// Scope is empty for the existing POST replay format. Other REST mutations
+	// bind their method and canonical resource UUID without changing gRPC.
+	Scope string
 }
 type requestKey struct{}
 

@@ -130,7 +130,7 @@ JSON migration. Historical events from before this version cannot be recovered;
 their first subsequent mutation begins a new history with its prior safety
 state captured.
 
-## Atomic REST create idempotency
+## Atomic REST mutation idempotency
 
 Manager `POST /api/v1/flavors` accepts one optional UUID `Idempotency-Key`.
 Equivalent UUID spellings share a canonical key. The Redis Lua create operation
@@ -141,6 +141,14 @@ lost replies or a process restart. A different body returns
 `409 IDEMPOTENCY_CONFLICT`; unavailable/corrupt response storage fails closed with
 `503 IDEMPOTENCY_UNAVAILABLE`. There is no in-memory fallback or post-create cache
 write. gRPC has no idempotency-key field in its current contract.
+
+PUT/PATCH/DELETE also accept an optional non-nil UUID header. Their new scoped
+records bind Manager identity, method, resource and body bytes, and atomically
+persist the original response with the mutation/audit. No-op PUT/archive results
+are remembered without another audit. A later retry returns the original result
+without undoing intervening edits. Existing requests without a key keep their
+previous behavior. See [NFR.md](NFR.md) for retention, permissions and boundaries,
+and the [isolated caller/TLS verification](../batch-inventory-service/docs/owned-nfr-handoff.md).
 
 For upgrade, stop old Catalog writers before starting this binary. Startup uses
 `SCAN` to reconcile every legacy UUID spelling in the existing `idempotency:`

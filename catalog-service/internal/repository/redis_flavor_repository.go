@@ -274,6 +274,9 @@ func (r *RedisFlavorRepository) List(ctx context.Context) ([]*model.FlavorAdmin,
 }
 
 func (r *RedisFlavorRepository) Update(ctx context.Context, previous, flavor *model.FlavorAdmin) error {
+	if request, ok := idempotency.FromContext(ctx); ok && request.Scope != "" {
+		return r.updateIdempotent(ctx, previous, flavor, request)
+	}
 	record, err := audit.NewRecord(ctx, audit.MutationAction(ctx), previous, flavor)
 	if err != nil {
 		return err
