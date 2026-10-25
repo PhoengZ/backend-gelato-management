@@ -19,3 +19,7 @@ analytics-service/main
 __pycache__/
 *.pyc
 .pytest_cache/
+
+# Local Testing Guides / Step Verification
+step.md
+docs/step.md
