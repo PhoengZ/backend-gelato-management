@@ -2,9 +2,10 @@
 
 Date: 2026-09-27
 
-Status: Proposed for affected service-owner review. Catalog implementation is
-available on the local development branch; this is not a team acceptance,
-deployment, or Order/Inventory integration claim.
+Status: Accepted in the supplied project proposal (ADR-006, page 15).
+This mirrors that document's decision status; it does not assert shared
+deployment or complete Order integration. Implementation and isolated runtime
+verification are recorded separately in the owned-service handoff.
 
 ## Context
 
@@ -61,7 +62,8 @@ ownership without an independent business capability.
   purchase. Historical transaction facts must be distinguished from a replicated
   current Catalog entity. The identifier-only wording in service-data-ownership
   is not amended implicitly by this change.
-- Inventory must decide whether an archived flavor can receive a new batch.
+- Inventory rejects a missing/archived flavor before creating a new batch.
+  Existing stock remains authoritative after a later Catalog archive.
 - Auth machine identities, privileged background callers, TLS deployment,
   pagination and deployment-wide rate limits remain separate integration work.
 - This does not implement the Order–Inventory reservation work promised by

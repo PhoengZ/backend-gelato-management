@@ -1,0 +1,13 @@
+{
+  "original_pages": 25,
+  "addendum_pages": 4,
+  "merged_pages": 29,
+  "original_sha256": "b6fbd067559a63cca0b5197f641376497589c2a522eee27d13fa811620a8137f",
+  "original_file_unchanged": true,
+  "all_original_page_content_streams_and_text_match": true,
+  "original_annotation_counts_match": true,
+  "addendum_sha256": "0bc1fd81e566fb8993c8efa441457d5003ef9960ddb863835f363d4937b7eec4",
+  "merged_sha256": "27e24538175462022ca1f6eaec038d484bb4f02add9f92bb73eeb48c4e19238d",
+  "all_addendum_pages_pixel_match_in_merged_package": true,
+  "visual_review": "All four addendum pages rendered and inspected; final diagram revision inspected."
+}

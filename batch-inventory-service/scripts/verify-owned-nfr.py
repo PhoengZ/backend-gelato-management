@@ -247,6 +247,25 @@ class Fixture:
             tokens, identities = {}, {}
             password = "fixture_" + uuid.uuid4().hex
             self.private_values.append(password)
+            replay_email = "signup-replay-" + namespace + "@example.invalid"
+            self.private_values.append(replay_email)
+            signup_body = {"email": replay_email, "password": password, "display_name": "Signup replay fixture"}
+            signup_key = {"Idempotency-Key": str(uuid.uuid4())}
+            original_signup = self.request(gateway_url + "/api/v1/auth/signup", "POST", signup_body,
+                                           headers=signup_key, expected=201)
+            if original_signup != self.request(gateway_url + "/api/v1/auth/signup", "POST", signup_body,
+                                               headers=signup_key, expected=201):
+                raise VerificationError("auth_signup_original_response_replay")
+            self.request(gateway_url + "/api/v1/auth/signup", "POST", {**signup_body, "display_name": "Changed"},
+                         headers=signup_key, expected=409)
+            signup_facts = self.sql("SELECT (SELECT count(*) FROM " + auth_schema + ".users WHERE id='" +
+                                    original_signup["id"] + "')=1 AND (SELECT count(*) FROM " + auth_schema +
+                                    ".outbox_events WHERE payload->>'user_id'='" + original_signup["id"] +
+                                    "')=1 AND (SELECT count(*) FROM " + auth_schema + ".auth_audit_logs WHERE user_id='" +
+                                    original_signup["id"] + "' AND event_type='USER_REGISTERED')=1")
+            if signup_facts != "t":
+                raise VerificationError("auth_signup_repeated_user_event_or_audit")
+            self.checks[mode + "_auth_signup_replay_through_actual_gateway"] = "PASS"
             for role in ("MANAGER", "STAFF", "CUSTOMER"):
                 email = role.lower() + "-" + namespace + "@example.invalid"
                 self.private_values.append(email)

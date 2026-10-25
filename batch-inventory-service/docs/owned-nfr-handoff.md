@@ -7,16 +7,19 @@ This is the owned-service implementation/evidence section for the group's progre
 ```mermaid
 flowchart LR
     Browser[Browser or staff client] --> Gateway[Gateway: teammate owned]
-    Gateway --> Auth[Auth REST]
-    Gateway --> Catalog[Catalog REST]
-    Gateway --> Inventory[Inventory REST]
+    Gateway -->|REST HTTP; optional verified HTTPS| Auth[Auth REST]
+    Gateway -->|REST HTTP; optional verified HTTPS| Catalog[Catalog REST]
+    Gateway -->|REST HTTP; optional verified HTTPS| Inventory[Inventory REST]
     Order[Order: teammate owned] -->|versioned gRPC| Catalog
     Order -->|machine-authenticated gRPC| Inventory
     Inventory -->|GetFlavor before stock transaction| Catalog
-    Auth --> AuthDB[(Auth PostgreSQL)]
+    Auth --> AuthDB[(Auth PostgreSQL: user + signup receipt + outbox)]
     Catalog --> CatalogDB[(Catalog Redis)]
-    Inventory --> InventoryDB[(Inventory PostgreSQL)]
+    Inventory --> InventoryDB[(Inventory PostgreSQL: stock + append-only history)]
+    AuthDB --> AuthOutbox[Auth publisher: opt-in]
+    AuthOutbox -->|AMQP; draft user.registered| Broker[RabbitMQ: shared activation pending]
     InventoryDB --> Outbox[Inventory transactional outbox]
+    Outbox -->|AMQP; waste + low_stock + expiring| Broker
 ```
 
 Shared Compose discovers services through Docker DNS names `auth-service`, `catalog-service` and `batch-inventory-service`. The isolated verification uses `auth`, `catalog` and `inventory` aliases on its own private network. Gateway holds no domain data; Order never reads Inventory's private tables. User JWT verification and the Order machine credential remain separate controls.
@@ -39,7 +42,7 @@ The checks observe:
 
 1. Inventory startup rejects an unmigrated schema; the updated migrator is repeatable and readiness succeeds afterwards.
 2. Actual Gateway Docker DNS/forwarding, Auth-issued Manager/Staff/Customer roles and shared-Gateway credential lockout isolation.
-3. Catalog/Inventory optional REST keys survive retries through Gateway without duplicate production, history or waste events.
+3. Auth signup and Catalog/Inventory optional REST keys survive retries through Gateway without duplicate users, registration outbox/audit, production, history or waste events.
 4. Actual default Order clients read Catalog, reserve/confirm Inventory and replay the original reservation result after confirmation. Invalid machine credentials fail.
 5. Owned HTTPS/gRPC and Inventory-to-Catalog TLS verify a strict private CA/hostname chain. Gateway's unchanged HTTPS upstream client trusts the fixture CA only within its container; a different CA is rejected.
 6. The existing plaintext Order clients fail against TLS listeners, explicitly demonstrating why their TLS adoption must precede activation in a shared environment. A verified TLS machine caller still completes the stock lifecycle.
@@ -50,7 +53,7 @@ Full service suites additionally use real PostgreSQL/Redis/RabbitMQ to cover con
 ## Shared-environment rollout order
 
 1. Choose a deployment window with the owners of active callers. Stop old Catalog/Inventory writers during cutover when complete replay/actor guarantees are required; DDL/restart can briefly interrupt Inventory.
-2. Run the updated Inventory migrator before its new binary. Migration 005 adds nullable actor fields/constraints and preserves stock/IDs/timestamps; unknown historical actors stay NULL. Current Compose already invokes `/app/migrate && exec /app/inventory`. No additional migration is needed for optional REST keys.
+2. Run the updated Inventory migrator before its new binary. Migration 005 adds nullable actor fields/constraints; 006 installs UPDATE/DELETE/TRUNCATE rejection on movements/waste. Both preserve stock/IDs/timestamps; unknown historical actors stay NULL. Readiness also verifies the four actual ALWAYS guards. Current Compose already invokes `/app/migrate && exec /app/inventory`. Inventory optional REST keys need no extra table. Auth migration 004 adds its private signup receipt table/index; Auth already migrates at startup, or operators can run its migrator before rollout.
 3. Start the new binaries with existing transport defaults. Check Auth/Catalog `/health` and Inventory `/ready`, then verify an authorized batch/waste and corresponding actor records against synthetic/demo data agreed by the team.
 4. Prepare server PEM pairs with service-hostname SANs, expiration/renewal and file permissions appropriate for each non-root image. Configure verified CA trust for every caller before enabling TLS. Keep private keys out of Git.
 5. Gateway owner sets HTTPS upstream URLs and process CA trust. Order owner must add a TLS transport option: its current Catalog/Inventory clients call `insecure.NewCredentials()` and cannot adopt TLS through existing address settings alone. Enable inbound gRPC TLS only after that path is ready. Inventory's outbound Catalog TLS is already configurable with `CATALOG_GRPC_TLS_*`.
@@ -60,12 +63,14 @@ Full service suites additionally use real PostgreSQL/Redis/RabbitMQ to cover con
 
 - 0:00-0:40: show Docker DNS/service names and the Gateway -> service / Order -> Inventory request paths.
 - 0:40-1:30: show JWT roles, separate machine authentication and verified TLS configuration.
-- 1:30-2:30: replay a Catalog mutation and CreateBatch/Waste request; show one resulting mutation/audit and a 409 for changed input.
-- 2:30-3:30: show Inventory's stock invariant, actor records, transaction rollback and migration readiness guard.
+- 1:30-2:30: replay signup, a Catalog mutation and CreateBatch/Waste; show one resulting operation and a 409 for changed input. Login still checks current credentials.
+- 2:30-3:30: show Inventory's stock invariant, actor records, transaction rollback, history UPDATE/DELETE/TRUNCATE rejection and migration readiness guard.
 - 3:30-4:30: show redacted diagnostics and Auth audit cancellation/transient-error tests; state the remaining shared deployment and outage limits.
 
 Use the real test receipt and synthetic data in the recording. The storyboard is preparation material; it is not a recorded/submitted video.
 
 ## Ownership and remaining acceptance
 
-Our code owns Auth/Catalog/Inventory data, audits, local transport capabilities and these reproducible checks. Team integration still owns Order p95 under agreed load, confirmed-order survival during Notification outage, consumer deduplication/DLQ, external Gateway HTTPS and production network policy. Auth token-response replay and continuous-database-outage audit durability require explicit contract/availability decisions. These are not claimed as completed by an isolated service test.
+Our code owns Auth/Catalog/Inventory data, audits, local transport capabilities and these reproducible checks. Team integration still owns Order p95 under agreed load, confirmed-order survival during Notification outage, consumer deduplication/DLQ, external Gateway HTTPS and production network policy. Best-effort Auth audit is accepted for this iteration, with observable failures; it is not guaranteed outage retention. Login keeps live credential validation and fresh issuance; shared NFR wording must explicitly adopt that credential policy rather than imply token replay. Auth's event draft still needs shared contract/routing agreement before publisher enablement. These boundaries are not closed by an isolated service test.
+
+See [the dated owned-service update](../../docs/architecture/owned-nfr-update-2026-10-25.md) for proposal corrections and the current evidence receipt.
