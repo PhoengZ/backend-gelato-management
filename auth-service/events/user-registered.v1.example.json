@@ -1,0 +1,14 @@
+{
+  "specversion": "1.0",
+  "id": "0670252a-fad5-4782-b962-119c173de00f",
+  "source": "urn:gelatoflow:auth-service",
+  "type": "com.gelatoflow.auth.user-registered.v1",
+  "subject": "users/ca3c50a0-7a42-44c4-bc55-410c8a5ad58c",
+  "time": "2026-10-25T00:00:00Z",
+  "datacontenttype": "application/json",
+  "data": {
+    "user_id": "ca3c50a0-7a42-44c4-bc55-410c8a5ad58c",
+    "role": "CUSTOMER",
+    "status": "ACTIVE"
+  }
+}

@@ -116,6 +116,58 @@ compression returns `415 UNSUPPORTED_MEDIA_TYPE`, and an oversized body returns
 `413 REQUEST_TOO_LARGE`. Database operations receive a request deadline; bcrypt
 work runs to completion and is bounded by the configured cost and request limit.
 
+## Auth outbox publisher (NFR-05)
+
+Signup already stores `user.registered` with the user in the same transaction.
+The API now includes an optional background publisher; broker outages do not
+participate in signup/login requests or their health endpoint.
+
+Publishing is disabled by default. Enable `OUTBOX_PUBLISH_ENABLED=true` only after
+agreeing the event and receiving topology with its owners, and explicitly set
+`OUTBOX_AMQP_URL` plus `OUTBOX_EXCHANGE`. Auth passively checks the exchange and
+never creates an exchange, queue, binding or broker user. A durable receiving queue
+must bind `user.registered`. Unroutable events stay pending even when the broker
+ACKs them; only a positive confirm without a mandatory return records `published_at`.
+
+The worker uses the existing outbox columns/index; **no migration is added**.
+An atomic lease uses `FOR UPDATE SKIP LOCKED` only for this work queue, releases
+the DB lock before network I/O, and expires after the publish timeout plus 10s.
+Attempts fence old completions. Failed sends retry after 1s, 2s, 4s and so on,
+capped at 5 minutes, without deleting pending events. Each attempt uses a fresh
+AMQP connection/channel, so a restarted broker is retried automatically.
+
+`OUTBOX_POLL_INTERVAL` defaults to 1s (50ms–1m); `OUTBOX_PUBLISH_TIMEOUT` defaults
+to 5s (100ms–30s). Dial, TLS/AMQP handshake, publish and confirm are bounded by
+that attempt. Shutdown cancels network I/O and allows at most 2s for the DB
+acknowledgement/retry update before closing the pool.
+
+Use `amqps://` outside an isolated trusted development network. It verifies the
+broker hostname and CA with TLS 1.2 minimum; `OUTBOX_TLS_CA_FILE` can add a private
+CA. No skip-verification or plaintext fallback is provided. Configuration and
+worker diagnostics exclude the URL, credentials, payload and customer PII.
+
+The [service-local event draft](events/user-registered.v1.schema.json) wraps old
+rows into CloudEvents 1.0 using the persisted event ID/time. Only `user_id`, `role`
+and `status` leave Auth; email, display name and credential fields are excluded.
+This draft does not replace or edit `contracts/`. Shared adoption remains a
+separate review. Duplicates are possible after a broker ACK followed by a crash/DB
+failure; consumers must deduplicate the stable CloudEvents `id`. Invalid old rows
+remain pending with backoff and a bounded `invalid_event` diagnostic.
+
+With **isolated** PostgreSQL and RabbitMQ fixtures:
+
+```sh
+TEST_DATABASE_URL='postgres://fixture_user:fixture_password@127.0.0.1:5432/fixture_db?sslmode=disable' \
+TEST_AUTH_AMQP_URL='amqp://fixture_user:fixture_password@127.0.0.1:5672/' \
+  go test -race -count=1 ./...
+```
+
+Rabbit tests create/delete uniquely named `auth_test_*` exchanges/queues only.
+They skip explicitly when `TEST_AUTH_AMQP_URL` is absent; no broker test is
+claimed from the PostgreSQL-only CI fixture. See [the ADR](docs/adr-auth-outbox.md).
+The reliability design follows RabbitMQ's [publisher confirms](https://www.rabbitmq.com/docs/confirms)
+and [mandatory routing](https://www.rabbitmq.com/docs/publishers#unroutable) guidance.
+
 ## Database migration
 
 The migration command uses embedded, ordered `*.up.sql` files and a PostgreSQL
