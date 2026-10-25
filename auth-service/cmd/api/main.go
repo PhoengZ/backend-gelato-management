@@ -13,6 +13,7 @@ import (
 	"auth-service/internal/audit"
 	"auth-service/internal/auth"
 	"auth-service/internal/middleware"
+	"auth-service/internal/outbox"
 	"auth-service/internal/repository"
 	"auth-service/internal/router"
 	"auth-service/internal/service"
@@ -84,6 +85,23 @@ func main() {
 	listener = transportsecurity.HTTP(listener, cfg.HTTPTLS)
 	go func() {
 		serverErrors <- app.Listener(listener)
+	}()
+	workerCtx, stopWorker := context.WithCancel(context.Background())
+	workerDone := make(chan struct{})
+	if cfg.Outbox.Enabled {
+		worker := outbox.NewWorker(pool, outbox.Rabbit{URL: cfg.Outbox.URL, Exchange: cfg.Outbox.Exchange, TLSConfig: cfg.Outbox.TLSConfig}, cfg.Outbox.PollInterval, cfg.Outbox.PublishTimeout)
+		go func() {
+			defer close(workerDone)
+			worker.Run(workerCtx, func(err error) {
+				log.Printf("auth outbox dispatch failed: category=%s", outbox.Category(err))
+			})
+		}()
+	} else {
+		close(workerDone)
+	}
+	defer func() {
+		stopWorker()
+		<-workerDone
 	}()
 
 	shutdownSignal, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
