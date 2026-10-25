@@ -1,58 +1,79 @@
 # Non-Functional Requirements Specification
 
-This document defines the authoritative Non-Functional Requirements (NFRs) and Quality Attributes for the GelatoFlow platform. It aligns business and architectural goals established in the project charter with the running microservices codebase and versioned contracts.
+This document defines the authoritative Non-Functional Requirements (NFRs) and Quality Attributes for the GelatoFlow platform. It harmonizes the original project charter and progress deliverable (Project Progress 2 PDF, Section 8, page 11: **NFR-01 through NFR-09**) with the repository architecture extensions (**NFR-10 through NFR-13**) and concrete microservice implementations across the codebase.
 
 ---
 
-## 1. NFR Summary Matrix
+## 1. NFR Master Summary Matrix
 
-| ID | Quality Attribute | Target Metric / Criterion | Implementation Mechanism | Verification & Enforcement |
-|:---:|:---:|---|---|---|
-| **NFR-01** | **Data Consistency** | $Available = Produced - Reserved - Sold - Waste \ge 0$ | PostgreSQL check constraints and atomic transactions in `batch-inventory-service`. | Unit & integration tests in `batch-inventory-service/tests/`. |
-| **NFR-02** | **Concurrency Reliability** | Exactly 1 success out of 20 concurrent requests on 1 portion. | Flavor-scoped PostgreSQL advisory locks and row-level locks (no `SKIP LOCKED` on inventory). | Concurrency race tests; Go `-race` detector suite. |
-| **NFR-03** | **Performance & Latency** | Order creation API $p95 \le 1.0\text{ s}$ under agreed MVP peak load. | In-memory Redis catalog cache, lightweight gRPC inter-service calls, indexed PostgreSQL queries. | Load testing suite; APM latency measurements. |
-| **NFR-04** | **Availability & Fault Isolation** | Zero order losses or payment failures caused by downstream notification outages. | Asynchronous messaging via RabbitMQ; Order status commits locally before async publication. | Integration tests simulating broker/notification downtime. |
-| **NFR-05** | **Reliability & Messaging** | At-least-once message delivery with idempotent consumer deduplication and DLQ routing. | Transactional outbox on producers; consumer event deduplication by CloudEvents `id`; RabbitMQ publisher confirms. | Python event schema validation script; test consumer replay fixtures. |
-| **NFR-06** | **Security & Access Control** | Transport Layer Security (TLS); short-lived JWT access tokens (15m); strict RBAC (`CUSTOMER`, `STAFF`, `MANAGER`). | API Gateway identity header sanitization; local JWT claim verification; bcrypt password hashing. | `catalog-service/SECURITY.md`, `api-gateway/tests/`, and `auth-service` test suites. |
-| **NFR-07** | **Privacy & Log Redaction** | Zero exposure of bearer tokens, machine secrets, Stripe signatures, or customer PII in logs. | Centralized logging sanitizers; header and token masking across HTTP/gRPC handlers. | Security code reviews; automated log payload inspections. |
-| **NFR-08** | **Auditability** | Full historical traceability of stock movements, waste records, allergen edits, and manager actions. | Immutable audit tables (`inventory_movements`, `waste_records`); explicit actor attribution. | Database migration integrity tests; audit log assertions. |
-| **NFR-09** | **Modifiability & Isolation** | Database-per-service isolation; zero direct cross-database queries or shadow/duplicate tables. | Microservice encapsulation; on-demand synchronous gRPC queries for cross-service facts. | Architecture boundary reviews; repository dependency linter. |
-| **NFR-10** | **Monetary Precision** | Zero floating-point representation; exact integer minor units (Satang) with ISO 4217 currency. | `int64` minor unit data models (`total_amount_minor`, `cost_lost_minor`); string currency (`THB`). | Schema validation via `contracts/openapi/` and unit test assertions. |
-| **NFR-11** | **Idempotency Standard** | Replay of identical request returns original response; mutated payload with identical key returns HTTP 409. | UUID `Idempotency-Key` header; hash verification; database-persisted operation idempotency records. | Idempotency handler test suites in Order and Inventory services. |
-| **NFR-12** | **Stateless Architecture** | Stateless operational services allowing immediate restart and horizontal scaling without state loss. | In-memory bounded TTL routing for Notification SSE; zero database dependencies in Payment adapter. | Service container restarts without persistent volume dependencies. |
-| **NFR-13** | **Network Isolation** | Zero public internet exposure of internal data stores or message brokers in production. | Dedicated Docker bridge networks (`gelato_network`); isolated production compose files. | `docker compose ... config` validation; network port audits. |
+| ID | Quality Attribute | Target Metric / Measurable Criterion (PDF & Repo Specification) | Implementation Mechanisms & Microservices | Verification & Enforcement Suite |
+|:---:|:---|---|---|---|
+| **NFR-01** | **Consistency** *(Data Invariant)* | ทุก batch ต้องรักษา Invariant:<br>$$\text{Available} = \text{Produced} - \text{Reserved} - \text{Sold} - \text{Waste} \ge 0$$<br>ไม่มียอดคงเหลือติดลบเด็ดขาด | • **`batch-inventory-service`**: PostgreSQL `CHECK` constraints on portions, atomic transactions, row-level locks, no `SKIP LOCKED`. | • `batch-inventory-service/tests/`<br>• `pytest tests/test_uc03_batch_inventory.py` |
+| **NFR-02** | **Concurrency Reliability** | เมื่อมีสินค้าคงเหลือ $Available = 1$ portion และมี **20 concurrent order requests** แย่งจองพร้อมกัน ระบบต้องตัดจองสำเร็จเพียง **1 รายการ** และ Available ต้องเหลือ 0 | • **`batch-inventory-service`**: Deterministic flavor advisory locks (`pg_advisory_xact_lock`) + batch row locks (`SELECT ... FOR UPDATE`).<br>• **`order-service`**: Synchronous gRPC reservation before checkout. | • `pytest tests/test_nfr02_concurrency.py`<br>• `go test -race ./...` in `batch-inventory-service` |
+| **NFR-03** | **Performance & Latency** | Order creation API ต้องมีค่า Latency **$p95 \le 1.0\text{ s}$** ภายใต้ภาระงาน MVP load ที่ตกลงกัน | • **`order-service`**: Bounded 5s gRPC client deadlines.<br>• **`catalog-service`**: In-memory Redis active catalog caching.<br>• **`batch-inventory-service`**: Indexed queries; no remote network calls while DB locks held. | • Automated latency benchmarks in `tests/`<br>• Profiling and APM latency histograms |
+| **NFR-04** | **Availability & Fault Isolation** | ความล้มเหลวของ Downstream services (เช่น Notification Service หรือ RabbitMQ ล่ม) ต้อง**ไม่ทำให้ confirmed order สูญหายหรือล้มเหลว** | • **`order-service`**: Transactional Outbox pattern; order state commits to PostgreSQL `PAID` locally before async publication.<br>• **`notification-service`**: Decoupled asynchronous consumer. | • `pytest tests/test_uc01_preorder_checkout.py` with stopped notification container |
+| **NFR-05** | **Reliability & Messaging** | การส่งข้อมูลแบบ Asynchronous ผ่าน RabbitMQ ต้องใช้ **Transactional Outbox**; Consumer ต้องรองรับ **At-least-once delivery**, ทำ **Idempotent Deduplication** ผ่าน CloudEvents `id`, และมี **Dead Letter Queue (DLQ)** | • **Producers** (`order`, `inventory`, `fulfillment`, `auth`): Transactional outbox with publisher confirms and reconnect loops.<br>• **Consumers** (`fulfillment`, `notification`, `analytics`): UUID `id` deduplication, RabbitMQ DLX `*.dlx` + `*_dlq`, and `Nack(requeue=false)`. | • `python contracts/scripts/validate_event_examples.py`<br>• `pytest tests/test_fulfillment_nfr.py`<br>• RabbitMQ DLQ queue verification |
+| **NFR-06** | **Security & Access Control** | ใช้ **TLS 1.2+**, Role-based authorization (**RBAC**: `CUSTOMER`, `STAFF`, `MANAGER`), Adaptive password hashing (**bcrypt cost 12**); **ไม่เก็บ plaintext password หรือข้อมูลบัตรเครดิต** | • **`auth-service`**: bcrypt password hashing, timing-attack mitigation on non-existent accounts, short-lived signed JWTs (15m, HS256).<br>• **`api-gateway`**: Identity header sanitization, public route protection.<br>• **Transports**: Opt-in TLS 1.2+ across Auth, Catalog, and Inventory. | • `auth-service/internal/transportsecurity/tls_test.go`<br>• `pytest tests/test_uc02_kitchen_pickup.py` (RBAC boundary checks) |
+| **NFR-07** | **Privacy & Log Redaction** | Application Log ต้อง **Redact ข้อมูลสำคัญ** เช่น Bearer Access Tokens, Machine Secrets, Stripe Webhook Signatures, raw DSNs, และข้อมูลส่วนบุคคล (PII) | • **`api-gateway`**: Header/cookie sanitizing access logger.<br>• **`payment-service`**: Logback `SensitiveDataMaskingPatternConverter` masking Stripe keys, URLs, and signatures.<br>• **Go services**: Bounded diagnostic errors excluding DSNs and panic text. | • `payment-service` unit tests: `SensitiveDataMaskingPatternConverterTest`<br>• `tests/process_privacy_test.go` in `auth-service` |
+| **NFR-08** | **Auditability** | ทุกการปรับปรุง Batch, การบันทึก Waste, การแก้ไขสารก่อภูมิแพ้ (Allergen), และ Privileged Actions ต้องมี **Audit Record ตรวจย้อนหลังได้พร้อมระบุตัวตน (Actor)** | • **`batch-inventory-service`**: Immutable `inventory_movements` (Migration 005) with verified `actor_id` and `actor_role`, plus `waste_records`.<br>• **`catalog-service`**: Atomic Redis mutation audit trail.<br>• **`auth-service`**: Immutable `auth_audit_logs` with triggers.<br>• **`fulfillment-service`**: Immutable `fulfillment_status_history`. | • `batch-inventory-service/tests/production_audit_test.go`<br>• `pytest tests/test_fulfillment_nfr.py` |
+| **NFR-09** | **Modifiability & Boundary** | Service อื่นต้องเข้าถึงข้อมูลผ่าน **API/gRPC Contract ของ Service เจ้าของข้อมูลเท่านั้น** ห้ามอ่าน/เขียน Private Database ของ Service อื่น และ**ห้ามทำ Duplicate/Shadow Tables** | • **Architecture**: Database-per-service isolation (PostgreSQL Auth, Redis Catalog, PostgreSQL Order, PostgreSQL Inventory, PostgreSQL Fulfillment, MongoDB Analytics, Stateless Payment & Notification).<br>• **Cross-service queries**: Synchronous gRPC on demand. | • `buf lint contracts` & `buf build contracts`<br>• `docker compose -f infra/docker/compose.yml config` boundary inspection |
+| **NFR-10** | **Monetary Precision** *(Repo Extension)* | ข้อมูลจำนวนเงินทั้งหมดต้องเก็บและคำนวณในรูป **Integer Minor Units** (Satang ใน THB) ร่วมกับระบุ ISO 4217 Currency อย่างชัดเจน **ห้ามใช้ Floating-point decimals** | • **All services**: `int64` minor unit data models (`price_minor`, `total_amount_minor`, `cost_lost_minor`, `revenue_minor`), explicit string currency (`THB`). | • `npx @redocly/cli lint contracts/openapi/*.yaml`<br>• Model test assertions |
+| **NFR-11** | **Idempotency Standard** *(Repo Extension)* | ทุก Mutation REST Endpoint ต้องรองรับ Header **`Idempotency-Key` (UUID)**; การส่งคำขอเดิมซ้ำต้อง Replay ผลลัพธ์เดิมที่สำเร็จ; ส่งคำขอ payload ขัดแย้งกันด้วย key เดิมต้องตอบกลับ **HTTP 409 Conflict** | • **`order-service`**: Order creation idempotency.<br>• **`batch-inventory-service`**: Reservation & waste idempotency.<br>• **`catalog-service`**: Flavor creation idempotency with Redis 24h key store.<br>• **`payment-service`**: Deterministic refund/session idempotency keys. | • `pytest tests/test_uc01_preorder_checkout.py`<br>• `pytest tests/test_uc03_batch_inventory.py` |
+| **NFR-12** | **Stateless Architecture** *(Repo Extension)* | **Payment Service** และ **Notification Service** ต้องเป็น **Stateless Service** โดยไม่ถือครอง Local Database ของตนเอง เพื่อรองรับการ Restart และ Horizontal Scaling ได้อิสระ | • **`payment-service`**: Stateless adapter translating Stripe webhooks to Order callbacks.<br>• **`notification-service`**: Stateless SSE adapter with bounded in-memory ring buffer (500 events/customer, 5-min TTL) replayable by `Last-Event-ID`. | • Container restart tests (`docker restart payment-service notification-service`)<br>• SSE reconnect replay checks |
+| **NFR-13** | **Network Isolation** *(Repo Extension)* | พอร์ตของฐานข้อมูลระดับ Operational (PostgreSQL, Redis, MongoDB) และ RabbitMQ Broker ต้องถูก**จำกัดสิทธิ์ให้อยู่ภายใน Docker Internal Network (`gelato_network`)** เท่านั้นใน Production | • **`infra/docker/compose.yml`**: Database and broker services omit `ports:` host mappings; communication is restricted to the internal bridge network. Dedicated `compose.dev.yml` provides opt-in host port exposure for local testing only. | • `docker compose --env-file infra/.env.example -f infra/docker/compose.yml config`<br>• Port scanning audits |
 
 ---
 
-## 2. Detailed Quality Requirements
+## 2. Microservice Implementation Controls & Evidence
 
-### 2.1 Concurrency & Invariant Consistency (NFR-01, NFR-02)
-- **Invariant:** The portion balances across all production batches must strictly adhere to:
-  $$\text{initial\_portions} = \text{available} + \text{reserved} + \text{sold} + \text{wasted}$$
-  where no balance may fall below zero at any point in time.
-- **Contention Protection:** Under extreme contention (e.g., flash sales of high-demand flavors), reservation requests are serialized using PostgreSQL transaction-level advisory locks ordered deterministically by Order ID and Flavor ID. The system strictly avoids `SKIP LOCKED` during stock allocation to prevent reporting artificial stock depletion when the inventory is merely locked for concurrent settlement.
+### 2.1 Auth Service
+- **Authentication & Roles (NFR-06):** Issues HMAC-SHA256 JWTs (15m expiry, `iss: gelatoflow-auth`, `aud: gelatoflow-api`) containing UUID `sub` and validated roles (`CUSTOMER`, `STAFF`, `MANAGER`). Password verification uses bcrypt (cost 12) with dummy hash comparison to eliminate username enumeration timing leaks.
+- **Audit Logging (NFR-08):** Appends to `auth_audit_logs` table via PostgreSQL triggers enforcing append-only immutability (prohibiting `UPDATE` and `DELETE`). Captures client IP, User-Agent (bounded to 255 chars), and event types (`LOGIN_SUCCESS`, `LOGIN_FAILURE`, `USER_REGISTERED`).
+- **Transport Security (NFR-06):** Supports opt-in TLS via `HTTP_TLS_CERT_FILE` and `HTTP_TLS_KEY_FILE` with TLS 1.2 minimum floor.
+- **Privacy & Diagnostics (NFR-07):** Startup and migration error diagnostics emit sanitized fixed text and error categories, completely omitting raw database connection strings (DSNs) and credentials.
 
-### 2.2 Performance and Latency Targets (NFR-03)
-- **Response Budget:** The critical path of checkout (`POST /api/v1/orders`) encompasses synchronous gRPC calls to Catalog (price/metadata validation), Inventory (atomic FEFO reservation), and Payment (Checkout Session initialization). Under standard MVP load, the 95th percentile response latency ($p95$) must not exceed 1.0 second.
-- **Deadlines & Timeouts:** Every inter-service RPC is bounded by explicit deadlines:
-  - Order-to-Payment gRPC: Default 5 seconds, maximum 30 seconds.
-  - Payment-to-Order HTTP Callback: Default 5,000 ms (100–30,000 ms allowable range).
-  - Order-to-Inventory gRPC: Default 5 seconds.
+### 2.2 Catalog Service
+- **Metadata Ownership & Caching (NFR-03, NFR-09):** Serves active flavor profiles, portion prices, and allergen flags from Redis. Public endpoints hide archived flavors and internal recipes.
+- **Atomic Mutation Auditing (NFR-08):** Flavor updates and creations atomically append verified actor attribution (`actor_id`, `actor_role`), timestamp, and before/after allergen/active states in a Redis transaction.
+- **Idempotent Registration (NFR-11):** Mutation requests support `Idempotency-Key` (UUID); the payload hash, response, and audit log commit atomically with a 24-hour Redis TTL.
+- **Transport Security (NFR-06):** Independent opt-in TLS 1.2+ configuration for HTTPS (port 3002) and gRPC (port 50052).
+- **Log Masking (NFR-07):** Request and transport diagnostic loggers redact Bearer tokens and sensitive query parameters.
 
-### 2.3 Reliability, Asynchronous Messaging & DLQ (NFR-04, NFR-05)
-- **Transactional Outbox:** All asynchronous domain events (`order.placed`, `order.cancelled`, `fulfillment.order_ready`, `inventory.waste`) are written atomically to the service's database outbox within the same database transaction that commits the domain entity state.
-- **At-Least-Once Delivery & Deduplication:** Message delivery through RabbitMQ guarantees at-least-once transmission. Every downstream consumer must record the CloudEvents UUID `id` and perform atomic deduplication. Redelivered events with previously processed IDs must be handled as idempotent no-ops.
-- **Poison Message & DLQ Policy:** Messages failing deserialization or invalid payload constraints must be rejected with `Nack(requeue=false)` and routed to a Dead Letter Queue (DLQ) to prevent infinite poison message requeuing loops.
+### 2.3 Batch Inventory Service
+- **Stock Invariant Invariant (NFR-01):** Enforces $Available = Produced - Reserved - Sold - Waste \ge 0$ at all times using database `CHECK (available_portions >= 0)` constraints.
+- **Advisory Lock Concurrency (NFR-02):** Serializes concurrent reservation requests per flavor using PostgreSQL transaction-scoped advisory locks (`pg_advisory_xact_lock(hashtext('flavor:' || flavor_id))`) and row-level locks (`SELECT ... FOR UPDATE`). Bypasses `SKIP LOCKED` to prevent artificial stock-out reports.
+- **Actor Attribution in Audit Trails (NFR-08):** Migration 005 (`005_movement_actor.sql`) binds verified `actor_id` and `actor_role` to every stock movement (`PRODUCED`, `WASTED`).
+- **Transactional Outbox (NFR-04, NFR-05):** Outbox table commits within the stock mutation transaction; outbox dispatcher publishes `inventory.waste` with publisher confirms and mandatory routing.
+- **Transport Security (NFR-06):** Opt-in TLS 1.2+ for HTTPS, inbound gRPC, and outbound Catalog gRPC client (`CATALOG_GRPC_TLS_ENABLED=true`).
 
-### 2.4 Security, Privacy & Log Redaction (NFR-06, NFR-07)
-- **Token Lifecycle:** User tokens issued by Auth Service are short-lived HMAC-SHA256 JWTs with a 15-minute expiration (`exp`), containing strict claims (`sub`, `role`, `iss`, `aud`, `iat`).
-- **Identity Sanitization:** The API Gateway strips all client-injected identity headers (`X-User-*`, `X-Role*`, `X-Authenticated-*`) to prevent spoofing and forwards only the verified Bearer token downstream.
-- **Log Redaction:** All application loggers must employ masking filters to redact sensitive values:
-  - `Authorization: Bearer [REDACTED]`
-  - `X-Payment-Service-Token: [REDACTED]`
-  - `Stripe-Signature: [REDACTED]`
-  - Stripe Checkout HTTPS URLs must never be emitted to public or diagnostic logs.
+### 2.4 Order Service
+- **Synchronous gRPC Orchestration (NFR-03, NFR-09):** Calls Catalog (`BatchGetFlavors`) and Batch Inventory (`ReservePortions`) via gRPC bounded by strict 5-second deadlines.
+- **Outbox Commitment (NFR-04, NFR-05):** Upon verified payment callback, commits order status `PAID` and `order.placed` CloudEvent atomically to PostgreSQL Order DB.
+- **Idempotency Protection (NFR-11):** Verifies incoming `Idempotency-Key` and compares SHA-256 request payload hash. Matching requests return existing order details; mutated requests with identical keys are rejected with HTTP 409 Conflict.
+- **Monetary Precision (NFR-10):** Computes all subtotals and totals in Satang (`int64` minor units) in `THB`.
 
-### 2.5 Monetary Precision and Data Ownership (NFR-09, NFR-10)
-- **Integer Minor Units:** All monetary figures persisted in storage or transmitted via API payloads must be expressed as non-negative integer minor units (e.g., Satang in THB). The use of floating-point representations (`float`, `double`, decimal JSON numbers) is strictly prohibited across backend services to eliminate rounding errors.
-- **Single Source of Truth:** Direct access to private storage belonging to another service is prohibited. Analytics receives asynchronous event projections, and services query live facts on-demand through versioned gRPC APIs.
+### 2.5 Payment Service
+- **Stateless Integration (NFR-12):** Maintains zero local database state; translates Stripe Checkout Sessions and signed webhooks (`Stripe-Signature`).
+- **Automated Compensation / Refund (NFR-04):** Automatically issues idempotent Stripe refunds (`refund-{payment_intent_id}`) when Order rejects late payment callbacks due to expired reservations (HTTP 409 Conflict).
+- **Log Redaction (NFR-07):** Configures Logback `SensitiveDataMaskingPatternConverter` to automatically mask Stripe secret keys (`sk_test_*`, `rk_test_*`), webhook secrets (`whsec_*`), and Stripe checkout session URLs.
+
+### 2.6 Fulfillment Service
+- **Slot Capacity Enforcement (NFR-01, NFR-03):** Allocates kitchen tickets within 15-minute pickup slots, strictly enforcing a maximum capacity limit (10 orders per slot) with HTTP 409 `SLOT_CAPACITY_EXCEEDED` guard.
+- **Audit History (NFR-08):** Records all ticket transitions (`QUEUED` -> `PREPARING` -> `READY_FOR_PICKUP` -> `COMPLETED`) in immutable `fulfillment_status_history` table.
+- **Messaging Resilience & DLQ (NFR-05):** RabbitMQ consumer verifies CloudEvents `id` against processed event log; poison messages route to `fulfillment.dlx` and `fulfillment_queue_dlq`.
+
+### 2.7 Notification Service
+- **Stateless In-Memory Replay (NFR-12):** Maintains a bounded in-memory ring buffer (500 events per customer, 5-minute TTL) allowing web clients to reconnect and resume dropped SSE streams via `Last-Event-ID`.
+- **SSE Streaming Optimization (NFR-03):** Sends `X-Accel-Buffering: no` and explicit keepalive heartbeats preventing reverse proxy chunk buffering.
+- **Fault Isolation & DLQ (NFR-04, NFR-05):** Consumes `order.*` and `fulfillment.*` events; failed deliveries route to `notification.dlx` and `notification_dlq` without impacting order placement.
+
+### 2.8 Analytics Service
+- **Eventual Consistency & Deduplication (NFR-05, NFR-09):** Consumes domain events from RabbitMQ and performs idempotent deduplication against `processed_events` collection with a 7-day TTL index.
+- **Monetary Precision (NFR-10):** Ingests and aggregates metrics exclusively in integer minor units (`gross_sales_minor`, `cost_lost_minor`, `revenue_minor`), eliminating floating-point rounding drifts.
+- **Dead Letter Routing (NFR-05):** Unprocessable messages route to `analytics.dlx` and `analytics_dlq`.
+
+### 2.9 API Gateway
+- **Single Entry Point & Coarse RBAC (NFR-06):** Centralizes ingress routing on `/api/v1/*`, verifies HS256 JWT signatures, and enforces role boundaries.
+- **Header Sanitization (NFR-06):** Strips untrusted client headers (`X-User-*`, `X-Role*`) and securely injects verified identity headers (`X-User-ID`, `X-User-Role`) extracted from the verified token.
+- **Rate Limiting (NFR-03):** Implements multi-tier in-memory rate limiting (100 req/min for public unauthenticated endpoints, 300 req/min for authenticated clients).
+- **Privacy & Logging (NFR-07):** Sanitizes access logs to redact authorization headers and cookie tokens.
