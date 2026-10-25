@@ -100,20 +100,115 @@ Gateway peer may represent many users, so it is never the 15-minute lockout key.
 Audit User-Agent values are normalized to valid PostgreSQL text and bounded to
 512 Unicode characters. Metadata explicitly marks truncation, invalid UTF-8 or
 NUL replacement and includes the original character count when truncated.
-Audit remains best effort: write failures emit a bounded event/error-type
-diagnostic, preserving the original login result and signup's already committed
-user/outbox result. Durable auditing during a database outage requires additional
-transaction/outbox work; this change prevents long headers from dropping rows.
+Audit writes finish independently of request cancellation, preserving an active
+request's storage deadline (at most 30s) or using a 500 ms grace period for an
+already cancelled/expired or unbounded context. At most three attempts handle
+transient storage/network failures.
+Stable event UUIDs deduplicate ambiguous acknowledgements without updating
+append-only evidence; reusing an event ID for different facts fails. Terminal
+failures emit a bounded diagnostic while preserving login/signup responses.
+A continuous outage of the only database remains best effort. The project owner
+explicitly accepts that policy for this iteration; terminal audit failures remain
+observable and do not replace a committed signup/login response with failure.
+This acceptance does not establish guaranteed audit retention during an outage.
+See [the isolated rollout and caller verification](../batch-inventory-service/docs/owned-nfr-handoff.md).
 
 Malformed credential objects return `400 INVALID_REQUEST`, unsupported media or
 compression returns `415 UNSUPPORTED_MEDIA_TYPE`, and an oversized body returns
 `413 REQUEST_TOO_LARGE`. Database operations receive a request deadline; bcrypt
 work runs to completion and is bounded by the configured cost and request limit.
 
+## Optional signup replay (NFR-11)
+
+`POST /api/v1/auth/signup` accepts an optional, single non-nil UUID
+`Idempotency-Key`. The successful user, `user.registered` outbox row and original
+201 response are saved in one PostgreSQL transaction. Within 24 hours, the same
+key with the same normalized email/display name and original password returns
+that response and `Idempotency-Replayed: true`, without another user, outbox
+event, registration audit or lockout reset. A changed valid request returns
+`409 IDEMPOTENCY_CONFLICT`; an invalid/multiple header returns
+`400 INVALID_IDEMPOTENCY_KEY`. Missing/corrupt replay storage returns
+`503 IDEMPOTENCY_UNAVAILABLE` for keyed requests rather than creating an
+unrecorded operation. Requests without the header retain the old behavior,
+including `409 EMAIL_ALREADY_EXISTS` for an existing email.
+
+The receipt is an original operation snapshot, not a current-account lookup and
+not an authentication token. Current role/status changes do not rewrite it.
+Only normalized non-secret fields use SHA-256. Password equality uses the
+original salted bcrypt hash, held privately in the receipt for its retention
+window; plaintext passwords and fast password digests are never stored.
+A background cleanup removes expired receipts in batches of at most 1,000,
+normally every minute; a database outage can delay physical deletion. Expiry is
+checked on access even before cleanup. After expiry a key may be reused, but
+email uniqueness still applies. Clients must retry within the retention window.
+
+Login deliberately verifies current credentials/status on every request and
+issues tokens afresh; it never caches or replays access tokens, including when
+sent an Idempotency-Key. This service-local policy and best-effort audit decision
+are recorded in [the signup ADR](docs/adr-signup-replay-and-audit-policy.md).
+The shared all-mutations requirement still needs its owners to adopt the
+credential-endpoint clarification; this patch does not edit shared contracts.
+
+## Auth outbox publisher (NFR-05)
+
+Signup already stores `user.registered` with the user in the same transaction.
+The API now includes an optional background publisher; broker outages do not
+participate in signup/login requests or their health endpoint.
+
+Publishing is disabled by default. Enable `OUTBOX_PUBLISH_ENABLED=true` only after
+agreeing the event and receiving topology with its owners, and explicitly set
+`OUTBOX_AMQP_URL` plus `OUTBOX_EXCHANGE`. Auth passively checks the exchange and
+never creates an exchange, queue, binding or broker user. A durable receiving queue
+must bind `user.registered`. Unroutable events stay pending even when the broker
+ACKs them; only a positive confirm without a mandatory return records `published_at`.
+
+The publisher uses the existing outbox columns/index; it adds no outbox migration.
+An atomic lease uses `FOR UPDATE SKIP LOCKED` only for this work queue, releases
+the DB lock before network I/O, and expires after the publish timeout plus 10s.
+Attempts fence old completions. Failed sends retry after 1s, 2s, 4s and so on,
+capped at 5 minutes, without deleting pending events. Each attempt uses a fresh
+AMQP connection/channel, so a restarted broker is retried automatically.
+
+`OUTBOX_POLL_INTERVAL` defaults to 1s (50ms–1m); `OUTBOX_PUBLISH_TIMEOUT` defaults
+to 5s (100ms–30s). Dial, TLS/AMQP handshake, publish and confirm are bounded by
+that attempt. Shutdown cancels network I/O and allows at most 2s for the DB
+acknowledgement/retry update before closing the pool.
+
+Use `amqps://` outside an isolated trusted development network. It verifies the
+broker hostname and CA with TLS 1.2 minimum; `OUTBOX_TLS_CA_FILE` can add a private
+CA. No skip-verification or plaintext fallback is provided. Configuration and
+worker diagnostics exclude the URL, credentials, payload and customer PII.
+
+The [service-local event draft](events/user-registered.v1.schema.json) wraps old
+rows into CloudEvents 1.0 using the persisted event ID/time. Only `user_id`, `role`
+and `status` leave Auth; email, display name and credential fields are excluded.
+This draft does not replace or edit `contracts/`. Shared adoption remains a
+separate review. Duplicates are possible after a broker ACK followed by a crash/DB
+failure; consumers must deduplicate the stable CloudEvents `id`. Invalid old rows
+remain pending with backoff and a bounded `invalid_event` diagnostic.
+
+With **isolated** PostgreSQL and RabbitMQ fixtures:
+
+```sh
+TEST_DATABASE_URL='postgres://fixture_user:fixture_password@127.0.0.1:5432/fixture_db?sslmode=disable' \
+TEST_AUTH_AMQP_URL='amqp://fixture_user:fixture_password@127.0.0.1:5672/' \
+  go test -race -count=1 ./...
+```
+
+Rabbit tests create/delete uniquely named `auth_test_*` exchanges/queues only.
+They skip explicitly when `TEST_AUTH_AMQP_URL` is absent; no broker test is
+claimed from the PostgreSQL-only CI fixture. See [the ADR](docs/adr-auth-outbox.md).
+The reliability design follows RabbitMQ's [publisher confirms](https://www.rabbitmq.com/docs/confirms)
+and [mandatory routing](https://www.rabbitmq.com/docs/publishers#unroutable) guidance.
+
 ## Database migration
 
 The migration command uses embedded, ordered `*.up.sql` files and a PostgreSQL
 advisory lock so two instances cannot apply the same migration concurrently.
+Migration `000004_signup_idempotency.up.sql` adds only Auth's private receipt
+table/index. The API already runs Auth migrations at startup; operators may run
+`/app/migrate` before rollout to control the DDL window. No teammate database is
+migrated by checking out or pushing this branch.
 
 With Go installed:
 

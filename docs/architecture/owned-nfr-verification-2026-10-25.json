@@ -1,0 +1,267 @@
+{
+  "date": "2026-10-25",
+  "branch": "catalog-nfr-privacy-audit",
+  "base_commit": "a11c91655cb6311697d304f9c42349bab6c94f69",
+  "implementation_diff_sha256": "0771e44246b4f503a46a4920f7b1c8c07bec6c0ea0520d6500174fb049bee499",
+  "scope": "Auth, Catalog regression checks, Batch Inventory, owned docs/tooling; no shared service/contract/infra changes",
+  "tests": [
+    {
+      "module": "auth-service",
+      "exit_code": 0,
+      "counts": {
+        "pass": 241,
+        "skip": 1
+      },
+      "failed": [],
+      "skipped": [
+        "TestAccountBudgetFollowsIdentityAcrossRealTCPPeers"
+      ]
+    },
+    {
+      "module": "catalog-service",
+      "exit_code": 0,
+      "counts": {
+        "pass": 180
+      },
+      "failed": [],
+      "skipped": []
+    },
+    {
+      "module": "batch-inventory-service",
+      "exit_code": 0,
+      "counts": {
+        "pass": 94
+      },
+      "failed": [],
+      "skipped": []
+    }
+  ],
+  "linux_platform_followup": {
+    "test": "TestAccountBudgetFollowsIdentityAcrossRealTCPPeers",
+    "passed": true,
+    "reason": "native macOS has no 127.0.0.2 alias"
+  },
+  "total_passing_tests_and_subtests": 516,
+  "runtime_check_count": 30,
+  "runtime_checks": {
+    "unmigrated_inventory_startup_blocked": "PASS",
+    "plain_migration_before_startup_and_readiness": "PASS",
+    "plain_auth_signup_replay_through_actual_gateway": "PASS",
+    "plain_actual_gateway_discovery_roles_lockout_and_rest_replay": "PASS",
+    "plain_actual_order_client_boundary": "PASS",
+    "plain_stock_history_and_covered_diagnostics": "PASS",
+    "tls_migration_before_startup_and_readiness": "PASS",
+    "tls_auth_signup_replay_through_actual_gateway": "PASS",
+    "tls_actual_gateway_discovery_roles_lockout_and_rest_replay": "PASS",
+    "tls_actual_order_client_boundary": "PASS",
+    "tls_wrong_ca_hostname_and_user_machine_credentials_rejected": "PASS",
+    "tls_stock_history_and_covered_diagnostics": "PASS",
+    "auth_actual_http_signup_to_confirmed_durable_message": "PASS",
+    "auth_broker_down_signup_login_available_and_event_pending": "PASS",
+    "auth_actual_api_restart_retains_pending_event": "PASS",
+    "auth_actual_broker_restart_recovers_original_event_id": "PASS",
+    "auth_confirmed_event_not_republished_after_api_restart": "PASS",
+    "auth_disabled_default_leaves_auth_broker_independent": "PASS",
+    "auth_enablement_drains_existing_outbox_without_migration": "PASS",
+    "auth_diagnostics_exclude_fixture_credentials_and_customer_pii": "PASS",
+    "inventory_broker_outage_preserves_stock_actor_and_outbox": "PASS",
+    "inventory_actual_inventory_worker_recovers_after_service_and_broker_restart": "PASS",
+    "inventory_retry_after_restart_does_not_repeat_stock_history_or_event": "PASS",
+    "inventory_actual_runtime_worker_routes_all_three_canonical_inventory_events": "PASS",
+    "inventory_runtime_diagnostics_exclude_fixture_credentials_and_freeform_data": "PASS",
+    "signup_process_actual_executable_restart_replays_original_without_repeated_user_outbox_audit": "PASS",
+    "signup_process_changed_password_conflicts_after_restart": "PASS",
+    "signup_process_login_checks_current_account_after_restart_instead_of_replaying_token": "PASS",
+    "signup_process_actual_api_starts_cleanup_and_preserves_unexpired_proof": "PASS",
+    "signup_process_actual_replay_cleanup_diagnostics_exclude_credentials_and_keys": "PASS"
+  },
+  "gates": [
+    {
+      "name": "auth-service-format",
+      "exit_code": 0,
+      "passed": true,
+      "log": "auth-service-format.log"
+    },
+    {
+      "name": "auth-service-vet",
+      "exit_code": 0,
+      "passed": true,
+      "log": "auth-service-vet.log"
+    },
+    {
+      "name": "auth-service-modules",
+      "exit_code": 0,
+      "passed": true,
+      "log": "auth-service-modules.log"
+    },
+    {
+      "name": "catalog-service-format",
+      "exit_code": 0,
+      "passed": true,
+      "log": "catalog-service-format.log"
+    },
+    {
+      "name": "catalog-service-vet",
+      "exit_code": 0,
+      "passed": true,
+      "log": "catalog-service-vet.log"
+    },
+    {
+      "name": "catalog-service-modules",
+      "exit_code": 0,
+      "passed": true,
+      "log": "catalog-service-modules.log"
+    },
+    {
+      "name": "batch-inventory-service-format",
+      "exit_code": 0,
+      "passed": true,
+      "log": "batch-inventory-service-format.log"
+    },
+    {
+      "name": "batch-inventory-service-vet",
+      "exit_code": 0,
+      "passed": true,
+      "log": "batch-inventory-service-vet.log"
+    },
+    {
+      "name": "batch-inventory-service-modules",
+      "exit_code": 0,
+      "passed": true,
+      "log": "batch-inventory-service-modules.log"
+    },
+    {
+      "name": "order-probe-format",
+      "exit_code": 0,
+      "passed": true,
+      "log": "order-probe-format.log"
+    },
+    {
+      "name": "python-syntax",
+      "exit_code": 0,
+      "passed": true,
+      "log": "python-syntax.log"
+    },
+    {
+      "name": "buf-lint",
+      "exit_code": 0,
+      "passed": true,
+      "log": "buf-lint.log"
+    },
+    {
+      "name": "buf-build",
+      "exit_code": 0,
+      "passed": true,
+      "log": "buf-build.log"
+    },
+    {
+      "name": "openapi",
+      "exit_code": 0,
+      "passed": true,
+      "log": "openapi.log"
+    },
+    {
+      "name": "events",
+      "exit_code": 0,
+      "passed": true,
+      "log": "events.log"
+    },
+    {
+      "name": "owned-event-schema",
+      "exit_code": 0,
+      "passed": true,
+      "log": "owned-event-schema.log"
+    },
+    {
+      "name": "compose",
+      "exit_code": 0,
+      "passed": true,
+      "log": "compose.log"
+    },
+    {
+      "name": "diff-check",
+      "exit_code": 0,
+      "passed": true,
+      "log": "diff-check.log"
+    },
+    {
+      "name": "catalog-service-generation",
+      "exit_code": 0,
+      "passed": true,
+      "log": "catalog-service-generation.log"
+    },
+    {
+      "name": "batch-inventory-service-generation",
+      "exit_code": 0,
+      "passed": true,
+      "log": "batch-inventory-service-generation.log"
+    },
+    {
+      "name": "catalog-service-generated-clean",
+      "exit_code": 0,
+      "passed": true,
+      "log": "catalog-service-generated-clean.log"
+    },
+    {
+      "name": "batch-inventory-service-generated-clean",
+      "exit_code": 0,
+      "passed": true,
+      "log": "batch-inventory-service-generated-clean.log"
+    }
+  ],
+  "gate_count": 22,
+  "actual_service_images_built": [
+    "auth-service",
+    "catalog-service",
+    "batch-inventory-service",
+    "api-gateway (unchanged source)"
+  ],
+  "accepted_policy": "Auth audit remains observable best effort; persistent storage failure can lose audit. Login always checks live credentials/status and issues fresh tokens; no token replay.",
+  "migrations": [
+    "Auth 000004_signup_idempotency (owned private table/index)",
+    "Inventory 006_append_only_history (guards only, preserves rows)"
+  ],
+  "deployment_performed": false,
+  "team_database_migrated": false,
+  "pull_request_opened": false,
+  "remaining_team_acceptance": [
+    "Shared NFR-11 credential-operation wording",
+    "Auth event draft/topology/consumer adoption before opt-in enablement",
+    "Consumer deduplication and DLQ",
+    "Coordinated TLS/CA rollout and external Gateway HTTPS",
+    "Full Order/Payment/Notification integration and agreed-load p95"
+  ],
+  "changed_files": [
+    "auth-service/NFR.md",
+    "auth-service/README.md",
+    "auth-service/cmd/api/main.go",
+    "auth-service/docs/adr-signup-replay-and-audit-policy.md",
+    "auth-service/internal/handler/auth_handler.go",
+    "auth-service/internal/idempotency/signup.go",
+    "auth-service/internal/model/user.go",
+    "auth-service/internal/repository/signup_replay.go",
+    "auth-service/internal/repository/user_repository.go",
+    "auth-service/internal/service/auth_service.go",
+    "auth-service/migrations/000004_signup_idempotency.down.sql",
+    "auth-service/migrations/000004_signup_idempotency.up.sql",
+    "auth-service/tests/signup_idempotency_test.go",
+    "batch-inventory-service/NFR.md",
+    "batch-inventory-service/README.md",
+    "batch-inventory-service/docs/adr-append-only-history.md",
+    "batch-inventory-service/docs/owned-nfr-handoff.md",
+    "batch-inventory-service/migrations/006_append_only_history.sql",
+    "batch-inventory-service/migrations/migrate.go",
+    "batch-inventory-service/migrations/migrate_test.go",
+    "batch-inventory-service/scripts/verify-owned-nfr.py",
+    "batch-inventory-service/tests/history_immutability_test.go",
+    "docs/architecture/adr-006-catalog-rest-and-grpc.md",
+    "docs/architecture/adr-007-inventory-transactions-and-callers.md",
+    "docs/architecture/owned-nfr-update-2026-10-25.md",
+    "docs/architecture/owned-nfr-verification-2026-10-25.json",
+    "docs/architecture/progress/owned-nfr-update-2026-10-25.pdf",
+    "docs/architecture/progress/pdf-verification-2026-10-25.json"
+  ],
+  "pdf_addendum": "progress/owned-nfr-update-2026-10-25.pdf",
+  "pdf_verification": "progress/pdf-verification-2026-10-25.json",
+  "changed_file_count": 28
+}

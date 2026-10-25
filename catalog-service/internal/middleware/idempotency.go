@@ -18,7 +18,7 @@ const IdempotencyHeaderKey = "Idempotency-Key"
 // post-handler cache SET and no unsafe in-memory/runtime fallback.
 func Idempotency() fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		if c.Method() != fiber.MethodPost {
+		if c.Method() != fiber.MethodPost && c.Method() != fiber.MethodPut && c.Method() != fiber.MethodPatch && c.Method() != fiber.MethodDelete {
 			return c.Next()
 		}
 		count := 0
@@ -36,7 +36,15 @@ func Idempotency() fiber.Handler {
 			return c.Status(400).JSON(fiber.Map{"code": "INVALID_IDEMPOTENCY_KEY", "message": "Provide exactly one UUID Idempotency-Key"})
 		}
 		hash := sha256.Sum256(c.Body())
-		c.SetUserContext(idempotency.WithRequest(c.UserContext(), idempotency.Request{Key: key, RawKey: raw, PayloadHash: hex.EncodeToString(hash[:])}))
+		request := idempotency.Request{Key: key, RawKey: raw, PayloadHash: hex.EncodeToString(hash[:])}
+		if c.Method() != fiber.MethodPost {
+			id, err := uuid.Parse(c.Params("flavor_id"))
+			if err != nil || id == uuid.Nil || key == uuid.Nil {
+				return c.Status(400).JSON(fiber.Map{"code": "INVALID_ARGUMENT", "message": "Provide non-nil resource and idempotency UUIDs"})
+			}
+			request.Scope = c.Method() + ":" + id.String()
+		}
+		c.SetUserContext(idempotency.WithRequest(c.UserContext(), request))
 		return c.Next()
 	}
 }

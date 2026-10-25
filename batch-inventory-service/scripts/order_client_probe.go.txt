@@ -1,0 +1,88 @@
+// Compiled in a disposable module by verify-owned-nfr.py. Import the actual
+// unchanged Order clients; this is not a replacement client implementation.
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"flag"
+	"fmt"
+	"os"
+	"time"
+
+	"github.com/google/uuid"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
+	pb "order-service/gen/inventory/v1"
+	"order-service/internal/client"
+)
+
+func fail(stage string) {
+	fmt.Fprintln(os.Stderr, "order client probe failed at "+stage)
+	os.Exit(1)
+}
+
+func main() {
+	catalogAddr := flag.String("catalog", "", "Catalog address")
+	inventoryAddr := flag.String("inventory", "", "Inventory address")
+	flavor := flag.String("flavor", "", "Fixture flavor UUID")
+	expectTLSRejection := flag.Bool("expect-tls-rejection", false, "Existing plaintext clients must fail against TLS")
+	flag.Parse()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	catalog, err := client.NewCatalogClient(*catalogAddr)
+	if err != nil {
+		fail("catalog construction")
+	}
+	defer catalog.Close()
+	stock, err := client.NewInventoryClient(*inventoryAddr, os.Getenv("ORDER_SERVICE_TOKEN"))
+	if err != nil {
+		fail("inventory construction")
+	}
+	defer stock.Close()
+	items := []*pb.PortionRequest{{FlavorId: *flavor, Portions: 1}}
+	flavors, catalogErr := catalog.BatchGetFlavors(ctx, []string{*flavor})
+	availability, inventoryErr := stock.CheckAvailability(ctx, &pb.CheckAvailabilityRequest{Items: items})
+	if *expectTLSRejection {
+		if catalogErr == nil || inventoryErr == nil {
+			fail("plaintext clients accepted by TLS listeners")
+		}
+		_ = json.NewEncoder(os.Stdout).Encode(map[string]bool{"existing_plaintext_clients_rejected_by_tls": true})
+		return
+	}
+	if catalogErr != nil || len(flavors) != 1 || flavors[0].GetId() != *flavor {
+		fail("actual Catalog client")
+	}
+	if inventoryErr != nil || !availability.GetAllAvailable() {
+		fail("actual Inventory client")
+	}
+	request := &pb.ReservePortionsRequest{OrderId: uuid.NewString(), IdempotencyKey: uuid.NewString(), Items: items}
+	reserved, err := stock.ReservePortions(ctx, request)
+	if err != nil || reserved.GetReservation().GetReservationId() == "" {
+		fail("reserve")
+	}
+	confirmed, err := stock.ConfirmReservation(ctx, &pb.ConfirmReservationRequest{
+		OrderId: request.OrderId, ReservationId: reserved.Reservation.ReservationId, IdempotencyKey: uuid.NewString(),
+	})
+	if err != nil || confirmed.GetReservation().GetStatus() != pb.ReservationStatus_RESERVATION_STATUS_CONFIRMED {
+		fail("confirm")
+	}
+	replayed, err := stock.ReservePortions(ctx, request)
+	if err != nil || !proto.Equal(reserved, replayed) {
+		fail("original reserve replay after confirmation")
+	}
+	unauthorized, err := client.NewInventoryClient(*inventoryAddr, "invalid_fixture_machine_credential")
+	if err != nil {
+		fail("unauthorized control construction")
+	}
+	defer unauthorized.Close()
+	_, err = unauthorized.CheckAvailability(ctx, &pb.CheckAvailabilityRequest{Items: items})
+	if status.Code(err) != codes.Unauthenticated {
+		fail("machine credential control")
+	}
+	_ = json.NewEncoder(os.Stdout).Encode(map[string]bool{
+		"actual_order_catalog_client": true, "actual_order_inventory_client": true,
+		"reserve_confirm_and_original_replay": true, "machine_credential_control": true,
+	})
+}

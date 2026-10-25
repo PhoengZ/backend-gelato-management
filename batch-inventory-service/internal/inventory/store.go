@@ -64,7 +64,25 @@ func rollback(tx pgx.Tx) {
 // Claim, mutation, and successful response commit atomically. A concurrent retry
 // waits for the unique key, then replays the exact original response after commit.
 func mutate[T any](ctx context.Context, s *Service, op, key string, input any, fn func(pgx.Tx) (T, error)) (T, error) {
+	return mutateKeys(ctx, s, []mutationKey{{op, key}}, input, fn)
+}
+
+type mutationKey struct{ operation, key string }
+
+// Optional REST aliases and canonical body keys share one transaction. Always
+// claim in the same order, and never replace an already committed response.
+func mutateKeys[T any](ctx context.Context, s *Service, keys []mutationKey, input any, fn func(pgx.Tx) (T, error)) (T, error) {
 	var zero T
+	if len(keys) == 0 {
+		return zero, ErrInvalid
+	}
+	keys = append([]mutationKey(nil), keys...)
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i].operation == keys[j].operation {
+			return keys[i].key < keys[j].key
+		}
+		return keys[i].operation < keys[j].operation
+	})
 	tx, err := s.DB.Begin(ctx)
 	if err != nil {
 		return zero, err
@@ -75,33 +93,62 @@ func mutate[T any](ctx context.Context, s *Service, op, key string, input any, f
 		return zero, err
 	}
 	hash := sha256.Sum256(body)
-	tag, err := tx.Exec(ctx, "INSERT INTO idempotency_records(operation,key,request_hash) VALUES($1,$2,$3) ON CONFLICT DO NOTHING", op, key, hash[:])
-	if err != nil {
-		return zero, err
-	}
-	if tag.RowsAffected() == 0 {
+	var claimed []mutationKey
+	var replay []byte
+	for i, key := range keys {
+		if i > 0 && key == keys[i-1] {
+			continue
+		}
+		tag, err := tx.Exec(ctx, "INSERT INTO idempotency_records(operation,key,request_hash) VALUES($1,$2,$3) ON CONFLICT DO NOTHING", key.operation, key.key, hash[:])
+		if err != nil {
+			return zero, err
+		}
+		if tag.RowsAffected() == 1 {
+			claimed = append(claimed, key)
+			continue
+		}
 		var savedHash, response []byte
-		if err = tx.QueryRow(ctx, "SELECT request_hash,response FROM idempotency_records WHERE operation=$1 AND key=$2", op, key).Scan(&savedHash, &response); err != nil {
+		if err = tx.QueryRow(ctx, "SELECT request_hash,response FROM idempotency_records WHERE operation=$1 AND key=$2", key.operation, key.key).Scan(&savedHash, &response); err != nil {
 			return zero, err
 		}
 		if !bytes.Equal(hash[:], savedHash) {
 			return zero, ErrConflict
 		}
-		if err = json.Unmarshal(response, &zero); err != nil {
+		if len(response) == 0 {
+			return zero, fmt.Errorf("idempotency response is missing")
+		}
+		if replay != nil && !bytes.Equal(replay, response) {
+			return zero, ErrConflict
+		}
+		replay = response
+	}
+	var result T
+	response := replay
+	if replay != nil {
+		if err := json.Unmarshal(replay, &result); err != nil {
 			return zero, err
 		}
-		return zero, nil
+		if len(claimed) == 0 {
+			return result, nil
+		}
+	} else {
+		result, err = fn(tx)
+		if err != nil {
+			return zero, err
+		}
+		response, err = json.Marshal(result)
+		if err != nil {
+			return zero, err
+		}
 	}
-	result, err := fn(tx)
-	if err != nil {
-		return zero, err
-	}
-	response, err := json.Marshal(result)
-	if err != nil {
-		return zero, err
-	}
-	if _, err = tx.Exec(ctx, "UPDATE idempotency_records SET response=$3 WHERE operation=$1 AND key=$2", op, key, response); err != nil {
-		return zero, err
+	for _, key := range claimed {
+		tag, err := tx.Exec(ctx, "UPDATE idempotency_records SET response=$3 WHERE operation=$1 AND key=$2", key.operation, key.key, response)
+		if err != nil {
+			return zero, err
+		}
+		if tag.RowsAffected() != 1 {
+			return zero, fmt.Errorf("idempotency response was not persisted")
+		}
 	}
 	if err = tx.Commit(ctx); err != nil {
 		return zero, err

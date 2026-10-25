@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:gelatoflow:auth:user-registered:v1",
+  "title": "Auth User Registered - service-local draft, shared adoption pending",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["specversion", "id", "source", "type", "subject", "time", "datacontenttype", "data"],
+  "properties": {
+    "specversion": {"const": "1.0"},
+    "id": {"type": "string", "format": "uuid"},
+    "source": {"const": "urn:gelatoflow:auth-service"},
+    "type": {"const": "com.gelatoflow.auth.user-registered.v1"},
+    "subject": {"type": "string", "pattern": "^users/[0-9a-f-]{36}$"},
+    "time": {"type": "string", "format": "date-time"},
+    "datacontenttype": {"const": "application/json"},
+    "data": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["user_id", "role", "status"],
+      "properties": {
+        "user_id": {"type": "string", "format": "uuid"},
+        "role": {"enum": ["CUSTOMER", "STAFF", "MANAGER"]},
+        "status": {"enum": ["ACTIVE", "DISABLED"]}
+      }
+    }
+  }
+}

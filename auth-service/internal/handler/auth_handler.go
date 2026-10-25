@@ -7,9 +7,11 @@ import (
 	"io"
 	"log"
 	"strconv"
+	"strings"
 	"unicode/utf8"
 
 	"auth-service/internal/audit"
+	"auth-service/internal/idempotency"
 	"auth-service/internal/middleware"
 	"auth-service/internal/service"
 
@@ -74,6 +76,10 @@ func (h *AuthHandler) SignUp(c *fiber.Ctx) error {
 		return middleware.RateLimited(c, retry)
 	}
 	defer release()
+	// Opt-in signup replay only. Credential admission/validation still applies.
+	if err := bindSignupKey(c); err != nil {
+		return badRequest(c, "INVALID_IDEMPOTENCY_KEY", "Provide exactly one non-nil UUID Idempotency-Key")
+	}
 
 	input := service.SignUpInput{
 		Email:       email,
@@ -86,14 +92,34 @@ func (h *AuthHandler) SignUp(c *fiber.Ctx) error {
 		return handleServiceError(c, err)
 	}
 
-	h.rateLimiter.Reset(ip, email)
-	h.reportAuditFailure(audit.EventUserRegistered, h.auditLogger.LogUserRegistered(c.UserContext(), user.ID, ip, userAgent, map[string]any{
-		"email":        user.Email,
-		"display_name": user.DisplayName,
-		"role":         string(user.Role),
-	}))
+	if user.IdempotentReplay {
+		c.Set("Idempotency-Replayed", "true")
+	} else {
+		h.rateLimiter.Reset(ip, email)
+		h.reportAuditFailure(audit.EventUserRegistered, h.auditLogger.LogUserRegistered(c.UserContext(), user.ID, ip, userAgent, map[string]any{
+			"email": user.Email, "display_name": user.DisplayName, "role": string(user.Role),
+		}))
+	}
 
 	return c.Status(fiber.StatusCreated).JSON(user)
+}
+
+func bindSignupKey(c *fiber.Ctx) error {
+	var count int
+	c.Request().Header.VisitAll(func(key, _ []byte) {
+		if bytes.EqualFold(key, []byte("Idempotency-Key")) {
+			count++
+		}
+	})
+	if count == 0 {
+		return nil
+	}
+	key, err := uuid.Parse(strings.TrimSpace(c.Get("Idempotency-Key")))
+	if count != 1 || err != nil || key == uuid.Nil {
+		return idempotency.ErrConflict
+	}
+	c.SetUserContext(idempotency.WithKey(c.UserContext(), key))
+	return nil
 }
 
 func (h *AuthHandler) Login(c *fiber.Ctx) error {
@@ -236,6 +262,10 @@ func decodeCredentials(body []byte, required ...string) (map[string]string, erro
 
 func handleServiceError(c *fiber.Ctx, err error) error {
 	switch {
+	case errors.Is(err, idempotency.ErrConflict):
+		return c.Status(fiber.StatusConflict).JSON(fiber.Map{"code": "IDEMPOTENCY_CONFLICT", "message": "Idempotency-Key was already used with different signup input"})
+	case errors.Is(err, idempotency.ErrUnavailable):
+		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"code": "IDEMPOTENCY_UNAVAILABLE", "message": "Signup replay storage is unavailable"})
 	case errors.Is(err, service.ErrInvalidInput):
 		return badRequest(c, "INVALID_INPUT", err.Error())
 	case errors.Is(err, service.ErrEmailAlreadyExists):

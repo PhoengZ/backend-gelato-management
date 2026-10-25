@@ -201,6 +201,12 @@ func NewHTTP(svc *inventory.Service, v *auth.Verifier, timeout time.Duration) ht
 			failure(w, err)
 			return
 		}
+		var err error
+		r, err = withRESTKey(r)
+		if err != nil {
+			failure(w, err)
+			return
+		}
 		b, err := svc.Create(r.Context(), in)
 		if err != nil {
 			failure(w, err)
@@ -211,6 +217,12 @@ func NewHTTP(svc *inventory.Service, v *auth.Verifier, timeout time.Duration) ht
 	mux.HandleFunc("POST /api/v1/inventory/batches/{id}/waste", protect(false, func(w http.ResponseWriter, r *http.Request, c *auth.Claims) {
 		var in inventory.WasteInput
 		if err := decode(w, r, &in); err != nil {
+			failure(w, err)
+			return
+		}
+		var err error
+		r, err = withRESTKey(r)
+		if err != nil {
 			failure(w, err)
 			return
 		}
@@ -226,6 +238,26 @@ func NewHTTP(svc *inventory.Service, v *auth.Verifier, timeout time.Duration) ht
 		defer cancel()
 		mux.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func withRESTKey(r *http.Request) (*http.Request, error) {
+	var values []string
+	for name, entries := range r.Header {
+		if strings.EqualFold(name, "Idempotency-Key") {
+			values = append(values, entries...)
+		}
+	}
+	if len(values) == 0 || (len(values) == 1 && strings.TrimSpace(values[0]) == "") {
+		return r, nil
+	}
+	if len(values) != 1 {
+		return r, inventory.ErrInvalid
+	}
+	ctx, err := inventory.WithRESTKey(r.Context(), strings.TrimSpace(values[0]))
+	if err != nil {
+		return r, err
+	}
+	return r.WithContext(ctx), nil
 }
 func queryValid(r *http.Request, allowed ...string) bool {
 	q, err := url.ParseQuery(r.URL.RawQuery)

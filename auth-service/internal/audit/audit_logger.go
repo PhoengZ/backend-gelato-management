@@ -57,25 +57,18 @@ func (l *PostgresAuditLogger) Log(ctx context.Context, record AuditRecord) error
 	if record.CreatedAt.IsZero() {
 		record.CreatedAt = time.Now().UTC()
 	}
+	record.CreatedAt = record.CreatedAt.UTC().Truncate(time.Microsecond)
 	record = normalizeRecord(record)
 	metadataJSON, err := json.Marshal(record.Metadata)
 	if err != nil {
 		metadataJSON = []byte("{}")
 	}
 
-	const query = `
-		INSERT INTO auth_audit_logs (id, event_type, user_id, ip_address, user_agent, metadata, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)`
-
-	_, err = l.pool.Exec(ctx, query,
-		record.ID,
-		record.EventType,
-		record.UserID,
-		record.IPAddress,
-		record.UserAgent,
-		metadataJSON,
-		record.CreatedAt,
-	)
+	// A client disconnect must not cancel evidence for an already completed
+	// authentication operation. The detached write has its own small budget.
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), auditWriteBudget(ctx))
+	defer cancel()
+	err = retryAuditWrite(writeCtx, func() error { return l.insert(writeCtx, record, metadataJSON) })
 	if err != nil {
 		log.Printf("failed to write auth audit log: error_type=%T", err)
 		return err

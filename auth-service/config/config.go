@@ -24,6 +24,7 @@ type Config struct {
 	JWTTTL         time.Duration
 	BcryptCost     int
 	RequestTimeout time.Duration
+	Outbox         OutboxConfig
 }
 
 func Load() (Config, error) {
@@ -68,6 +69,9 @@ func Load() (Config, error) {
 	}
 	cfg.RequestTimeout = timeout
 	if cfg.HTTPTLS, err = transportsecurity.ServerFromEnv("HTTP_TLS"); err != nil {
+		return Config{}, err
+	}
+	if cfg.Outbox, err = loadOutbox(); err != nil {
 		return Config{}, err
 	}
 

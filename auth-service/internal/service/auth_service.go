@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"auth-service/internal/auth"
+	"auth-service/internal/idempotency"
 	"auth-service/internal/model"
 	"auth-service/internal/repository"
 
@@ -91,6 +93,26 @@ func (s *authService) SignUp(ctx context.Context, input SignUpInput) (*model.Use
 	if err := validatePassword(input.Password, 8); err != nil {
 		return nil, err
 	}
+	key, keyed := idempotency.Key(ctx)
+	// Hash only normalized non-secret fields. Password equality is checked
+	// against the original salted bcrypt hash, never a fast password digest.
+	nonSecret, _ := json.Marshal(struct{ Email, DisplayName string }{email, displayName})
+	fingerprint := sha256.Sum256(nonSecret)
+	var replayRepository repository.SignupReplayRepository
+	if keyed {
+		var supported bool
+		replayRepository, supported = s.repository.(repository.SignupReplayRepository)
+		if !supported {
+			return nil, idempotency.ErrUnavailable
+		}
+		cached, err := replayRepository.LookupSignup(ctx, key, fingerprint[:])
+		if err != nil {
+			return nil, err
+		}
+		if cached != nil {
+			return verifySignupReplay(cached, input.Password)
+		}
+	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(input.Password), s.bcryptCost)
 	if err != nil {
@@ -122,6 +144,16 @@ func (s *authService) SignUp(ctx context.Context, input SignUpInput) (*model.Use
 		EventType: "user.registered",
 		Payload:   payload,
 	}
+	if keyed {
+		result, replayed, err := replayRepository.CreateSignup(ctx, user, event, key, fingerprint[:])
+		if err != nil {
+			return nil, err
+		}
+		if replayed {
+			return verifySignupReplay(result, input.Password)
+		}
+		return &result.User, nil
+	}
 
 	if outboxRepo, ok := s.repository.(repository.OutboxUserRepository); ok {
 		if err := outboxRepo.CreateWithOutbox(ctx, user, event); err != nil {
@@ -139,6 +171,17 @@ func (s *authService) SignUp(ctx context.Context, input SignUpInput) (*model.Use
 		}
 	}
 	return user, nil
+}
+
+func verifySignupReplay(result *repository.SignupReplay, password string) (*model.User, error) {
+	if err := bcrypt.CompareHashAndPassword([]byte(result.PasswordHash), []byte(password)); err != nil {
+		if errors.Is(err, bcrypt.ErrMismatchedHashAndPassword) {
+			return nil, idempotency.ErrConflict
+		}
+		return nil, idempotency.ErrUnavailable
+	}
+	result.User.IdempotentReplay = true
+	return &result.User, nil
 }
 
 func (s *authService) Login(ctx context.Context, input LoginInput) (*AuthResult, error) {

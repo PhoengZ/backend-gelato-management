@@ -22,14 +22,15 @@ const (
 )
 
 type User struct {
-	ID           uuid.UUID  `json:"id"`
-	Email        string     `json:"email"`
-	DisplayName  string     `json:"display_name"`
-	PasswordHash string     `json:"-"`
-	Role         Role       `json:"role"`
-	Status       UserStatus `json:"status"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"-"`
+	ID               uuid.UUID  `json:"id"`
+	Email            string     `json:"email"`
+	DisplayName      string     `json:"display_name"`
+	PasswordHash     string     `json:"-"`
+	Role             Role       `json:"role"`
+	Status           UserStatus `json:"status"`
+	CreatedAt        time.Time  `json:"created_at"`
+	UpdatedAt        time.Time  `json:"-"`
+	IdempotentReplay bool       `json:"-"`
 }
 
 func (r Role) Valid() bool {

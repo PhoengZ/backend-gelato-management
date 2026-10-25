@@ -44,6 +44,21 @@ func CheckReady(ctx context.Context, pool *pgxpool.Pool) error {
 			return ErrNotReady
 		}
 	}
+	// A version marker alone cannot prove that append-only protections still
+	// exist. Require the exact enabled trigger/function/event bindings.
+	var protected bool
+	if err := pool.QueryRow(ctx, `SELECT count(*)=4 FROM pg_trigger t
+		WHERE NOT t.tgisinternal AND t.tgenabled='A'
+		AND t.tgnargs=0 AND t.tgqual IS NULL AND t.tgattr=''::int2vector
+		AND t.tgfoid=to_regprocedure('prevent_inventory_history_modification()')
+		AND ((t.tgrelid=to_regclass('inventory_movements') AND
+		     ((t.tgname='inventory_movements_append_only' AND t.tgtype=27) OR
+		      (t.tgname='inventory_movements_no_truncate' AND t.tgtype=34)))
+		  OR (t.tgrelid=to_regclass('waste_records') AND
+		     ((t.tgname='waste_records_append_only' AND t.tgtype=27) OR
+		      (t.tgname='waste_records_no_truncate' AND t.tgtype=34))))`).Scan(&protected); err != nil || !protected {
+		return ErrNotReady
+	}
 	return nil
 }
 

@@ -64,4 +64,5 @@ func setValidEnvironment(t *testing.T) {
 	t.Setenv("JWT_TTL", "15m")
 	t.Setenv("BCRYPT_COST", "12")
 	t.Setenv("REQUEST_TIMEOUT", "5s")
+	t.Setenv("OUTBOX_PUBLISH_ENABLED", "false")
 }

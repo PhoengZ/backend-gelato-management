@@ -96,6 +96,9 @@ func (h *CatalogHandler) Update(c *fiber.Ctx) error {
 	if err != nil {
 		return handleServiceError(c, err)
 	}
+	if flavor.IdempotentReplay {
+		c.Set("X-Idempotent-Replay", "true")
+	}
 	return c.Status(fiber.StatusOK).JSON(flavor)
 }
 
@@ -111,6 +114,9 @@ func (h *CatalogHandler) Replace(c *fiber.Ctx) error {
 	flavor, err := h.service.Replace(c.UserContext(), id, input)
 	if err != nil {
 		return handleServiceError(c, err)
+	}
+	if flavor.IdempotentReplay {
+		c.Set("X-Idempotent-Replay", "true")
 	}
 	return c.Status(fiber.StatusOK).JSON(flavor)
 }

@@ -1,8 +1,9 @@
 # ADR-007 — Implement Inventory transactions and explicit caller boundaries
 
 Date: 2026-09-28
-Status: Proposed for affected service-owner review; implementation on the local
-Inventory branch. This is not deployment or team-wide integration acceptance.
+Status: Proposed for affected service-owner review, matching the supplied
+project proposal (ADR-007, page 16). Implementation and isolated verification
+are available; deployment and team-wide integration acceptance remain separate.
 
 ## Context
 
@@ -28,6 +29,7 @@ Order's caller and Auth-issued machine identity contracts remain separate work.
   a later Catalog archive does not delete existing stock. Order must separately
   enforce sale eligibility when creating an order.
 - Use transaction-scoped flavor advisory locks plus row locks and DB constraints.
+  The advisory key is the first 64 bits of SHA-256, not PostgreSQL hashtext.
   Take order locks before sorted flavor locks, then row locks consistently across
   stock-changing paths. FEFO orders expiry, creation, UUID. No SKIP LOCKED for
   stock allocation, so lock contention is not reported as absent inventory.
@@ -42,6 +44,9 @@ Order's caller and Auth-issued machine identity contracts remain separate work.
   expired batch becomes waste. Repeated/concurrent workers cannot double-count it.
 - Write waste, audit movement and CloudEvent outbox together. Outbox uses broker
   confirms, mandatory routing and stable IDs under at-least-once delivery.
+- Persist verified human actors for new production/manual waste; preserve unknown
+  legacy/system actors. Migration 005 adds movement actor fields; migration 006
+  rejects UPDATE/DELETE/TRUNCATE of movements/waste while permitting new entries.
 - Disable event publication by default; explicitly enable against an isolated
   broker or after consumer compatibility/deduplication has been verified.
 
@@ -51,8 +56,11 @@ Independent Inventory replicas preserve stock correctness using PostgreSQL, with
 serialization per affected flavor rather than a global application lock. Very hot
 flavors can contend; deadlines bound waiting. Unrelated flavors remain independent.
 One reservation per order is deliberately restrictive and must be reviewed with
-Order before adding retry/reorder workflows. CreateBatch remains non-idempotent
-because its v1 contract has no key; ambiguous create failures need reconciliation.
+Order before adding retry/reorder workflows. CreateBatch supports an optional
+UUID header whose claim, hash and original response share the stock transaction.
+Existing no-header callers retain their behavior and still need reconciliation
+after an ambiguous create. Waste retains its required body key and optionally
+accepts a header alias. See Inventory's optional REST replay decision.
 
 Migrations and tables belong exclusively to Inventory. Gateway already routes
 its prefix and needs no code change. The Inventory Catalog client reads existing
@@ -69,5 +77,8 @@ RabbitMQ failures/redelivery. CI must fail rather than skip required integration
 Analytics currently parses canonical waste identifiers and costs, but that alone
 is not end-to-end or duplicate-safe processing evidence. Coordinate its projection
 and date semantics, then test the published event against the real consumer before
-turning on the shared producer. This change does not implement Order, payments,
-Auth machine identities, low-stock notifications, a video, or a production rollout.
+turning on the shared producer. Inventory implements inventory.waste,
+inventory.low_stock and inventory.expiring production, including isolated
+broker/service recovery tests. Those events do not prove Notification/Analytics
+processing. This change does not implement Order, payments, Auth machine
+identities, a recorded video or a production rollout.

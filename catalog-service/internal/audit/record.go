@@ -31,6 +31,15 @@ type actor struct {
 	role string
 }
 
+// ManagerID reads only identity bound by the locally verified transport.
+func ManagerID(ctx context.Context) (uuid.UUID, error) {
+	a, ok := ctx.Value(actorKey{}).(actor)
+	if !ok || a.id == uuid.Nil || a.role != "MANAGER" {
+		return uuid.Nil, ErrActorRequired
+	}
+	return a.id, nil
+}
+
 // WithActor must be called only after JWT verification, never from identity
 // headers, query parameters, or user-controlled request bodies.
 func WithActor(ctx context.Context, subject, role string) context.Context {

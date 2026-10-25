@@ -52,8 +52,9 @@ shared Compose, gRPC contracts or event payloads.
 
 ## Local setup
 
-See [owned NFR evidence, actor migration and TLS setup](NFR.md) for migration
-005, verified production attribution and optional inbound/outbound TLS. Public
+See [owned NFR evidence, actor/history migrations and TLS setup](NFR.md) for
+migrations 005/006, verified production attribution, DB-level append-only history
+and optional inbound/outbound TLS. Public
 request/response contracts and teammate clients are unchanged.
 
 Use the existing Inventory PostgreSQL on host port 5434, and run Catalog with
@@ -71,10 +72,14 @@ go run ./cmd/api
 The default REST port is 3004, matching Gateway's existing Inventory target.
 The gRPC default is 127.0.0.1:50051. `GET /health` checks liveness; `GET /ready`
 checks PostgreSQL connectivity, every embedded forward migration marker and the
-batch-code/alert columns used by this binary. Startup checks the same invariant
+batch-code/alert/actor columns and append-only trigger bindings used by this binary. Startup checks the same invariant
 before opening listeners; an old or inconsistent schema fails startup and `/ready`
 returns `503` if drift appears later. Run the updated migrator, including
-`000004` and `005_movement_actor.sql`, before starting this binary. Catalog/RabbitMQ failures do not remove access
+`000004`, `005_movement_actor.sql` and `006_append_only_history.sql`, before
+starting this binary. Migration 006 preserves existing history and rejects
+UPDATE/DELETE/TRUNCATE of movements and waste while allowing new evidence.
+See [the history decision](docs/adr-append-only-history.md) for upgrade/admin
+limits. Catalog/RabbitMQ failures do not remove access
 to existing stock: batch creation fails if Catalog is down, and outbox work waits
 if RabbitMQ is down. Migrations run explicitly before startup, never implicitly
 inside request handling. They are embedded, versioned and transactionally locked.
@@ -129,8 +134,11 @@ ports to loopback. Do not expose these credentials over an untrusted network.
 - Production dates use YYYY-MM-DD; event reporting dates are UTC, consistent
   with the current Analytics event-time aggregation. Timestamps are RFC3339 UTC.
 - Unit costs are THB minor units, with multiplication bounds checked on creation.
-- REST CreateBatch has no idempotency key in v1. Do not automatically retry after
-  an ambiguous timeout. No external dependency call is made under stock locks.
+- REST CreateBatch accepts an optional UUID `Idempotency-Key`; same-Manager/key/input
+  returns its persisted original result. Without a key, do not automatically retry
+  after an ambiguous timeout. Waste keeps its required body key and may add an
+  independent header alias in the same stock transaction. See [NFR.md](NFR.md).
+  No external dependency call is made under stock locks.
 - List endpoints are unpaginated v1 contracts. gRPC availability above int32
   capacity returns OUT_OF_RANGE instead of truncating/wrapping the value.
 
@@ -215,3 +223,7 @@ The Docker image includes `/app/inventory`, `/app/migrate` and `/app/demo`.
 Shared Compose and teammate service implementations are unchanged. Image
 publication, deployment, Order client integration, low-stock/expiring notification
 events and arbitrary batch adjustments are follow-up work.
+
+The [owned-service handoff](docs/owned-nfr-handoff.md) provides a repeatable private
+fixture for actual Gateway/Order clients, migration readiness, TLS trust and stock
+history, plus the service-local ADR, request diagram and progress-demo outline.

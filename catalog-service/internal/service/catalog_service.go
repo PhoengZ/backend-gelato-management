@@ -193,6 +193,9 @@ func (s *catalogService) Update(ctx context.Context, id uuid.UUID, input UpdateF
 	if !hasUpdate(input) {
 		return nil, fmt.Errorf("%w: at least one field must be provided", ErrInvalidInput)
 	}
+	if original, replayed, err := s.replayMutation(audit.WithAction(ctx, audit.Update), id); err != nil || replayed {
+		return original, err
+	}
 
 	record, err := s.find(ctx, id)
 	if err != nil {
@@ -255,11 +258,16 @@ func (s *catalogService) Update(ctx context.Context, id uuid.UUID, input UpdateF
 			return nil, fmt.Errorf("update flavor: %w", err)
 		}
 	}
-	audit.LogCommitted(ctx, audit.Update, record.ID)
+	if !record.IdempotentReplay {
+		audit.LogCommitted(ctx, audit.Update, record.ID)
+	}
 	return record, nil
 }
 
 func (s *catalogService) Replace(ctx context.Context, id uuid.UUID, input ReplaceFlavorInput) (*model.FlavorAdmin, error) {
+	if original, replayed, err := s.replayMutation(audit.WithAction(ctx, audit.Replace), id); err != nil || replayed {
+		return original, err
+	}
 	if input.Active == nil {
 		return nil, fmt.Errorf("%w: active is required for replacement", ErrInvalidInput)
 	}
@@ -280,46 +288,77 @@ func (s *catalogService) Replace(ctx context.Context, id uuid.UUID, input Replac
 		Recipe: recipe,
 	}
 	// A repeated identical PUT does not create a new resource or touch timestamps.
-	if previous.Name == name && previous.Description == description && previous.Price == price &&
+	unchanged := previous.Name == name && previous.Description == description && previous.Price == price &&
 		previous.ImageURL == imageURL && slices.Equal(previous.Allergens, allergens) &&
-		previous.Active == active && previous.Recipe == recipe {
-		return previous, nil
+		previous.Active == active && previous.Recipe == recipe
+	if unchanged {
+		if _, keyed := idempotency.FromContext(ctx); !keyed {
+			return previous, nil
+		}
 	}
-	now := s.now().UTC()
-	if !now.After(previous.UpdatedAt) {
-		now = previous.UpdatedAt.Add(time.Millisecond)
+	if !unchanged {
+		now := s.now().UTC()
+		if !now.After(previous.UpdatedAt) {
+			now = previous.UpdatedAt.Add(time.Millisecond)
+		}
+		replacement.UpdatedAt = now
 	}
-	replacement.UpdatedAt = now
 	if err := s.repository.Update(audit.WithAction(ctx, audit.Replace), previous, replacement); err != nil {
 		return nil, fmt.Errorf("replace flavor: %w", err)
 	}
-	audit.LogCommitted(ctx, audit.Replace, replacement.ID)
+	if !unchanged && !replacement.IdempotentReplay {
+		audit.LogCommitted(ctx, audit.Replace, replacement.ID)
+	}
 	return replacement, nil
 }
 
 func (s *catalogService) Archive(ctx context.Context, id uuid.UUID) error {
+	if _, replayed, err := s.replayMutation(audit.WithAction(ctx, audit.Archive), id); err != nil || replayed {
+		return err
+	}
 	record, err := s.find(ctx, id)
 	if err != nil {
 		return err
 	}
-	if !record.Active {
-		return nil
+	unchanged := !record.Active
+	if unchanged {
+		if _, keyed := idempotency.FromContext(ctx); !keyed {
+			return nil
+		}
 	}
 	previous := *record
-	record.Active = false
-	now := s.now().UTC()
-	if !now.After(previous.UpdatedAt) {
-		now = previous.UpdatedAt.Add(time.Millisecond)
+	if !unchanged {
+		record.Active = false
+		now := s.now().UTC()
+		if !now.After(previous.UpdatedAt) {
+			now = previous.UpdatedAt.Add(time.Millisecond)
+		}
+		record.UpdatedAt = now
 	}
-	record.UpdatedAt = now
 	if err := s.repository.Update(audit.WithAction(ctx, audit.Archive), &previous, record); err != nil {
 		if errors.Is(err, repository.ErrFlavorNotFound) {
 			return ErrFlavorNotFound
 		}
 		return fmt.Errorf("archive flavor: %w", err)
 	}
-	audit.LogCommitted(ctx, audit.Archive, record.ID)
+	if !unchanged && !record.IdempotentReplay {
+		audit.LogCommitted(ctx, audit.Archive, record.ID)
+	}
 	return nil
+}
+
+func (s *catalogService) replayMutation(ctx context.Context, id uuid.UUID) (*model.FlavorAdmin, bool, error) {
+	request, keyed := idempotency.FromContext(ctx)
+	if !keyed {
+		return nil, false, nil
+	}
+	replays, supported := s.repository.(interface {
+		LookupMutation(context.Context, uuid.UUID, idempotency.Request) (*model.FlavorAdmin, bool, error)
+	})
+	if !supported {
+		return nil, false, idempotency.ErrUnavailable
+	}
+	return replays.LookupMutation(ctx, id, request)
 }
 
 func (s *catalogService) GetRecipe(ctx context.Context, id uuid.UUID) (*model.FlavorRecipe, error) {
