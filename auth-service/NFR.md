@@ -10,7 +10,7 @@ The attached Project Progress 2 PDF (section 8, page 11) defines NFR-01 through 
 | 05 Messaging reliability | Signup commits the user and USER_REGISTERED outbox row in one PostgreSQL transaction. | No event consumer runs here; publication, consumer deduplication and DLQ integration are not established by this patch. |
 | 06 Security | Local JWT validation, strict roles, bounded bcrypt and opt-in HTTPS with TLS 1.2 minimum. | Gateway HTTPS URL/trust, certificates and secure PostgreSQL deployment must be coordinated before production. |
 | 07 Privacy | API/migrator storage diagnostics contain fixed text and error type, never raw DSNs or database errors. Credential handlers do not log passwords/tokens; bounded audit failures are observable. | No claim is made about logs emitted by out-of-scope components. |
-| 08 Auditability | PostgreSQL login/signup audit with safe User-Agent bounds and distinct operational failures. | Audit remains best effort during a DB outage; there is no public role-change endpoint in this contract. |
+| 08 Auditability | PostgreSQL login/signup audit with safe User-Agent bounds, distinct operational failures, and request-cancellation-independent writes. Transient failures retry at most three times with stable event identity and collision-safe deduplication. A live request retains its storage deadline (capped at 30s); cancelled/expired/unbounded contexts get a 500 ms grace budget. | A continuous DB outage remains best effort; there is no public role-change endpoint in this contract. No new independent durable store or authentication availability policy is imposed. |
 | 09 Ownership | Runtime reads/writes Auth PostgreSQL only; other services verify JWTs or use Auth APIs. | No cross-service private database access is introduced. |
 | 10 Money | No money/card model or payment operations. | Monetary calculations belong to Catalog/Inventory/Order/Payment. |
 | 11 Idempotency extension | Signup uniqueness and credential semantics are preserved. | The canonical authentication API defines no Idempotency-Key replay contract. Caching/replaying access tokens is not introduced under a generic REST-mutation statement. |
@@ -27,4 +27,7 @@ Use a certificate trusted by the caller and valid for the service hostname. Neve
 - `go test -race ./...` with isolated `TEST_DATABASE_URL`: credential/RBAC/lifecycle, audit persistence and startup privacy.
 - `internal/transportsecurity/tls_test.go`: trusted HTTPS, untrusted/plaintext rejection, TLS version floor and fail-closed configuration.
 - `tests/process_privacy_test.go`: actual API and migration executables with malformed/unavailable DSNs.
-- The owned TLS smoke verification uses real Auth-issued Customer/Staff/Manager tokens against Catalog and Inventory. It does not exercise Gateway or Order.
+- `tests/audit_resilience_test.go`: real PostgreSQL cancellation/expired-context recovery, transient versus permanent errors, bounded write time, duplicate acknowledgement safety and immutable event facts.
+- TLS verification uses real Auth-issued Customer/Staff/Manager tokens against Catalog and Inventory; the reusable fixture below additionally covers Gateway and existing Order client boundaries.
+
+The reusable [owned-service verification](../batch-inventory-service/docs/owned-nfr-handoff.md) additionally builds the existing Gateway and Order clients without editing them. It exercises default transports, Docker DNS, role tokens, Gateway lockout isolation and optional TLS in a private fixture. It never migrates the team's database or installs a host CA.

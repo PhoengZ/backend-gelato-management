@@ -100,10 +100,16 @@ Gateway peer may represent many users, so it is never the 15-minute lockout key.
 Audit User-Agent values are normalized to valid PostgreSQL text and bounded to
 512 Unicode characters. Metadata explicitly marks truncation, invalid UTF-8 or
 NUL replacement and includes the original character count when truncated.
-Audit remains best effort: write failures emit a bounded event/error-type
-diagnostic, preserving the original login result and signup's already committed
-user/outbox result. Durable auditing during a database outage requires additional
-transaction/outbox work; this change prevents long headers from dropping rows.
+Audit writes finish independently of request cancellation, preserving an active
+request's storage deadline (at most 30s) or using a 500 ms grace period for an
+already cancelled/expired or unbounded context. At most three attempts handle
+transient storage/network failures.
+Stable event UUIDs deduplicate ambiguous acknowledgements without updating
+append-only evidence; reusing an event ID for different facts fails. Terminal
+failures emit a bounded diagnostic while preserving login/signup responses.
+A continuous outage of the only database remains best effort; a stronger guarantee
+needs independent durable storage or an agreed fail-closed availability policy.
+See [the isolated rollout and caller verification](../batch-inventory-service/docs/owned-nfr-handoff.md).
 
 Malformed credential objects return `400 INVALID_REQUEST`, unsupported media or
 compression returns `415 UNSUPPORTED_MEDIA_TYPE`, and an oversized body returns
