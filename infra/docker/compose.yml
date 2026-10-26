@@ -133,7 +133,8 @@ services:
       retries: 10
 
   analytics-service:
-    image: phoeng/analytics-service:1.1.0
+    build:
+      context: ../../analytics-service
     container_name: analytics-service
     env_file:
       - path: ../../analytics-service/.env
