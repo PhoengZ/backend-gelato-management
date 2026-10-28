@@ -3,7 +3,8 @@
 
 export function createSummaryHandler(reportFileName) {
   return function (data) {
-    const reportPath = `load-tests/reports/${reportFileName}`;
+    const reportsDir = __ENV.REPORTS_DIR || 'load-tests/reports';
+    const reportPath = `${reportsDir}/${reportFileName}`;
     const output = {};
 
     // Persist full structured summary data into JSON file
