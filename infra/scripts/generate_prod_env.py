@@ -109,10 +109,11 @@ def build_definitions(env: dict[str, str]) -> dict:
     return definitions
 
 
-def write_private(path: Path, content: str) -> None:
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+def write_file(path: Path, content: str, mode: int) -> None:
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
     with os.fdopen(fd, "w") as handle:
         handle.write(content)
+    os.chmod(path, mode)  # os.open applies the umask; set the exact mode
 
 
 def main() -> None:
@@ -135,8 +136,11 @@ def main() -> None:
         "# Replace the Stripe placeholders with test-mode keys before starting payment-service.",
     ]
     lines += [f"{key}={value}" for key, value in env.items()]
-    write_private(ENV_PATH, "\n".join(lines) + "\n")
-    write_private(DEFS_PATH, json.dumps(definitions, indent=2) + "\n")
+    # Plaintext secrets: readable only by the deploying user.
+    write_file(ENV_PATH, "\n".join(lines) + "\n", 0o600)
+    # Bind-mounted into RabbitMQ, which runs as uid 999 and must be able to read it.
+    # It holds only salted password hashes, never the passwords themselves.
+    write_file(DEFS_PATH, json.dumps(definitions, indent=2) + "\n", 0o644)
 
     print(f"Wrote {ENV_PATH}")
     print(f"Wrote {DEFS_PATH}")
