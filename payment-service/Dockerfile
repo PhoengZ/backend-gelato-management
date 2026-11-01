@@ -13,6 +13,4 @@ WORKDIR /app
 COPY --from=build --chown=payment:gelato /workspace/payment-service/target/payment-service-1.0.0-SNAPSHOT.jar app.jar
 USER payment
 EXPOSE 3007 50057
-HEALTHCHECK --interval=30s --timeout=5s --start-period=45s --retries=3 \
-  CMD wget -q -O /dev/null http://127.0.0.1:3007/actuator/health/liveness || exit 1
 ENTRYPOINT ["java", "-jar", "app.jar"]
