@@ -1,0 +1,21 @@
+# Public entry point for the production overlay (infra/docker/compose.prod.yml).
+# Caddy obtains and renews the HTTPS certificate for SITE_DOMAIN automatically.
+{
+	email {$ACME_EMAIL}
+}
+
+{$SITE_DOMAIN} {
+	encode zstd gzip
+
+	# Stripe calls the webhook directly. It must reach the Gateway unchanged, because the
+	# Next.js proxy forwards only an allowlist of headers and would drop Stripe-Signature.
+	handle /api/v1/payments/webhook {
+		reverse_proxy api-gateway:8080
+	}
+
+	# Browsers talk only to Next.js, which forwards /api/v1/* to the Gateway with the
+	# session token. SSE responses are flushed immediately by reverse_proxy.
+	handle {
+		reverse_proxy frontend:3000
+	}
+}

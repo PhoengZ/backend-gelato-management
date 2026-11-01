@@ -82,5 +82,7 @@ docker compose \
   up -d rabbitmq analytics-mongodb auth-postgres inventory-postgres catalog-redis
 ```
 
+To deploy the full system on one server with HTTPS, see `docs/deployment.md`.
+
 See `infra/README.md` for connection targets, local ports, RabbitMQ permissions,
 and the application-service image workflow.

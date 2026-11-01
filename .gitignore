@@ -23,3 +23,6 @@ __pycache__/
 # Local Testing Guides / Step Verification
 step.md
 docs/step.md
+
+# Generated production RabbitMQ definitions (contain password hashes)
+infra/rabbitmq/definitions.prod.json
