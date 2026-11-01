@@ -1,0 +1,72 @@
+# Production overlay for a single host (for example an Oracle Cloud Always Free VM).
+#
+#   docker compose --env-file infra/.env.prod \
+#     -f infra/docker/compose.yml -f infra/docker/compose.prod.yml up -d --build
+#
+# Only Caddy publishes ports. Databases, RabbitMQ and every service stay on the
+# private gelato_network. Never combine this file with compose.dev.yml, which
+# publishes database and service ports. Generate infra/.env.prod and
+# infra/rabbitmq/definitions.prod.json with infra/scripts/generate_prod_env.py.
+
+services:
+  rabbitmq:
+    volumes:
+      # Same target as the base mount, so it replaces the committed dev definitions.
+      - ../rabbitmq/definitions.prod.json:/etc/rabbitmq/definitions.json:ro
+
+  analytics-service:
+    environment:
+      GO_ENV: production
+
+  payment-service:
+    environment:
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:?STRIPE_SECRET_KEY is required}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:?STRIPE_WEBHOOK_SECRET is required}
+      STRIPE_LIVE_MODE: ${STRIPE_LIVE_MODE:-false}
+      STRIPE_CHECKOUT_SUCCESS_URL: https://${SITE_DOMAIN:?SITE_DOMAIN is required}/checkout/return?session_id={CHECKOUT_SESSION_ID}
+      STRIPE_CHECKOUT_CANCEL_URL: https://${SITE_DOMAIN:?SITE_DOMAIN is required}/checkout/return?cancelled=1
+
+  api-gateway:
+    environment:
+      CORS_ALLOWED_ORIGINS: https://${SITE_DOMAIN:?SITE_DOMAIN is required}
+
+  frontend:
+    build:
+      # Sibling checkout of the frontend-gelato-management repository.
+      context: ${FRONTEND_CONTEXT:-../../../frontend-gelato-management}
+    container_name: frontend
+    environment:
+      API_GATEWAY_URL: http://api-gateway:8080
+    networks:
+      - gelato_network
+    depends_on:
+      api-gateway:
+        condition: service_started
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2.10-alpine
+    container_name: caddy
+    environment:
+      SITE_DOMAIN: ${SITE_DOMAIN:?SITE_DOMAIN is required}
+      ACME_EMAIL: ${ACME_EMAIL:?ACME_EMAIL is required}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ../caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - gelato_network
+    depends_on:
+      frontend:
+        condition: service_started
+      api-gateway:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:

@@ -56,29 +56,20 @@ be replaced outside local development.
 
 ## Production deployment
 
-In production, deploy using only the base `docker/compose.yml` to ensure data store ports remain isolated within `gelato_network` and are not exposed to the public internet:
+Follow `docs/deployment.md`. In short:
 
-1. Create a production `.env` from `.env.example` on the host server and restrict file permissions:
-   ```bash
-   cp .env.example .env
-   chmod 600 .env
-   ```
-2. Start infrastructure services without development port mappings:
-   ```bash
-   docker compose \
-     --env-file .env \
-     -f docker/compose.yml \
-     up -d rabbitmq analytics-mongodb auth-postgres inventory-postgres order-postgres catalog-redis
-   ```
-   Or specify an external secret store path:
-   ```bash
-   docker compose \
-     --env-file /etc/secrets/gelatoflow.env \
-     -f docker/compose.yml \
-     up -d
-   ```
+```bash
+python3 infra/scripts/generate_prod_env.py --domain <host> --email <you@example.com>
+# fill in the Stripe test keys in infra/.env.prod
+docker compose --env-file infra/.env.prod \
+  -f infra/docker/compose.yml -f infra/docker/compose.prod.yml up -d --build
+```
 
-Environment variables are interpolated by Docker Compose from `--env-file` at runtime. Container definitions do not hardcode secrets or bind unisolated environment files, ensuring services receive only their designated credentials.
+Do not copy `.env.example` for production. Its RabbitMQ service passwords match the
+password hashes committed in `rabbitmq/definitions.json`. The generator creates new
+passwords and a matching, git-ignored `rabbitmq/definitions.prod.json`, which
+`compose.prod.yml` mounts instead. Never combine the production overlay with
+`compose.dev.yml`, because that file publishes database and service ports.
 
 ## Service connection targets
 

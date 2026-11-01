@@ -139,6 +139,18 @@ services:
     env_file:
       - path: ../../analytics-service/.env
         required: false
+    environment:
+      # Without these the service defaults to port 3000 and an unauthenticated Mongo URI,
+      # which the Gateway (analytics-service:8080) and the root-auth Mongo container reject.
+      GO_ENV: ${ANALYTICS_GO_ENV:-development}
+      PORT: "8080"
+      MONGO_URI: mongodb://${MONGO_INITDB_ROOT_USERNAME}:${MONGO_INITDB_ROOT_PASSWORD}@analytics-mongodb:27017/analytics?authSource=admin
+      RABBITMQ_URL: amqp://analytics_service:${ANALYTICS_RABBITMQ_PASSWORD:-password123}@rabbitmq:5672/gelato_vhost
+      # Order Service does not expose gRPC yet; cancellation enrichment fails until it does.
+      ORDER_SERVICE_GRPC_ADDR: order-service:50054
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      JWT_ISSUER: ${JWT_ISSUER:-gelatoflow-auth}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-gelatoflow-api}
     networks:
       - gelato_network
     depends_on:
@@ -282,8 +294,8 @@ services:
       ORDER_GRPC_TLS: "false"
       ORDER_HTTP_BASE_URL: http://order-service:3003
       PAYMENT_CALLBACK_ALLOW_PLAINTEXT: "true"
-      STRIPE_CHECKOUT_SUCCESS_URL: ${STRIPE_CHECKOUT_SUCCESS_URL:-http://localhost:3000/payment/success?session_id={CHECKOUT_SESSION_ID}}
-      STRIPE_CHECKOUT_CANCEL_URL: ${STRIPE_CHECKOUT_CANCEL_URL:-http://localhost:3000/payment/cancel}
+      STRIPE_CHECKOUT_SUCCESS_URL: ${STRIPE_CHECKOUT_SUCCESS_URL:-http://localhost:3000/checkout/return?session_id={CHECKOUT_SESSION_ID}}
+      STRIPE_CHECKOUT_CANCEL_URL: ${STRIPE_CHECKOUT_CANCEL_URL:-http://localhost:3000/checkout/return?cancelled=1}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       JWT_ISSUER: ${JWT_ISSUER:-gelatoflow-auth}
       JWT_AUDIENCE: ${JWT_AUDIENCE:-gelatoflow-api}
@@ -338,6 +350,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       JWT_ISSUER: ${JWT_ISSUER:-gelatoflow-auth}
       JWT_AUDIENCE: ${JWT_AUDIENCE:-gelatoflow-api}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-*}
     networks:
       - gelato_network
     depends_on:

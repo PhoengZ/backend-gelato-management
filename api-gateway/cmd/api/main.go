@@ -25,7 +25,7 @@ func main() {
 	// Setup middlewares
 	app.Use(logger.New())
 	app.Use(cors.New(cors.Config{
-		AllowOrigins: "*", // In production, restrict to frontend URL
+		AllowOrigins: cfg.CORSAllowedOrigins,
 		AllowHeaders: "Origin, Content-Type, Accept, Authorization, Idempotency-Key, X-Idempotency-Key",
 		AllowMethods: "GET, POST, PUT, DELETE, PATCH, OPTIONS",
 	}))

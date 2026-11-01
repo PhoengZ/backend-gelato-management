@@ -122,8 +122,8 @@ ORDER_HTTP_CALLBACK_TIMEOUT_MS=5000
 STRIPE_LIVE_MODE=false
 STRIPE_SECRET_KEY=sk_test_YOUR_SANDBOX_SECRET
 STRIPE_WEBHOOK_SECRET=whsec_FROM_THE_LISTENER_IN_STEP_4
-STRIPE_CHECKOUT_SUCCESS_URL=http://localhost:3000/payment/success?session_id={CHECKOUT_SESSION_ID}
-STRIPE_CHECKOUT_CANCEL_URL=http://localhost:3000/payment/cancel
+STRIPE_CHECKOUT_SUCCESS_URL=http://localhost:3000/checkout/return?session_id={CHECKOUT_SESSION_ID}
+STRIPE_CHECKOUT_CANCEL_URL=http://localhost:3000/checkout/return?cancelled=1
 ```
 
 Use simple unquoted `KEY=value` lines for the PowerShell loader below. Go's

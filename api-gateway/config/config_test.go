@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -60,4 +61,21 @@ func TestLoadConfigDefaults(t *testing.T) {
 	if cfg.NotificationServiceURL == "" {
 		t.Errorf("expected default NotificationServiceURL, got empty")
 	}
+}
+
+func TestLoadConfigCORSAllowedOrigins(t *testing.T) {
+	t.Run("defaults to any origin for local development", func(t *testing.T) {
+		t.Setenv("CORS_ALLOWED_ORIGINS", "") // registers restore of any prior value
+		os.Unsetenv("CORS_ALLOWED_ORIGINS")
+		if got := LoadConfig().CORSAllowedOrigins; got != "*" {
+			t.Fatalf("CORSAllowedOrigins = %q, want %q", got, "*")
+		}
+	})
+
+	t.Run("uses the configured origin list", func(t *testing.T) {
+		t.Setenv("CORS_ALLOWED_ORIGINS", "https://gelato.example.com")
+		if got := LoadConfig().CORSAllowedOrigins; got != "https://gelato.example.com" {
+			t.Fatalf("CORSAllowedOrigins = %q, want the configured origin", got)
+		}
+	})
 }
