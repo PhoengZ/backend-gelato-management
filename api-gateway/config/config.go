@@ -23,6 +23,9 @@ type Config struct {
 	JWTSecret              string
 	JWTIssuer              string
 	JWTAudience            string
+	// CORSAllowedOrigins is a comma-separated origin list passed to the CORS middleware.
+	// "*" keeps local development open; production should name the frontend origin.
+	CORSAllowedOrigins string
 }
 
 func LoadConfig() Config {
@@ -44,6 +47,7 @@ func LoadConfig() Config {
 		JWTSecret:              os.Getenv("JWT_SECRET"),
 		JWTIssuer:              getEnv("JWT_ISSUER", "gelatoflow-auth"),
 		JWTAudience:            getEnv("JWT_AUDIENCE", "gelatoflow-api"),
+		CORSAllowedOrigins:     getEnv("CORS_ALLOWED_ORIGINS", "*"),
 	}
 }
 
