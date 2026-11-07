@@ -136,8 +136,6 @@ services:
     build:
       context: ../../analytics-service
     container_name: analytics-service
-    environment:
-      PORT: "8080"
     env_file:
       - path: ../../analytics-service/.env
         required: false
