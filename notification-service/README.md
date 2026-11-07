@@ -16,7 +16,7 @@ Service นี้ **stateless**: ไม่มี database ไม่ถือข�
 | RabbitMQ user `notification_service` + permission ใน `infra/rabbitmq/definitions.json`, compose, `.env.example` | เพิ่มแล้ว |
 | Reconnect RabbitMQ อัตโนมัติ (backoff 1s → 30s) และ `/health` ตอบ 503 เมื่อ broker หลุด | ทำแล้ว (unit test ผ่าน) |
 | ปิด SSE stream เมื่อ JWT หมดอายุ (ส่ง `: token-expired` แล้วปิด) | ทำแล้ว (unit test ผ่าน) |
-| Replay ผ่าน `Last-Event-ID` จาก buffer ใน memory (500 รายการต่อ user/role, เก็บ 5 นาที, ล้างทุก 1 นาที) รวม alert ของ STAFF/MANAGER | ทำแล้ว (unit test ผ่าน) |
+| Replay จาก buffer ใน memory (500 รายการต่อ user/role, เก็บ 5 นาที, ล้างทุก 1 นาที) รวม alert ของ STAFF/MANAGER: มี `Last-Event-ID` = ส่งเฉพาะที่มาหลัง id นั้น, ไม่มี id = ส่งทุกอันที่ยังอยู่ใน buffer ก่อน live event | ทำแล้ว (unit test ผ่าน) |
 | DLQ: `notification.dlx` → `notification_dlq`, message ที่ผิดรูปถูก `Nack(requeue=false)` | ทำแล้ว (unit test ผ่าน) |
 | Route ใน API Gateway (`GET /api/v1/notifications/stream` ผ่าน `api-gateway/internal/proxy/sse.go`) | ทำแล้ว |
 | ทดสอบกับ RabbitMQ จริงและ publisher จริงของ Order/Fulfillment | ดู `tests/test_uc01_preorder_checkout.py` และหัวข้อ "ทดลองกับ broker" |
@@ -38,7 +38,7 @@ Service นี้ **stateless**: ไม่มี database ไม่ถือข�
 
 - **Confirmation มาจาก Fulfillment**: `order.confirmed` ส่งครั้งเดียวต่อ order ตอนได้ `fulfillment.order_queued` (Fulfillment สร้าง ticket และออกเลขคิวแล้ว) `order.placed` ไม่ push อะไร จึงไม่มี confirmation ซ้ำ ถ้า Fulfillment ล่มหรือ event ยังค้างใน outbox ลูกค้าจะได้ confirmation ช้าลงตามนั้น
 - **การหาว่า order เป็นของใคร**: `order.ready` และ `order.cancelled` ไม่มี `customer_id` service จึงจำ `order_id → customer_id` จาก `order.placed` ไว้ใน memory (หมดอายุตาม `ORDER_OWNER_TTL`, จำกัดจำนวน) ถ้า service restart หรือ order เก่ากว่า TTL จะไม่ส่ง popup (log `no known owner`) ทางแก้ถาวรคือเรียก Order gRPC `GetOrderDetails` หรือเพิ่ม `customer_id` ใน thin event — ต้องคุยกับเจ้าของ Order
-- **ส่งแบบ best effort**: ถ้า reconnect ภายใน 5 นาทีพร้อม `Last-Event-ID` จะได้ notification ที่พลาดไป แต่ถ้านานกว่านั้นหรือ service restart จะหาย ฝั่ง frontend ควรยัง poll `GET /api/v1/orders/{id}/status` เป็น fallback
+- **ส่งแบบ best effort**: ถ้าเปิด stream ภายใน 5 นาที (มีหรือไม่มี `Last-Event-ID`) จะได้ notification ที่พลาดไป; ไม่มี id = ได้ทุกอันที่ยังอยู่ใน buffer จึงอาจได้ซ้ำข้าม connection ฝั่ง frontend ต้อง dedupe ด้วย notification `id` แต่ถ้านานกว่านั้นหรือ service restart จะหาย ฝั่ง frontend ควรยัง poll `GET /api/v1/orders/{id}/status` เป็น fallback
 - **รันได้ 1 replica เท่านั้น**: ทุก instance ใช้ `notification_queue` ร่วมกัน (competing consumers) event หนึ่งจะไปถึงแค่ instance เดียว และ order owner map กับ replay buffer อยู่ใน memory ของแต่ละ process ถ้าจะ scale ต้องเปลี่ยนเป็น queue ต่อ instance ก่อน
 - **Stream ปิดเมื่อ token หมดอายุ**: client ต้องต่อใหม่ด้วย token ใหม่ และส่ง `Last-Event-ID` เพื่อรับสิ่งที่พลาด
 - **Dedupe**: เก็บ event id ล่าสุดใน memory เท่านั้น หลัง restart อาจเห็น popup ซ้ำได้หนึ่งครั้ง

@@ -11,9 +11,11 @@ info:
     owns no business data and exposes no operation for other services to call.
 
 
-    Delivery is best effort. A notification reaches only users who are
-    connected when the event is processed, and nothing is replayed on
-    reconnect, so clients keep polling order status as a fallback.
+    Delivery is best effort. Notifications are kept in an in-memory buffer for
+    five minutes (at most 500 per user or role) and replayed when a stream
+    opens, as described on the stream operation. Anything older, or anything
+    sent before the service restarted, is lost, so clients keep polling order
+    status as a fallback.
 
 
     Browsers' `EventSource` cannot send an `Authorization` header. Clients use
@@ -37,14 +39,41 @@ paths:
         event id), `event` (the notification `type`) and `data` (a JSON
         `Notification`, described by the schema below). The stream ends with a
         `: token-expired` comment when the access token expires; reconnect with
-        a fresh token and `Last-Event-ID` to replay notifications from the last
-        five minutes. `GET /health` is also served for liveness but is not part
+        a fresh token and `Last-Event-ID`.
+
+
+        Replay happens before live events. With a `Last-Event-ID` header (or a
+        `last_event_id` query parameter) the stream first sends the buffered
+        notifications after that id, or every buffered one if the id is no
+        longer in the buffer. Without an id it first sends every
+        notification still buffered for the user, plus broadcasts to the
+        user's role, so a page opened shortly after an event still shows it.
+        The buffer keeps notifications for five minutes. A notification can
+        therefore arrive more than once across connections; clients
+        deduplicate by notification `id`. `GET /health` is also served for liveness but is not part
         of the public contract. The API Gateway routes this path to the
         service through its streaming proxy.
       tags: [Notifications]
       security:
         - bearerAuth: []
       x-required-roles: [CUSTOMER, STAFF, MANAGER]
+      parameters:
+        - name: Last-Event-ID
+          in: header
+          required: false
+          description: >-
+            Id of the last notification the client received. Omit it to replay
+            every buffered notification. An id that is not a UUID disables replay.
+          schema:
+            type: string
+            format: uuid
+        - name: last_event_id
+          in: query
+          required: false
+          description: Same as the `Last-Event-ID` header, for clients that cannot set it.
+          schema:
+            type: string
+            format: uuid
       responses:
         '200':
           description: Event stream
