@@ -11,6 +11,19 @@ import (
 	fiberproxy "github.com/gofiber/fiber/v2/middleware/proxy"
 )
 
+// AppConfig returns the Fiber settings that depend on deployment configuration.
+func AppConfig(cfg config.Config) fiber.Config {
+	app := fiber.Config{AppName: "API Gateway"}
+	if len(cfg.TrustedProxies) > 0 {
+		// All browser traffic reaches the Gateway through Next.js, so without this
+		// c.IP() is one shared address and one client exhausts every per-IP limit.
+		app.EnableTrustedProxyCheck = true
+		app.TrustedProxies = cfg.TrustedProxies
+		app.ProxyHeader = fiber.HeaderXForwardedFor
+	}
+	return app
+}
+
 func SetupRoutes(app *fiber.App, cfg config.Config) {
 	app.Use(func(c *fiber.Ctx) error {
 		err := c.Next()

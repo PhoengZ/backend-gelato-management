@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 
 	"github.com/joho/godotenv"
 )
@@ -11,6 +12,8 @@ import (
 const MinimumJWTSecretBytes = 32
 
 type Config struct {
+	// TrustedProxies lists peers whose X-Forwarded-For names the real client.
+	TrustedProxies         []string
 	Port                   string
 	AuthServiceURL         string
 	CatalogServiceURL      string
@@ -48,6 +51,7 @@ func LoadConfig() Config {
 		JWTIssuer:              getEnv("JWT_ISSUER", "gelatoflow-auth"),
 		JWTAudience:            getEnv("JWT_AUDIENCE", "gelatoflow-api"),
 		CORSAllowedOrigins:     getEnv("CORS_ALLOWED_ORIGINS", "*"),
+		TrustedProxies:         splitList(getEnv("TRUSTED_PROXIES", "")),
 	}
 }
 
@@ -56,6 +60,16 @@ func (c Config) Validate() error {
 		return fmt.Errorf("JWT_SECRET must contain at least %d bytes", MinimumJWTSecretBytes)
 	}
 	return nil
+}
+
+func splitList(raw string) []string {
+	var items []string
+	for _, item := range strings.Split(raw, ",") {
+		if item = strings.TrimSpace(item); item != "" {
+			items = append(items, item)
+		}
+	}
+	return items
 }
 
 func getEnv(key, fallback string) string {
