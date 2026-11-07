@@ -305,3 +305,56 @@ func TestStreamReplaysRoleBroadcasts(t *testing.T) {
 		t.Fatalf("expected replayed role broadcast %s, got %v", second, f)
 	}
 }
+
+// nextEvent reads frames until one with an id, skipping comments such as
+// keep-alive. With the 50ms test heartbeat it gives up after about two seconds.
+func nextEvent(t *testing.T, r *bufio.Reader) map[string]string {
+	t.Helper()
+	for range 40 {
+		if f := readFrame(t, r); f["id"] != "" {
+			return f
+		}
+	}
+	t.Fatal("no notification frame arrived")
+	return nil
+}
+
+func TestStreamReplaysBufferWithoutLastEventID(t *testing.T) {
+	srv, h, buf := newServerWithBuffer(t)
+	h.OnPushToRoles(buf.AddForRoles)
+	staff, other := uuid.New(), uuid.New()
+
+	own, broadcast, notMine := uuid.New(), uuid.New(), uuid.New()
+	h.PushToUser(staff, hub.Notification{ID: own, Type: "order.confirmed", OccurredAt: time.Now().UTC()})
+	h.PushToRoles(hub.Notification{ID: broadcast, Type: "inventory.low_stock", OccurredAt: time.Now().UTC()}, auth.RoleStaff, auth.RoleManager)
+	h.PushToUser(other, hub.Notification{ID: notMine, Type: "order.confirmed", OccurredAt: time.Now().UTC()})
+
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/v1/notifications/stream", nil)
+	req.Header.Set("Authorization", "Bearer "+token(t, staff, auth.RoleStaff, nil))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	reader := bufio.NewReader(resp.Body)
+	if f := nextEvent(t, reader); f["id"] != own.String() {
+		t.Fatalf("first frame = %v, want buffered user notification %s", f, own)
+	}
+	if f := nextEvent(t, reader); f["id"] != broadcast.String() {
+		t.Fatalf("second frame = %v, want buffered role broadcast %s", f, broadcast)
+	}
+
+	// Live events still follow the replay, and another user's buffer is never sent.
+	live := uuid.New()
+	deadline := time.Now().Add(2 * time.Second)
+	for h.PushToUser(staff, hub.Notification{ID: live, Type: "order.ready", OccurredAt: time.Now().UTC()}) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("stream never subscribed")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if f := nextEvent(t, reader); f["id"] != live.String() {
+		t.Fatalf("frame after replay = %v, want live %s (not %s)", f, live, notMine)
+	}
+}

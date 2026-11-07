@@ -4,8 +4,11 @@ info:
   version: 1.0.0
   description: >-
     Kitchen preparation queue and pickup status. Fulfillment creates a ticket
-    from the `order.placed` event and owns the ticket lifecycle; it does not
-    own order, payment, or inventory data.
+    in `QUEUED` from the `order.placed` event, publishes
+    `fulfillment.order_queued` with the queue number, and owns the ticket
+    lifecycle; it does not own order, payment, or inventory data. Lifecycle:
+    `QUEUED` -> `PREPARING` -> `READY_FOR_PICKUP` -> `PICKED_UP`.
+    `order.cancelled` moves a `QUEUED` or `PREPARING` ticket to `CANCELLED`.
 servers:
   - url: /
 paths:
@@ -131,9 +134,12 @@ paths:
       operationId: updateFulfillmentStatus
       summary: Advance a fulfillment ticket to the next status
       description: >-
-        Allowed transitions are PREPARING to READY_FOR_PICKUP and
-        READY_FOR_PICKUP to PICKED_UP. Repeating the current status is a no-op
-        that does not publish another event.
+        Allowed transitions are QUEUED to PREPARING, PREPARING to
+        READY_FOR_PICKUP, and READY_FOR_PICKUP to PICKED_UP. Any other change
+        returns 409 `INVALID_TRANSITION`. Moving to PREPARING publishes no
+        event; READY_FOR_PICKUP publishes `fulfillment.order_ready` and
+        PICKED_UP publishes `fulfillment.order_picked_up`. Repeating the current
+        status is a no-op that does not publish another event.
       tags: [Fulfillment]
       security:
         - bearerAuth: []
@@ -260,7 +266,11 @@ components:
           minimum: 1
     FulfillmentStatus:
       type: string
-      enum: [PREPARING, READY_FOR_PICKUP, PICKED_UP, CANCELLED]
+      description: >-
+        `QUEUED` is the initial status of a ticket created from `order.placed`.
+        Tickets created before `QUEUED` existed started in `PREPARING` and keep
+        that status.
+      enum: [QUEUED, PREPARING, READY_FOR_PICKUP, PICKED_UP, CANCELLED]
     FulfillmentStatusHistory:
       type: object
       additionalProperties: false
@@ -294,7 +304,7 @@ components:
       properties:
         status:
           type: string
-          enum: [READY_FOR_PICKUP, PICKED_UP]
+          enum: [PREPARING, READY_FOR_PICKUP, PICKED_UP]
     ErrorResponse:
       type: object
       additionalProperties: false

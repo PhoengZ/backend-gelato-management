@@ -16,6 +16,11 @@ EVENT_CONTRACTS = (
         (),
     ),
     (
+        "events/fulfillment-order-queued.v1.schema.json",
+        "examples/fulfillment-order-queued.v1.json",
+        (),
+    ),
+    (
         "events/fulfillment-order-ready.v1.schema.json",
         "examples/fulfillment-order-ready.v1.json",
         (),

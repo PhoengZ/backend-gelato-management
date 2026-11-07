@@ -28,6 +28,7 @@ changes.
 | Order payment gRPC methods (proposed; Order server pending) | Order Service | Legacy PaymentIntent adapter |
 | `order.placed` event | Order Service | Fulfillment, Notification, Analytics |
 | `order.cancelled` event | Order Service | Fulfillment, Notification, Analytics |
+| `fulfillment.order_queued` event | Fulfillment Service | Notification Service |
 | `fulfillment.order_ready` event | Fulfillment Service | Notification Service |
 | `fulfillment.order_picked_up` event | Fulfillment Service | None in MVP |
 | `inventory.waste` event | Batch Inventory Service | Analytics Service |
@@ -142,9 +143,14 @@ without an inbound request trace. Domain payload fields use `snake_case`, UUID
 resource IDs, RFC 3339 UTC timestamps, and integer minor-unit money.
 
 `OrderPlaced` is published to the `order` topic exchange with routing key
-`order.placed`. `OrderReady` and `OrderPickedUp` are published to the
-`fulfillment` topic exchange with routing keys `fulfillment.order_ready` and
-`fulfillment.order_picked_up`. `WasteRecorded` is published to the `inventory` topic exchange
+`order.placed`. `OrderQueued`, `OrderReady` and `OrderPickedUp` are published to the
+`fulfillment` topic exchange with routing keys `fulfillment.order_queued`,
+`fulfillment.order_ready` and `fulfillment.order_picked_up`. Fulfillment writes
+`OrderQueued` to its outbox in the same transaction that creates the ticket
+(status `QUEUED`) and assigns the queue number; it carries `customer_id`,
+`queue_number`, `pickup_slot_id` and `pickup_at` so Notification can confirm the
+order with its queue number. It is not published for an `order.placed` that has
+no `customer_id`. `WasteRecorded` is published to the `inventory` topic exchange
 with routing key `inventory.waste`.
 
 The Analytics implementation currently accepts the canonical waste routing key
