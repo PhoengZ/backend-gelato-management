@@ -76,7 +76,7 @@ data: {"id":"5b0c1f1e-...","type":"order.ready","message":"Your gelato order is 
 ผ่าน compose (จาก repo root):
 
 ```bash
-cp infra/.env.example infra/.env   # แล้วตั้ง NOTIFICATION_JWT_SECRET ให้ตรงกับ Auth
+cp infra/.env.example infra/.env   # Notification ใช้ JWT_SECRET เดียวกับ Auth อยู่แล้ว
 docker compose --env-file infra/.env \
   -f infra/docker/compose.yml -f infra/docker/compose.dev.yml up --build rabbitmq notification-service
 # service: http://localhost:8082
