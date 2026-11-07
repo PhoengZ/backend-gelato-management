@@ -200,78 +200,31 @@ func TestProcessOrderPlaced(t *testing.T) {
 	}
 }
 
-func TestProcessOrderCancelled_ViaGRPC(t *testing.T) {
+// Order only cancels unpaid orders, and only paid orders emit order.placed, so a
+// cancellation has never been counted and must not change sales.
+func TestOrderCancelledLeavesSalesUntouched(t *testing.T) {
 	mockRepo := NewMockRepository()
 	mockEventRepo := NewMockEventRepository()
-	mockOrderClient := NewMockOrderClient()
-	svc := service.NewAnalyticsService(mockRepo, mockEventRepo, mockOrderClient)
+	svc := service.NewAnalyticsService(mockRepo, mockEventRepo, NewMockOrderClient())
 
-	// Pre-populate daily analytics record
 	mockRepo.Records["2026-08-20"] = &models.Analytics{
-		Date: "2026-08-20",
-		Financials: models.Financials{
-			GrossSalesMinor: 200000,
-			TotalOrders:     2,
-		},
-		Operations: models.Operations{
-			ScoopsSold: 20,
-		},
-		FlavorStats: []models.FlavorStat{
-			{FlavorID: "F01", Name: "Vanilla", ScoopsSold: 10, RevenueMinor: 100000},
-			{FlavorID: "F02", Name: "Chocolate", ScoopsSold: 10, RevenueMinor: 100000},
-		},
+		Date:       "2026-08-20",
+		Financials: models.Financials{GrossSalesMinor: 200000, TotalOrders: 2},
+		Operations: models.Operations{ScoopsSold: 20},
 	}
 
-	// Mock order response from Order Service gRPC
-	mockOrderClient.Orders["ord_cancel_001"] = &models.OrderDetails{
-		OrderID:          "ord_cancel_001",
-		CreatedAt:        "2026-08-20T11:00:00Z",
-		TotalAmountMinor: 100000, // 1000.00 THB
-		Currency:         "THB",
-		Items: []models.OrderItemDetail{
-			{FlavorID: "F01", FlavorName: "Vanilla", Portions: 5, SubtotalMinor: 50000},
-			{FlavorID: "F02", FlavorName: "Chocolate", Portions: 5, SubtotalMinor: 50000},
-		},
-	}
-
-	// Thin cancellation event containing only order_id
-	cancelEvent := models.OrderCancelledEvent{
-		ID:     "evt_cancel_001",
-		Type:   "OrderCancelled",
-		Time:   "2026-08-20T12:00:00Z",
-		Source: "order-service",
-		Data: models.OrderCancelledData{
-			OrderID: "ord_cancel_001",
-			Reason:  "CUSTOMER_REQUEST",
-		},
-	}
-
-	err := svc.ProcessOrderCancelled(context.Background(), cancelEvent)
+	err := svc.ProcessOrderCancelled(context.Background(), models.OrderCancelledEvent{
+		ID:   "evt_cancel_001",
+		Time: "2026-08-20T12:00:00Z",
+		Data: models.OrderCancelledData{OrderID: "ord_unknown_to_analytics", Reason: "CUSTOMER_REQUEST"},
+	})
 	if err != nil {
-		t.Fatalf("Expected no error processing cancellation, got: %v", err)
+		t.Fatalf("cancellation must be acknowledged, got: %v", err)
 	}
 
 	record := mockRepo.Records["2026-08-20"]
-	if record.Financials.GrossSalesMinor != 100000 {
-		t.Errorf("Expected GrossSalesMinor 100000, got %d", record.Financials.GrossSalesMinor)
-	}
-	if record.Financials.TotalOrders != 1 {
-		t.Errorf("Expected TotalOrders 1, got %d", record.Financials.TotalOrders)
-	}
-	if record.Operations.ScoopsSold != 10 {
-		t.Errorf("Expected ScoopsSold 10, got %d", record.Operations.ScoopsSold)
-	}
-
-	for _, fs := range record.FlavorStats {
-		if fs.FlavorID == "F01" && fs.ScoopsSold != 5 {
-			t.Errorf("Expected F01 scoops sold 5, got %d", fs.ScoopsSold)
-		}
-	}
-
-	// Verify event was marked as processed
-	processed, _ := mockEventRepo.IsProcessed(context.Background(), "evt_cancel_001")
-	if !processed {
-		t.Errorf("Expected event evt_cancel_001 to be marked as processed")
+	if record.Financials.GrossSalesMinor != 200000 || record.Financials.TotalOrders != 2 || record.Operations.ScoopsSold != 20 {
+		t.Fatalf("sales changed: %+v %+v", record.Financials, record.Operations)
 	}
 }
 
