@@ -7,7 +7,20 @@
   "datacontenttype": "application/json",
   "data": {
     "order_id": "8d29d6cf-bd4d-48ca-9e4f-dcd8ec54e594",
-    "reason": "CUSTOMER_REQUEST",
-    "customer_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+    "reason": "STORE_CANCELLED",
+    "customer_id": "8dc81c31-a354-4774-b835-36ea0411bc54",
+    "was_paid": true,
+    "total_amount_minor": 1250,
+    "currency": "THB",
+    "items": [
+      {
+        "flavor_id": "0f3bca11-1eb2-4a86-908a-e60d7656c79b",
+        "flavor_name": "Sicilian Pistachio",
+        "portions": 2,
+        "unit_price_minor": 625,
+        "subtotal_minor": 1250
+      }
+    ],
+    "paid_at": "2026-09-02T14:30:00Z"
   }
 }
