@@ -50,7 +50,9 @@ class CheckoutGrpcTest {
   }
 
   PaymentServiceGrpc.PaymentServiceBlockingStub client(String credential) {
-    var stub = PaymentServiceGrpc.newBlockingStub(channel).withDeadlineAfter(2, TimeUnit.SECONDS);
+    // The deploy host builds this image on 2 vCPUs, where a cold first call took about 3s.
+    // The deadline only bounds a hung call; no test here asserts a timeout.
+    var stub = PaymentServiceGrpc.newBlockingStub(channel).withDeadlineAfter(10, TimeUnit.SECONDS);
     if (credential == null) return stub;
     var headers = new Metadata();
     headers.put(Metadata.Key.of("authorization", Metadata.ASCII_STRING_MARSHALLER), credential);
