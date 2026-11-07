@@ -98,7 +98,9 @@ func TestDispatchOrderCancelledContractExample(t *testing.T) {
 	if retry, err := Dispatch(r, contractExample(t, "order-cancelled.v1.json")); err != nil || retry {
 		t.Fatalf("Dispatch() = retry %v, err %v", retry, err)
 	}
-	if len(r.cancelled) != 1 || r.cancelled[0].Reason != "CUSTOMER_REQUEST" {
+	// The example is a paid store cancellation; Notification only needs who to tell and why.
+	if len(r.cancelled) != 1 || r.cancelled[0].Reason != "STORE_CANCELLED" ||
+		r.cancelled[0].CustomerID.String() != "8dc81c31-a354-4774-b835-36ea0411bc54" {
 		t.Errorf("cancelled = %+v", r.cancelled)
 	}
 }
