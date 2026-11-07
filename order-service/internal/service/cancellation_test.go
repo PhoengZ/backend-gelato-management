@@ -300,7 +300,7 @@ func storeCancelService(r *lifecycleRepo, f client.Fulfillment, returns func(*in
 func TestStoreCancelReturnsStockAndAnnouncesPaidFacts(t *testing.T) {
 	r := &lifecycleRepo{}
 	r.order = paidOrder()
-	f := &ticketFulfillment{ticket: &client.Ticket{OrderID: r.order.ID, Status: "QUEUED", QueueNumber: 3}}
+	f := &ticketFulfillment{ticket: &client.Ticket{OrderID: r.order.ID, Status: "QUEUED", QueueNumber: "03"}}
 	var requests []*inventoryv1.ReturnConfirmedReservationRequest
 	s := storeCancelService(r, f, func(req *inventoryv1.ReturnConfirmedReservationRequest) (*inventoryv1.ReturnConfirmedReservationResponse, error) {
 		if r.order.Status != domain.StatusStoreCancelPending {

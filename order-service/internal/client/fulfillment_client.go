@@ -29,9 +29,10 @@ var ErrTicketForbidden = errors.New("fulfillment rejected the caller credentials
 
 // Ticket holds the Fulfillment fields Order relies on.
 type Ticket struct {
-	OrderID     string `json:"order_id"`
-	Status      string `json:"status"`
-	QueueNumber int    `json:"queue_number"`
+	OrderID string `json:"order_id"`
+	Status  string `json:"status"`
+	// QueueNumber is a zero-padded string such as "04" in the Fulfillment contract.
+	QueueNumber string `json:"queue_number"`
 }
 
 func (c *fulfillmentClient) GetTicket(ctx context.Context, orderID string) (*Ticket, error) {
