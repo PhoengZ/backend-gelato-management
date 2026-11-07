@@ -1047,8 +1047,8 @@ const file_catalog_v1_catalog_proto_rawDesc = "" +
 	"\vListFlavors\x12\x1e.catalog.v1.ListFlavorsRequest\x1a\x1f.catalog.v1.ListFlavorsResponse\x12Z\n" +
 	"\x0fBatchGetFlavors\x12\".catalog.v1.BatchGetFlavorsRequest\x1a#.catalog.v1.BatchGetFlavorsResponse\x12Q\n" +
 	"\fUpdateFlavor\x12\x1f.catalog.v1.UpdateFlavorRequest\x1a .catalog.v1.UpdateFlavorResponse\x12Q\n" +
-	"\fDeleteFlavor\x12\x1f.catalog.v1.DeleteFlavorRequest\x1a .catalog.v1.DeleteFlavorResponseB\x91\x01\n" +
-	"\x0ecom.catalog.v1B\fCatalogProtoP\x01Z(catalog-service/gen/catalog/v1;catalogv1\xa2\x02\x03CXX\xaa\x02\n" +
+	"\fDeleteFlavor\x12\x1f.catalog.v1.DeleteFlavorRequest\x1a .catalog.v1.DeleteFlavorResponseB\x8f\x01\n" +
+	"\x0ecom.catalog.v1B\fCatalogProtoP\x01Z&order-service/gen/catalog/v1;catalogv1\xa2\x02\x03CXX\xaa\x02\n" +
 	"Catalog.V1\xca\x02\n" +
 	"Catalog\\V1\xe2\x02\x16Catalog\\V1\\GPBMetadata\xea\x02\vCatalog::V1b\x06proto3"
 
