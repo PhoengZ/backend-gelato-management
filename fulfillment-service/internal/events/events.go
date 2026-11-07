@@ -15,12 +15,14 @@ const (
 	DataContentType = "application/json"
 	Source          = "/gelatoflow/fulfillment-service"
 
+	TypeOrderQueued   = "com.gelatoflow.fulfillment.order-queued.v1"
 	TypeOrderReady    = "com.gelatoflow.fulfillment.order-ready.v1"
 	TypeOrderPickedUp = "com.gelatoflow.fulfillment.order-picked-up.v1"
 
 	TypeOrderPlaced    = "com.gelatoflow.order.placed.v1"
 	TypeOrderCancelled = "com.gelatoflow.order.cancelled.v1"
 
+	RoutingKeyOrderQueued   = "fulfillment.order_queued"
 	RoutingKeyOrderReady    = "fulfillment.order_ready"
 	RoutingKeyOrderPickedUp = "fulfillment.order_picked_up"
 	RoutingKeyOrderPlaced   = "order.placed"
@@ -37,6 +39,16 @@ type Envelope struct {
 	DataContentType string          `json:"datacontenttype"`
 	Traceparent     string          `json:"traceparent,omitempty"`
 	Data            json.RawMessage `json:"data"`
+}
+
+// OrderQueuedData is published when a ticket is created and given its queue
+// number. Every field is required by the contract.
+type OrderQueuedData struct {
+	OrderID      uuid.UUID `json:"order_id"`
+	CustomerID   uuid.UUID `json:"customer_id"`
+	QueueNumber  string    `json:"queue_number"`
+	PickupSlotID uuid.UUID `json:"pickup_slot_id"`
+	PickupAt     time.Time `json:"pickup_at"`
 }
 
 type OrderReadyData struct {
@@ -84,6 +96,11 @@ func newEnvelope(eventType string, at time.Time, data any) (Envelope, error) {
 		DataContentType: DataContentType,
 		Data:            raw,
 	}, nil
+}
+
+func NewOrderQueued(at time.Time, d OrderQueuedData) (Envelope, error) {
+	d.PickupAt = d.PickupAt.UTC()
+	return newEnvelope(TypeOrderQueued, at, d)
 }
 
 func NewOrderReady(at time.Time, d OrderReadyData) (Envelope, error) {

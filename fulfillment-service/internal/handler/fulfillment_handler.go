@@ -104,7 +104,7 @@ func isStaff(c echo.Context) bool {
 	return ok && (role == middleware.RoleStaff || role == middleware.RoleManager)
 }
 
-// GET /api/v1/fulfillments?status=PREPARING,READY_FOR_PICKUP&pickup_from=...&pickup_to=...
+// GET /api/v1/fulfillments?status=QUEUED,PREPARING,READY_FOR_PICKUP&pickup_from=...&pickup_to=...
 func (h *FulfillmentHandler) List(c echo.Context) error {
 	var filter models.ListFilter
 	if raw := c.QueryParam("status"); raw != "" {
@@ -200,7 +200,7 @@ func (h *FulfillmentHandler) UpdateStatus(c echo.Context) error {
 	}
 	if !req.Status.IsUpdatable() {
 		return fail(c, http.StatusBadRequest, "VALIDATION_ERROR", "invalid status",
-			map[string]string{"status": "must be READY_FOR_PICKUP or PICKED_UP"})
+			map[string]string{"status": "must be PREPARING, READY_FOR_PICKUP or PICKED_UP"})
 	}
 
 	ctx := c.Request().Context()

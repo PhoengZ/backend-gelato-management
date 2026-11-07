@@ -59,7 +59,7 @@ This document defines the authoritative Non-Functional Requirements (NFRs) and Q
 
 ### 2.6 Fulfillment Service
 - **Slot Capacity Enforcement (NFR-01, NFR-03):** Allocates kitchen tickets within 15-minute pickup slots, strictly enforcing a maximum capacity limit (10 orders per slot) with HTTP 409 `SLOT_CAPACITY_EXCEEDED` guard.
-- **Audit History (NFR-08):** Records all ticket transitions (`QUEUED` -> `PREPARING` -> `READY_FOR_PICKUP` -> `COMPLETED`) in immutable `fulfillment_status_history` table.
+- **Audit History (NFR-08):** Records all ticket transitions (`QUEUED` -> `PREPARING` -> `READY_FOR_PICKUP` -> `PICKED_UP`, or `QUEUED`/`PREPARING` -> `CANCELLED`) in immutable `fulfillment_status_history` table.
 - **Messaging Resilience & DLQ (NFR-05):** RabbitMQ consumer verifies CloudEvents `id` against processed event log; poison messages route to `fulfillment.dlx` and `fulfillment_queue_dlq`.
 
 ### 2.7 Notification Service

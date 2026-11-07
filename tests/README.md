@@ -109,7 +109,7 @@ pytest -m nfr02 -v
 - **UC-02 (Kitchen Fulfillment & Pickup)**:
   - Kitchen queue listing on `GET /api/v1/fulfillments`.
   - RBAC verification (`CUSTOMER` role denied with 403 Forbidden).
-  - Status progression: `PREPARING` $\rightarrow$ `READY_FOR_PICKUP` $\rightarrow$ `PICKED_UP`.
+  - Status progression: `QUEUED` $\rightarrow$ `PREPARING` $\rightarrow$ `READY_FOR_PICKUP` $\rightarrow$ `PICKED_UP`.
   - Backward status transition rejection with 409 Conflict.
 
 - **UC-03 (Batch Inventory & Waste Tracking)**:
