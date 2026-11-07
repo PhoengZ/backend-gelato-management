@@ -137,7 +137,7 @@ sequenceDiagram
 
 An Inventory error prevents final cancellation commit, while CANCEL_PENDING
 remains durable. If release succeeds but Order's database commit fails, retries
-or the lifecycle worker use the same Inventory key and constant reason. Order currently does
+or the lifecycle worker use the same Inventory key and persisted reason. Order currently does
 not expire/cancel Stripe sessions; payment through an old URL requires
 reconciliation/refund and must not revive a cancelled order.
 
@@ -152,12 +152,35 @@ sequenceDiagram
 
     Sweep->>I: Expire ACTIVE reservation at stock deadline
     Note over I: Return valid portions or record expired-batch waste
-    Note over O: No Order expiry worker, local state may remain pending
+    participant OW as Order Expiry Worker
+    OW->>O: Claim overdue PENDING_PAYMENT as CANCEL_PENDING (RESERVATION_EXPIRED)
+    Note over O: Skipped if a payment already claimed PAYMENT_CONFIRMING
+    O->>I: ReleaseReservation (returns EXPIRED after the sweep)
+    O->>O: Transaction: CANCELLED and order.cancelled outbox
     P->>O: Verified late payment success
-    O->>I: ConfirmReservation
-    I-->>O: FAILED_PRECONDITION
-    O-->>P: 409 conflict, no PAID transition or order.placed
-    Note over P: Durable reconciliation and refund integration required
+    O-->>P: 410 PAYMENT_REJECTED, no PAID transition or order.placed
+    Note over P: Payment refunds the rejected charge
+```
+
+## Store cancellation of a paid order
+
+```mermaid
+sequenceDiagram
+    participant S as Staff or Manager
+    participant G as API Gateway
+    participant O as Order
+    participant F as Fulfillment
+    participant I as Inventory
+
+    S->>G: POST /api/v1/orders/{id}/store-cancel
+    G->>O: Verified X-User-ID and X-User-Role, bearer forwarded
+    O->>F: GET /api/v1/fulfillments/{id} with caller bearer
+    F-->>O: status QUEUED
+    O->>O: Transaction: PAID to STORE_CANCEL_PENDING
+    O->>I: ReturnConfirmedReservation (STORE_CANCELLED)
+    I-->>O: RETURNED; sold portions available or wasted
+    O->>O: Transaction: CANCELLED and order.cancelled (was_paid true)
+    O-->>S: 204; refund is a manual store process
 ```
 
 ## Order state and downstream targets
@@ -169,7 +192,10 @@ stateDiagram-v2
     PAYMENT_CONFIRMING --> PAID: Inventory confirmation and local outbox commit
     PAYMENT_CONFIRMING --> CANCEL_PENDING: Inventory definitively rejects confirmation
     PENDING_PAYMENT --> CANCEL_PENDING: Customer cancel or verified payment failure claims workflow
+    PENDING_PAYMENT --> CANCEL_PENDING: Expiry worker claims an overdue hold
     CANCEL_PENDING --> CANCELLED: Inventory release and local outbox commit
+    PAID --> STORE_CANCEL_PENDING: Staff or manager cancels a queued order
+    STORE_CANCEL_PENDING --> CANCELLED: Inventory return and local outbox commit
     PAID --> PREPARING: Target fulfillment integration
     PREPARING --> READY_FOR_PICKUP: Target fulfillment integration
     READY_FOR_PICKUP --> COMPLETED: Target collection integration

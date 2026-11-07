@@ -221,6 +221,89 @@ func (s *Service) transition(ctx context.Context, tx pgx.Tx, in TransitionInput,
 	return r, nil
 }
 
+// Return moves a CONFIRMED reservation to the terminal RETURNED status. Sold
+// portions go back to available, or to waste when their batch has expired. The
+// claim, balance changes, history and response commit in one transaction, and a
+// reservation that is already RETURNED is a no-op so stock moves only once.
+func (s *Service) Return(ctx context.Context, in TransitionInput) (Reservation, error) {
+	var err error
+	if in.ReservationID, err = ID(in.ReservationID); err != nil {
+		return Reservation{}, err
+	}
+	if in.OrderID, err = ID(in.OrderID); err != nil {
+		return Reservation{}, err
+	}
+	if in.Key, err = ID(in.Key); err != nil {
+		return Reservation{}, err
+	}
+	if !shortText(in.Reason, 500) {
+		return Reservation{}, ErrInvalid
+	}
+	return mutate(ctx, s, "return", in.Key, in, func(tx pgx.Tx) (Reservation, error) { return s.returnConfirmed(ctx, tx, in) })
+}
+func (s *Service) returnConfirmed(ctx context.Context, tx pgx.Tx, in TransitionInput) (Reservation, error) {
+	var r Reservation
+	if err := lock(ctx, tx, "order:"+in.OrderID); err != nil {
+		return r, err
+	}
+	ids, err := reservationFlavors(ctx, tx, in.ReservationID)
+	if err != nil {
+		return r, err
+	}
+	if err = lockFlavors(ctx, tx, ids); err != nil {
+		return r, err
+	}
+	r, err = loadReservation(ctx, tx, in.ReservationID)
+	if err != nil {
+		return r, err
+	}
+	if r.OrderID != in.OrderID {
+		return Reservation{}, ErrNotFound
+	}
+	if r.Status == "RETURNED" {
+		return r, nil
+	}
+	if r.Status != "CONFIRMED" {
+		return r, ErrState
+	}
+	t, err := now(ctx, tx)
+	if err != nil {
+		return r, err
+	}
+	for _, a := range r.Allocations {
+		b, err := scanBatch(tx.QueryRow(ctx, "SELECT "+batchColumns+" FROM batches WHERE id=$1 FOR UPDATE", a.BatchID))
+		if err != nil {
+			return r, err
+		}
+		if b.Sold < a.Portions {
+			return r, ErrState
+		}
+		b.Sold -= a.Portions
+		if !b.ExpiresAt.After(t) {
+			b.Wasted += a.Portions
+			if _, err = s.recordWaste(ctx, tx, b, a.Portions, "EXPIRED", "returned order after batch expiry", "", r.ID, t); err != nil {
+				return r, err
+			}
+		} else {
+			b.Available += a.Portions
+			if err = movement(ctx, tx, b.ID, r.ID, "RETURNED", a.Portions, t); err != nil {
+				return r, err
+			}
+		}
+		if err = saveBatch(ctx, tx, b, t); err != nil {
+			return r, err
+		}
+	}
+	if _, err = tx.Exec(ctx, "UPDATE reservations SET status='RETURNED',updated_at=$2,release_reason=$3 WHERE id=$1", r.ID, t, in.Reason); err != nil {
+		return r, err
+	}
+	for _, fid := range ids {
+		_ = service.ResetLowStockNotified(ctx, tx, fid, t)
+	}
+	r.Status = "RETURNED"
+	return r, nil
+}
+
 // Sweep is safe across replicas; discovery holds no row locks while acquiring
 // order/flavor locks. Every candidate is rechecked inside its own transaction.
 func (s *Service) Sweep(ctx context.Context, limit int) error {

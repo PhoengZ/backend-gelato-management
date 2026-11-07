@@ -94,6 +94,9 @@ reservation transition. V1 allows one reservation per order ID; a different key
 for that order is ALREADY_EXISTS. Confirm/Release require a matching order ID.
 TTL defaults to 10 minutes, capped by the earliest allocated batch expiry.
 Late confirmation is FAILED_PRECONDITION; release after expiry returns EXPIRED.
+ReturnConfirmedReservation moves a CONFIRMED reservation to the terminal RETURNED
+status for store cancellation of a paid order, returning sold portions to
+available (or waste for an expired batch). Other states are FAILED_PRECONDITION.
 Availability exceeding the proto int32 capacity is OUT_OF_RANGE.
 
 ## Order-orchestrated checkout
@@ -113,11 +116,19 @@ and frontend owners and end-to-end verification.
 
 Order REST v1.2 adds `CANCEL_PENDING` and `PAYMENT_CONFIRMING` status values.
 Order durably claims either workflow before contacting Inventory, blocks checkout
-for both, and resumes unfinished work in a lifecycle worker. No database columns
-are added. Release requests and cancellation events use the constant reason
-`ORDER_CANCELLED`, so different cancellation entry points replay identical facts.
+for both, and resumes unfinished work in a lifecycle worker. Release requests
+and cancellation events use `ORDER_CANCELLED` for customer and payment-failure
+cancellations, so those entry points replay identical facts.
 Review the enum additions and generic cancellation reason with affected owners;
-reconcile unfinished operations from older deployments before rollout. See the
+reconcile unfinished operations from older deployments before rollout.
+
+Order REST v1.3 adds STORE_CANCEL_PENDING and POST
+/api/v1/orders/{order_id}/store-cancel for STAFF or MANAGER. Order persists the
+cancellation reason: order.cancelled uses RESERVATION_EXPIRED for unpaid orders
+its expiry worker cancels and STORE_CANCELLED, with the optional paid facts
+(was_paid, total_amount_minor, currency, items, paid_at), for store
+cancellations. Refunds of store-cancelled orders are manual; Order does not call
+Payment for them. See the
 checkout architecture for recovery and payment-refund responsibilities.
 
 ## Legacy PaymentIntent integration

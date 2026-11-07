@@ -30,6 +30,7 @@ stateDiagram-v2
     ACTIVE --> CONFIRMED: ConfirmReservation before expiry
     ACTIVE --> RELEASED: ReleaseReservation before expiry
     ACTIVE --> EXPIRED: Stock hold deadline or late release
+    CONFIRMED --> RETURNED: ReturnConfirmedReservation (store cancellation)
 
     note right of RELEASED
         Valid batch: reserved becomes available.
@@ -41,6 +42,9 @@ stateDiagram-v2
 - Confirming moves portions from `reserved` to `sold`.
 - Releasing or expiring moves portions from `reserved` back to `available`, unless
   the batch has expired and the portions must be recorded as waste.
+- Returning a confirmed reservation moves portions from `sold` back to
+  `available` (movement `RETURNED`), or to `wasted` with an `inventory.waste`
+  event when the batch has expired. RETURNED is terminal.
 - Reservation expiry and batch expiry are distinct. An expired reservation can
   return its portions to available when the underlying batch is still valid.
 
@@ -89,6 +93,7 @@ The client supports these internal gRPC operations:
 - `ReservePortions`
 - `ConfirmReservation`
 - `ReleaseReservation`
+- `ReturnConfirmedReservation`
 
 Checkout directly calls ReservePortions rather than requiring a prior
 CheckAvailability read. Availability is only a snapshot, not a reservation promise.
@@ -102,9 +107,11 @@ Order retains its pending record for idempotent retry until the hold expires.
 ## Cancellation and local Order state
 
 Order checks customer ownership and atomically claims CANCEL_PENDING from
-PENDING_PAYMENT before releasing any stock. It uses the existing status column
-and stable release key with the constant reason ORDER_CANCELLED; no new columns
-are needed. CANCEL_PENDING blocks checkout and payment confirmation. On release
+PENDING_PAYMENT before releasing any stock. The claim persists a cancellation
+reason with the stable release key: RESERVATION_EXPIRED for the expiry worker,
+otherwise ORDER_CANCELLED (rows from before the `cancellation_reason` column
+also use ORDER_CANCELLED). CANCEL_PENDING blocks checkout and payment
+confirmation. On release
 success, Order commits CANCELLED and order.cancelled together in its own database.
 If release or local finalization fails, the durable intent remains. A lifecycle
 worker resumes it after restart, replaying the same operation/reason/key;
@@ -125,13 +132,22 @@ charge on 410 only; a 409 can still end in PAID, so Payment retries it instead.
 
 For a valid batch with ten initial portions, cancelling a two-portion hold changes
 available=8/reserved=2 to available=10/reserved=0; the invariant remains intact.
-Paid orders do not use this pending-order release path; refund/return workflows
-need a separate design.
+Paid orders do not use this pending-order release path. Staff or a manager can
+cancel a PAID order whose Fulfillment ticket is still QUEUED: Order claims
+STORE_CANCEL_PENDING, calls ReturnConfirmedReservation with the stable key
+`uuidv5(URL, "<order_id>/return")` and reason STORE_CANCELLED, then commits
+CANCELLED and order.cancelled with the paid facts. Inventory moves the
+reservation to RETURNED once; a different key for a RETURNED reservation is a
+no-op, and release or confirm of it is FAILED_PRECONDITION. Order does not call
+Payment: refunds of store-cancelled paid orders are a manual store process.
 
-Inventory's expiry worker settles stock, but Order has no automatic expiry worker
-and can remain PENDING_PAYMENT. A late ConfirmReservation returns a conflict;
-Order must not mark PAID or emit order.placed, and Payment refunds on the resulting
-410. Order cancellation currently does not close a Stripe Checkout Session, so a
+Inventory's expiry worker settles stock, and Order's expiry worker (every
+ORDER_EXPIRY_INTERVAL, default 15s) cancels PENDING_PAYMENT orders past
+reservation_expires_at with reason RESERVATION_EXPIRED. It claims each order
+under the same row lock as the payment claim, so it never cancels an order a
+payment already claimed (PAYMENT_CONFIRMING). A late ConfirmReservation returns
+a conflict; Order must not mark PAID or emit order.placed, and Payment refunds on
+the resulting 410. Order cancellation currently does not close a Stripe Checkout Session, so a
 customer can still pay it; that charge is also rejected with 410 and refunded.
 
 Inventory waste and its transactional outbox commit together, then publication

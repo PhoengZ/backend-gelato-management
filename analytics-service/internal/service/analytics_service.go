@@ -176,21 +176,82 @@ func (s *analyticsService) ProcessOrderPlaced(ctx context.Context, event models.
 	return nil
 }
 
-// ProcessOrderCancelled only records the event. Order cancels unpaid orders only, and
-// order.placed is emitted only after payment, so a cancelled order was never counted.
-// A paid-order refund workflow must publish a distinct event to reverse sales.
+// ProcessOrderCancelled reverses a paid order's sale. An unpaid cancellation was
+// never counted (order.placed is emitted only after payment), so it is only
+// recorded. When was_paid is true, exactly what ProcessOrderPlaced added is
+// subtracted from the day bucket of paid_at, which equals the order.placed time.
+// The reversal and its per-order marker are one document write, so a
+// redelivery, even after the dedupe marker was lost, cannot subtract twice.
 func (s *analyticsService) ProcessOrderCancelled(ctx context.Context, event models.OrderCancelledEvent) error {
+	if event.ID != "" && s.eventRepo != nil {
+		processed, err := s.eventRepo.IsProcessed(ctx, event.ID)
+		if err != nil {
+			return fmt.Errorf("failed to check event deduplication: %w", err)
+		}
+		if processed {
+			return nil
+		}
+	}
+	if event.Data.WasPaid {
+		if err := s.reversePaidOrder(ctx, event.Data); err != nil {
+			return err
+		}
+	}
 	if event.ID == "" || s.eventRepo == nil {
 		return nil
 	}
-	processed, err := s.eventRepo.IsProcessed(ctx, event.ID)
-	if err != nil {
-		return fmt.Errorf("failed to check event deduplication: %w", err)
-	}
-	if processed {
-		return nil
-	}
 	return s.eventRepo.MarkProcessed(ctx, event.ID, "OrderCancelled")
+}
+
+func (s *analyticsService) reversePaidOrder(ctx context.Context, data models.OrderCancelledData) error {
+	if data.OrderID == "" {
+		return fmt.Errorf("%w: paid cancellation without order_id", ErrInvalidDate)
+	}
+	date, err := extractDate(data.PaidAt)
+	if err != nil {
+		return err
+	}
+	record, err := s.getOrCreateAnalytics(ctx, date)
+	if err != nil {
+		return err
+	}
+	for _, id := range record.ReversedOrderIDs {
+		if id == data.OrderID {
+			return nil
+		}
+	}
+
+	record.Financials.GrossSalesMinor -= data.TotalAmountMinor
+	record.Financials.TotalOrders -= 1
+	record.Financials.AverageOrderValueMinor = 0
+	if record.Financials.TotalOrders > 0 {
+		record.Financials.AverageOrderValueMinor = record.Financials.GrossSalesMinor / int64(record.Financials.TotalOrders)
+	}
+	for _, item := range data.Items {
+		record.Operations.ScoopsSold -= item.Portions
+		found := false
+		for i, fs := range record.FlavorStats {
+			if fs.FlavorID == item.FlavorID {
+				record.FlavorStats[i].ScoopsSold -= item.Portions
+				record.FlavorStats[i].RevenueMinor -= item.SubtotalMinor
+				found = true
+				break
+			}
+		}
+		if !found {
+			// The reversal arrived before its order.placed; the later sale nets to zero.
+			record.FlavorStats = append(record.FlavorStats, models.FlavorStat{
+				FlavorID: item.FlavorID, Name: item.FlavorName,
+				ScoopsSold: -item.Portions, RevenueMinor: -item.SubtotalMinor,
+			})
+		}
+	}
+	record.Operations.WasteRate = 0
+	if record.Operations.ScoopsSold > 0 {
+		record.Operations.WasteRate = float64(record.WasteStats.TotalWastePortions) / float64(record.Operations.ScoopsSold)
+	}
+	_, err = s.repo.SaveReversal(ctx, record, data.OrderID)
+	return err
 }
 
 func (s *analyticsService) ProcessWasteRecorded(ctx context.Context, event models.WasteRecordedEvent) error {

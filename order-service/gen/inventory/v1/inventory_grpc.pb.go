@@ -19,10 +19,11 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	InventoryService_CheckAvailability_FullMethodName  = "/inventory.v1.InventoryService/CheckAvailability"
-	InventoryService_ReservePortions_FullMethodName    = "/inventory.v1.InventoryService/ReservePortions"
-	InventoryService_ConfirmReservation_FullMethodName = "/inventory.v1.InventoryService/ConfirmReservation"
-	InventoryService_ReleaseReservation_FullMethodName = "/inventory.v1.InventoryService/ReleaseReservation"
+	InventoryService_CheckAvailability_FullMethodName          = "/inventory.v1.InventoryService/CheckAvailability"
+	InventoryService_ReservePortions_FullMethodName            = "/inventory.v1.InventoryService/ReservePortions"
+	InventoryService_ConfirmReservation_FullMethodName         = "/inventory.v1.InventoryService/ConfirmReservation"
+	InventoryService_ReleaseReservation_FullMethodName         = "/inventory.v1.InventoryService/ReleaseReservation"
+	InventoryService_ReturnConfirmedReservation_FullMethodName = "/inventory.v1.InventoryService/ReturnConfirmedReservation"
 )
 
 // InventoryServiceClient is the client API for InventoryService service.
@@ -33,6 +34,10 @@ type InventoryServiceClient interface {
 	ReservePortions(ctx context.Context, in *ReservePortionsRequest, opts ...grpc.CallOption) (*ReservePortionsResponse, error)
 	ConfirmReservation(ctx context.Context, in *ConfirmReservationRequest, opts ...grpc.CallOption) (*ConfirmReservationResponse, error)
 	ReleaseReservation(ctx context.Context, in *ReleaseReservationRequest, opts ...grpc.CallOption) (*ReleaseReservationResponse, error)
+	// ReturnConfirmedReservation moves a CONFIRMED reservation to RETURNED when a
+	// paid order is cancelled by the store. Each allocation's sold portions become
+	// available again, or wasted when the batch has expired.
+	ReturnConfirmedReservation(ctx context.Context, in *ReturnConfirmedReservationRequest, opts ...grpc.CallOption) (*ReturnConfirmedReservationResponse, error)
 }
 
 type inventoryServiceClient struct {
@@ -83,6 +88,16 @@ func (c *inventoryServiceClient) ReleaseReservation(ctx context.Context, in *Rel
 	return out, nil
 }
 
+func (c *inventoryServiceClient) ReturnConfirmedReservation(ctx context.Context, in *ReturnConfirmedReservationRequest, opts ...grpc.CallOption) (*ReturnConfirmedReservationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReturnConfirmedReservationResponse)
+	err := c.cc.Invoke(ctx, InventoryService_ReturnConfirmedReservation_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // InventoryServiceServer is the server API for InventoryService service.
 // All implementations must embed UnimplementedInventoryServiceServer
 // for forward compatibility.
@@ -91,6 +106,10 @@ type InventoryServiceServer interface {
 	ReservePortions(context.Context, *ReservePortionsRequest) (*ReservePortionsResponse, error)
 	ConfirmReservation(context.Context, *ConfirmReservationRequest) (*ConfirmReservationResponse, error)
 	ReleaseReservation(context.Context, *ReleaseReservationRequest) (*ReleaseReservationResponse, error)
+	// ReturnConfirmedReservation moves a CONFIRMED reservation to RETURNED when a
+	// paid order is cancelled by the store. Each allocation's sold portions become
+	// available again, or wasted when the batch has expired.
+	ReturnConfirmedReservation(context.Context, *ReturnConfirmedReservationRequest) (*ReturnConfirmedReservationResponse, error)
 	mustEmbedUnimplementedInventoryServiceServer()
 }
 
@@ -112,6 +131,9 @@ func (UnimplementedInventoryServiceServer) ConfirmReservation(context.Context, *
 }
 func (UnimplementedInventoryServiceServer) ReleaseReservation(context.Context, *ReleaseReservationRequest) (*ReleaseReservationResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ReleaseReservation not implemented")
+}
+func (UnimplementedInventoryServiceServer) ReturnConfirmedReservation(context.Context, *ReturnConfirmedReservationRequest) (*ReturnConfirmedReservationResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ReturnConfirmedReservation not implemented")
 }
 func (UnimplementedInventoryServiceServer) mustEmbedUnimplementedInventoryServiceServer() {}
 func (UnimplementedInventoryServiceServer) testEmbeddedByValue()                          {}
@@ -206,6 +228,24 @@ func _InventoryService_ReleaseReservation_Handler(srv interface{}, ctx context.C
 	return interceptor(ctx, in, info, handler)
 }
 
+func _InventoryService_ReturnConfirmedReservation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReturnConfirmedReservationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(InventoryServiceServer).ReturnConfirmedReservation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: InventoryService_ReturnConfirmedReservation_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(InventoryServiceServer).ReturnConfirmedReservation(ctx, req.(*ReturnConfirmedReservationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // InventoryService_ServiceDesc is the grpc.ServiceDesc for InventoryService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -228,6 +268,10 @@ var InventoryService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ReleaseReservation",
 			Handler:    _InventoryService_ReleaseReservation_Handler,
+		},
+		{
+			MethodName: "ReturnConfirmedReservation",
+			Handler:    _InventoryService_ReturnConfirmedReservation_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

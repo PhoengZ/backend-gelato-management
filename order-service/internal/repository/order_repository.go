@@ -24,7 +24,10 @@ type OrderRepository interface {
 	BeginTransition(context.Context, string, domain.OrderStatus) (*domain.Order, error)
 	PendingTransitions(context.Context, string, int) ([]domain.Order, error)
 	RejectPaymentConfirmation(context.Context, string) error
-	MarkPaidWithOutbox(context.Context, string, *domain.OutboxEvent) error
+	ExpiredPendingOrders(ctx context.Context, afterID string, now time.Time, limit int) ([]domain.Order, error)
+	BeginExpiry(ctx context.Context, id string, now time.Time) (*domain.Order, error)
+	BeginStoreCancellation(context.Context, string) (*domain.Order, error)
+	MarkPaidWithOutbox(ctx context.Context, id string, paidAt time.Time, event *domain.OutboxEvent) error
 	MarkCancelled(context.Context, string, *domain.OutboxEvent) error
 	PendingOutbox(context.Context, int) ([]domain.OutboxEvent, error)
 	MarkOutboxPublished(context.Context, string) error
@@ -124,7 +127,7 @@ func (r *gormOrderRepository) PendingTransitions(ctx context.Context, afterID st
 		limit = 100
 	}
 	var orders []domain.Order
-	query := r.db.WithContext(ctx).Preload("Items").Where("status IN ?", []domain.OrderStatus{domain.StatusCancelPending, domain.StatusPaymentConfirming})
+	query := r.db.WithContext(ctx).Preload("Items").Where("status IN ?", []domain.OrderStatus{domain.StatusCancelPending, domain.StatusPaymentConfirming, domain.StatusStoreCancelPending})
 	if afterID != "" {
 		query = query.Where("id > ?", afterID)
 	}
@@ -154,9 +157,73 @@ func (r *gormOrderRepository) RejectPaymentConfirmation(ctx context.Context, id 
 	})
 }
 
-func (r *gormOrderRepository) MarkPaidWithOutbox(ctx context.Context, id string, event *domain.OutboxEvent) error {
+// ExpiredPendingOrders pages unpaid orders whose stock hold has passed. It only
+// discovers candidates; BeginExpiry rechecks every condition under a row lock.
+func (r *gormOrderRepository) ExpiredPendingOrders(ctx context.Context, afterID string, now time.Time, limit int) ([]domain.Order, error) {
+	if limit < 1 || limit > 500 {
+		limit = 100
+	}
+	var orders []domain.Order
+	query := r.db.WithContext(ctx).Where("status = ? AND reservation_expires_at <= ?", domain.StatusPendingPayment, now.UTC())
+	if afterID != "" {
+		query = query.Where("id > ?", afterID)
+	}
+	err := query.Order("id").Limit(limit).Find(&orders).Error
+	return orders, err
+}
+
+// BeginExpiry claims CANCEL_PENDING with reason RESERVATION_EXPIRED only while
+// the order is still PENDING_PAYMENT and overdue. The row lock it shares with
+// BeginTransition means a concurrent PAYMENT_CONFIRMING claim always wins or
+// loses as a whole; expiry never takes an order a payment already claimed.
+func (r *gormOrderRepository) BeginExpiry(ctx context.Context, id string, now time.Time) (*domain.Order, error) {
+	var order domain.Order
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Preload("Items").First(&order, "id = ?", id).Error; err != nil {
+			return err
+		}
+		if order.Status != domain.StatusPendingPayment || order.ReservationExpiresAt.After(now.UTC()) {
+			return ErrInvalidTransition
+		}
+		updates := map[string]any{"status": domain.StatusCancelPending, "checkout_url": "", "cancellation_reason": domain.ReasonReservationExpired}
+		if err := tx.Model(&order).Updates(updates).Error; err != nil {
+			return err
+		}
+		order.Status, order.CheckoutURL, order.CancellationReason = domain.StatusCancelPending, "", domain.ReasonReservationExpired
+		return nil
+	})
+	return &order, err
+}
+
+// BeginStoreCancellation commits the store's intent to cancel a PAID order
+// before any Inventory call. Repeating it, or calling it after the store
+// cancellation finished, returns the current order unchanged.
+func (r *gormOrderRepository) BeginStoreCancellation(ctx context.Context, id string) (*domain.Order, error) {
+	var order domain.Order
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Preload("Items").First(&order, "id = ?", id).Error; err != nil {
+			return err
+		}
+		if order.Status == domain.StatusStoreCancelPending ||
+			(order.Status == domain.StatusCancelled && order.CancellationReason == domain.ReasonStoreCancelled) {
+			return nil
+		}
+		if order.Status != domain.StatusPaid {
+			return ErrInvalidTransition
+		}
+		updates := map[string]any{"status": domain.StatusStoreCancelPending, "cancellation_reason": domain.ReasonStoreCancelled}
+		if err := tx.Model(&order).Updates(updates).Error; err != nil {
+			return err
+		}
+		order.Status, order.CancellationReason = domain.StatusStoreCancelPending, domain.ReasonStoreCancelled
+		return nil
+	})
+	return &order, err
+}
+
+func (r *gormOrderRepository) MarkPaidWithOutbox(ctx context.Context, id string, paidAt time.Time, event *domain.OutboxEvent) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		result := tx.Model(&domain.Order{}).Where("id = ? AND status = ?", id, domain.StatusPaymentConfirming).Update("status", domain.StatusPaid)
+		result := tx.Model(&domain.Order{}).Where("id = ? AND status = ?", id, domain.StatusPaymentConfirming).Updates(map[string]any{"status": domain.StatusPaid, "paid_at": paidAt.UTC()})
 		if result.Error != nil {
 			return result.Error
 		}
@@ -174,9 +241,10 @@ func (r *gormOrderRepository) MarkPaidWithOutbox(ctx context.Context, id string,
 	})
 }
 
+// MarkCancelled finishes either cancellation intent together with its event.
 func (r *gormOrderRepository) MarkCancelled(ctx context.Context, id string, event *domain.OutboxEvent) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		result := tx.Model(&domain.Order{}).Where("id = ? AND status = ?", id, domain.StatusCancelPending).Update("status", domain.StatusCancelled)
+		result := tx.Model(&domain.Order{}).Where("id = ? AND status IN ?", id, []domain.OrderStatus{domain.StatusCancelPending, domain.StatusStoreCancelPending}).Update("status", domain.StatusCancelled)
 		if result.Error != nil {
 			return result.Error
 		}

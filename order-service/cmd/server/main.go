@@ -104,6 +104,7 @@ func run() error {
 	defer stop()
 	go service.RunOutboxWorker(ctx, repo, pub)
 	go service.RunLifecycleWorker(ctx, svc)
+	go service.RunExpiryWorker(ctx, svc, cfg.OrderExpiryInterval)
 
 	app := fiber.New(fiber.Config{DisableStartupMessage: true})
 	app.Use(logger.New(), recover.New())
@@ -114,6 +115,7 @@ func run() error {
 	api.Post("/:id/payment-succeeded", h.PaymentSucceeded)
 	api.Post("/:id/payment-failed", h.PaymentFailed)
 	api.Post("/:id/cancel", h.CancelOrder)
+	api.Post("/:id/store-cancel", h.StoreCancelOrder)
 	app.Get("/health", func(c *fiber.Ctx) error { return c.SendString("ok") })
 
 	listenErr := make(chan error, 1)

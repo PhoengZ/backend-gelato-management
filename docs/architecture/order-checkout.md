@@ -99,9 +99,16 @@ Neither a transaction nor row lock spans an Inventory network call.
 
 After the claim, both cancellation paths call Inventory ReleaseReservation with
 the persisted reservation/order IDs, existing deterministic release key, and
-constant reason ORDER_CANCELLED. The original caller's reason is not persisted;
-no columns or tables are added. On success, Order commits CANCELLED and
-order.cancelled together, using the same generic reason in the event.
+the persisted cancellation reason, ORDER_CANCELLED for these two paths (customer
+and payment-failure causes are not distinguished). On success, Order commits
+CANCELLED and order.cancelled together, using the same reason in the event.
+
+Order's expiry worker uses the same path for PENDING_PAYMENT orders whose
+reservation_expires_at has passed. It pages candidates by order ID every
+ORDER_EXPIRY_INTERVAL (default 15s), claims each under the row lock as
+CANCEL_PENDING with reason RESERVATION_EXPIRED, and skips any order a payment
+already claimed. A failed release leaves the durable intent for the lifecycle
+worker, which replays the persisted reason and key after a restart.
 
 Inventory returns RELEASED or EXPIRED. Each allocation returns to available if
 its batch is still valid; expired-batch portions become waste. If release succeeds
@@ -134,10 +141,29 @@ flowchart TD
 
 There is no Order-to-Payment cancel-session RPC in the current contract or code.
 The existing URL can remain payable after stock release, and a browser cancel
-redirect is not automatically an Order cancellation. A late success for
-CANCEL_PENDING or CANCELLED is rejected with 410; a late success after Inventory
-expiry cannot confirm stock and also returns 410. Payment refunds such charges. Inventory expires holds independently,
-but Order has no worker that automatically changes its pending status.
+redirect is not automatically an Order cancellation. A late success for an
+unpaid CANCEL_PENDING or CANCELLED order is rejected with 410, including an
+order the expiry worker cancelled; a late success after Inventory expiry cannot
+confirm stock and also returns 410. Payment refunds such charges.
+
+## Store cancellation of a paid order
+
+Staff or a manager calls POST /api/v1/orders/{id}/store-cancel. Order enforces
+the role from the Gateway-set X-User-Role header (STAFF or MANAGER) and reads
+GET /api/v1/fulfillments/{id} with the caller's bearer token. Only a PAID order
+whose ticket is QUEUED proceeds; a missing or non-QUEUED ticket returns 409
+ORDER_PREPARATION_STARTED, an unreachable Fulfillment 503 and a token
+Fulfillment rejects 403. Order then claims STORE_CANCEL_PENDING, calls Inventory
+ReturnConfirmedReservation and commits CANCELLED with order.cancelled (reason
+STORE_CANCELLED, was_paid true, total, items and paid_at). The lifecycle worker
+finishes an interrupted intent without re-checking Fulfillment. A ticket that
+starts preparing between the check and the claim is still cancelled by
+Fulfillment's order.cancelled consumer.
+
+Order does not call Payment. Refunds of store-cancelled paid orders are a manual
+store process in this release, and a duplicate payment-succeeded callback for
+such an order returns 409 rather than 410 so Payment does not refund it
+automatically. Analytics subtracts the sale from the paid_at day.
 
 See [detailed sequence and state diagrams](../sequence-diagram.md) and
 [Inventory lifecycle](inventory-reservation.md).

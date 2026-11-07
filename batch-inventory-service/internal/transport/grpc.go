@@ -94,3 +94,10 @@ func (h *grpcHandler) ReleaseReservation(ctx context.Context, r *pb.ReleaseReser
 	}
 	return &pb.ReleaseReservationResponse{Reservation: toProto(result)}, nil
 }
+func (h *grpcHandler) ReturnConfirmedReservation(ctx context.Context, r *pb.ReturnConfirmedReservationRequest) (*pb.ReturnConfirmedReservationResponse, error) {
+	result, err := h.svc.Return(ctx, inventory.TransitionInput{ReservationID: r.GetReservationId(), OrderID: r.GetOrderId(), Key: r.GetIdempotencyKey(), Reason: r.GetReason()})
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	return &pb.ReturnConfirmedReservationResponse{Reservation: toProto(result)}, nil
+}

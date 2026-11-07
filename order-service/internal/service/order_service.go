@@ -48,8 +48,10 @@ type Service interface {
 	PlaceOrder(context.Context, CreateOrderInput, string) (*domain.CheckoutResponse, error)
 	ConfirmPayment(context.Context, string) error
 	CancelOrder(context.Context, string, string) error
+	StoreCancelOrder(context.Context, string) error
 	GetOrder(context.Context, string) (*domain.Order, error)
 	ResumePendingTransitions(context.Context) error
+	ExpireOverdueOrders(context.Context) error
 }
 
 const DefaultPickupSlotMaxCapacity = 10
@@ -356,7 +358,10 @@ func (s *orderService) paymentStateError(ctx context.Context, orderID string) er
 	if err != nil {
 		return mapRepositoryError(err)
 	}
-	if order.Status == domain.StatusCancelPending || order.Status == domain.StatusCancelled {
+	// A store-cancelled order was paid; its refund is handled manually, so a
+	// duplicate payment callback must not look refundable.
+	wasPaid := order.PaidAt != nil || order.CancellationReason == domain.ReasonStoreCancelled
+	if (order.Status == domain.StatusCancelPending || order.Status == domain.StatusCancelled) && !wasPaid {
 		return paymentRejected()
 	}
 	return conflict("ORDER_STATE_CONFLICT", "order is not awaiting payment")
@@ -378,12 +383,15 @@ func (s *orderService) finishPayment(ctx context.Context, order *domain.Order) e
 		return mapGRPCError("INVENTORY", err)
 	}
 	eventID := uuid.NewString()
-	envelope := cloudEvent{SpecVersion: "1.0", ID: eventID, Source: "/gelatoflow/order-service", Type: "com.gelatoflow.order.placed.v1", Time: time.Now().UTC(), DataContentType: "application/json", Data: orderPlacedData{OrderID: order.ID, CustomerID: order.CustomerID, Status: string(domain.StatusPaid), PickupAt: order.PickupAt.UTC(), TotalAmountMinor: order.TotalAmountMinor, Currency: order.Currency, Items: order.Items}}
+	// paid_at equals the order.placed time so a later reversal hits the same
+	// Analytics day bucket.
+	paidAt := time.Now().UTC()
+	envelope := cloudEvent{SpecVersion: "1.0", ID: eventID, Source: "/gelatoflow/order-service", Type: "com.gelatoflow.order.placed.v1", Time: paidAt, DataContentType: "application/json", Data: orderPlacedData{OrderID: order.ID, CustomerID: order.CustomerID, Status: string(domain.StatusPaid), PickupAt: order.PickupAt.UTC(), TotalAmountMinor: order.TotalAmountMinor, Currency: order.Currency, Items: order.Items}}
 	payload, err := json.Marshal(envelope)
 	if err != nil {
 		return dependencyError("ORDER_EVENT_ENCODING_FAILED", err)
 	}
-	if err := s.repo.MarkPaidWithOutbox(ctx, order.ID, &domain.OutboxEvent{ID: eventID, OrderID: order.ID, RoutingKey: "order.placed", Payload: payload}); err != nil {
+	if err := s.repo.MarkPaidWithOutbox(ctx, order.ID, paidAt, &domain.OutboxEvent{ID: eventID, OrderID: order.ID, RoutingKey: "order.placed", Payload: payload}); err != nil {
 		if errors.Is(err, repository.ErrInvalidTransition) {
 			return conflict("ORDER_STATE_CONFLICT", "order changed state before payment confirmation")
 		}
@@ -412,17 +420,28 @@ func (s *orderService) CancelOrder(ctx context.Context, orderID, reason string) 
 	return s.finishCancellation(ctx, order)
 }
 
-// The durable status is sufficient to reconstruct exactly the same release
-// request after restart, regardless of which endpoint requested cancellation.
-const cancellationReason = "ORDER_CANCELLED"
+// cancellationReason is the reason persisted with the durable claim, so the
+// release request and event are identical after a restart. Rows claimed before
+// the column existed keep the generic ORDER_CANCELLED reason.
+func cancellationReason(order *domain.Order) string {
+	if order.CancellationReason != "" {
+		return order.CancellationReason
+	}
+	return domain.ReasonOrderCancelled
+}
 
 func (s *orderService) finishCancellation(ctx context.Context, order *domain.Order) error {
-	_, err := s.inventory.ReleaseReservation(ctx, &inventoryv1.ReleaseReservationRequest{ReservationId: order.ReservationID, OrderId: order.ID, IdempotencyKey: order.ReleaseIdempotencyKey, Reason: cancellationReason})
+	reason := cancellationReason(order)
+	_, err := s.inventory.ReleaseReservation(ctx, &inventoryv1.ReleaseReservationRequest{ReservationId: order.ReservationID, OrderId: order.ID, IdempotencyKey: order.ReleaseIdempotencyKey, Reason: reason})
 	if err != nil {
 		return mapGRPCError("INVENTORY", err)
 	}
+	return s.commitCancellation(ctx, order, orderCancelledData{OrderID: order.ID, CustomerID: order.CustomerID, Reason: reason})
+}
+
+func (s *orderService) commitCancellation(ctx context.Context, order *domain.Order, data orderCancelledData) error {
 	eventID := uuid.NewString()
-	payload, err := json.Marshal(cloudEvent{SpecVersion: "1.0", ID: eventID, Source: "/gelatoflow/order-service", Type: "com.gelatoflow.order.cancelled.v1", Time: time.Now().UTC(), DataContentType: "application/json", Data: map[string]string{"order_id": order.ID, "customer_id": order.CustomerID, "reason": cancellationReason}})
+	payload, err := json.Marshal(cloudEvent{SpecVersion: "1.0", ID: eventID, Source: "/gelatoflow/order-service", Type: "com.gelatoflow.order.cancelled.v1", Time: time.Now().UTC(), DataContentType: "application/json", Data: data})
 	if err != nil {
 		return dependencyError("ORDER_EVENT_ENCODING_FAILED", err)
 	}
@@ -435,6 +454,124 @@ func (s *orderService) finishCancellation(ctx context.Context, order *domain.Ord
 	return nil
 }
 
+// StoreCancelOrder cancels a PAID order for staff or a manager while its
+// Fulfillment ticket is still QUEUED. The caller's bearer token in ctx is
+// forwarded to Fulfillment. The intent is committed before Inventory is called,
+// and the lifecycle worker finishes it after a failure or restart without
+// re-checking Fulfillment. The refund is a manual store process.
+func (s *orderService) StoreCancelOrder(ctx context.Context, orderID string) error {
+	if _, err := uuid.Parse(orderID); err != nil {
+		return badRequest("order_id must be a UUID")
+	}
+	order, err := s.repo.Get(ctx, orderID)
+	if err != nil {
+		return mapRepositoryError(err)
+	}
+	switch {
+	case order.Status == domain.StatusCancelled && order.CancellationReason == domain.ReasonStoreCancelled:
+		return nil
+	case order.Status == domain.StatusStoreCancelPending:
+		return s.finishStoreCancellation(ctx, order)
+	case order.Status != domain.StatusPaid:
+		return conflict("ORDER_STATE_CONFLICT", "only paid orders can be cancelled by the store")
+	}
+	if s.fulfillment == nil {
+		return &AppError{Code: "FULFILLMENT_UNAVAILABLE", Message: "fulfillment status could not be verified", HTTPStatus: 503}
+	}
+	ticket, err := s.fulfillment.GetTicket(ctx, order.ID)
+	if errors.Is(err, client.ErrTicketNotFound) || (err == nil && ticket.Status != "QUEUED") {
+		return conflict("ORDER_PREPARATION_STARTED", "the order is no longer queued; preparation has started or no ticket exists")
+	}
+	if errors.Is(err, client.ErrTicketForbidden) {
+		return &AppError{Code: "FORBIDDEN", Message: "staff or manager role is required", HTTPStatus: 403}
+	}
+	if err != nil {
+		return &AppError{Code: "FULFILLMENT_UNAVAILABLE", Message: "fulfillment status could not be verified", HTTPStatus: 503}
+	}
+	claimed, err := s.repo.BeginStoreCancellation(ctx, order.ID)
+	if err != nil {
+		if errors.Is(err, repository.ErrInvalidTransition) {
+			return conflict("ORDER_STATE_CONFLICT", "only paid orders can be cancelled by the store")
+		}
+		return mapRepositoryError(err)
+	}
+	if claimed.Status == domain.StatusCancelled {
+		return nil
+	}
+	return s.finishStoreCancellation(ctx, claimed)
+}
+
+func (s *orderService) finishStoreCancellation(ctx context.Context, order *domain.Order) error {
+	_, err := s.inventory.ReturnConfirmedReservation(ctx, &inventoryv1.ReturnConfirmedReservationRequest{
+		ReservationId: order.ReservationID, OrderId: order.ID,
+		IdempotencyKey: uuid.NewSHA1(uuid.NameSpaceURL, []byte(order.ID+"/return")).String(),
+		Reason:         domain.ReasonStoreCancelled,
+	})
+	if err != nil {
+		return mapGRPCError("INVENTORY", err)
+	}
+	// Orders paid before paid_at existed fall back to their PAID update time.
+	paidAt := order.UpdatedAt.UTC()
+	if order.PaidAt != nil {
+		paidAt = order.PaidAt.UTC()
+	}
+	wasPaid, total, currency := true, order.TotalAmountMinor, order.Currency
+	items := order.Items
+	if items == nil {
+		items = []domain.OrderItem{}
+	}
+	return s.commitCancellation(ctx, order, orderCancelledData{
+		OrderID: order.ID, CustomerID: order.CustomerID, Reason: domain.ReasonStoreCancelled,
+		WasPaid: &wasPaid, TotalAmountMinor: &total, Currency: &currency, Items: items, PaidAt: &paidAt,
+	})
+}
+
+// expiryPageSize bounds each discovery query of the expiry worker.
+const expiryPageSize = 100
+
+// ExpireOverdueOrders cancels PENDING_PAYMENT orders whose stock hold passed.
+// Each candidate is claimed under its row lock, so an order a concurrent
+// payment already claimed (PAYMENT_CONFIRMING) is skipped. The claim is
+// durable; a failed release is finished by the lifecycle worker.
+func (s *orderService) ExpireOverdueOrders(ctx context.Context) error {
+	var failures []error
+	afterID := ""
+	for {
+		now := time.Now().UTC()
+		orders, err := s.repo.ExpiredPendingOrders(ctx, afterID, now, expiryPageSize)
+		if err != nil {
+			return errors.Join(append(failures, err)...)
+		}
+		for _, candidate := range orders {
+			callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			err = s.expireOrder(callCtx, candidate.ID, now)
+			cancel()
+			if err != nil {
+				failures = append(failures, fmt.Errorf("expire order %s: %w", candidate.ID, err))
+			}
+			if ctx.Err() != nil {
+				return errors.Join(append(failures, ctx.Err())...)
+			}
+		}
+		if len(orders) < expiryPageSize {
+			break
+		}
+		afterID = orders[len(orders)-1].ID
+	}
+	return errors.Join(failures...)
+}
+
+func (s *orderService) expireOrder(ctx context.Context, orderID string, now time.Time) error {
+	order, err := s.repo.BeginExpiry(ctx, orderID, now)
+	if errors.Is(err, repository.ErrInvalidTransition) {
+		return nil // paid, claimed or cancelled since discovery
+	}
+	if err != nil {
+		return mapRepositoryError(err)
+	}
+	return s.finishCancellation(ctx, order)
+}
+
 func (s *orderService) ResumePendingTransitions(ctx context.Context) error {
 	var failures []error
 	afterID := ""
@@ -445,9 +582,12 @@ func (s *orderService) ResumePendingTransitions(ctx context.Context) error {
 		}
 		for _, order := range orders {
 			callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-			if order.Status == domain.StatusCancelPending {
+			switch order.Status {
+			case domain.StatusCancelPending:
 				err = s.CancelOrder(callCtx, order.ID, "CUSTOMER_REQUEST")
-			} else {
+			case domain.StatusStoreCancelPending:
+				err = s.finishStoreCancellation(callCtx, &order)
+			default:
 				err = s.ConfirmPayment(callCtx, order.ID)
 			}
 			cancel()
@@ -579,6 +719,20 @@ type cloudEvent struct {
 	DataContentType string    `json:"datacontenttype"`
 	Data            any       `json:"data"`
 }
+
+// orderCancelledData follows order-cancelled.v1; paid facts appear only when
+// the cancelled order had been paid.
+type orderCancelledData struct {
+	OrderID          string             `json:"order_id"`
+	CustomerID       string             `json:"customer_id"`
+	Reason           string             `json:"reason"`
+	WasPaid          *bool              `json:"was_paid,omitempty"`
+	TotalAmountMinor *int64             `json:"total_amount_minor,omitempty"`
+	Currency         *string            `json:"currency,omitempty"`
+	Items            []domain.OrderItem `json:"items,omitempty"`
+	PaidAt           *time.Time         `json:"paid_at,omitempty"`
+}
+
 type orderPlacedData struct {
 	OrderID          string             `json:"order_id"`
 	CustomerID       string             `json:"customer_id"`

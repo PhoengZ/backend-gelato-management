@@ -17,6 +17,7 @@ type Inventory interface {
 	ReservePortions(context.Context, *inventoryv1.ReservePortionsRequest) (*inventoryv1.ReservePortionsResponse, error)
 	ConfirmReservation(context.Context, *inventoryv1.ConfirmReservationRequest) (*inventoryv1.ConfirmReservationResponse, error)
 	ReleaseReservation(context.Context, *inventoryv1.ReleaseReservationRequest) (*inventoryv1.ReleaseReservationResponse, error)
+	ReturnConfirmedReservation(context.Context, *inventoryv1.ReturnConfirmedReservationRequest) (*inventoryv1.ReturnConfirmedReservationResponse, error)
 	Close() error
 }
 
@@ -63,6 +64,12 @@ func (c *inventoryClient) ReleaseReservation(ctx context.Context, req *inventory
 	callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	return c.inner.ReleaseReservation(c.authenticated(callCtx), req)
+}
+
+func (c *inventoryClient) ReturnConfirmedReservation(ctx context.Context, req *inventoryv1.ReturnConfirmedReservationRequest) (*inventoryv1.ReturnConfirmedReservationResponse, error) {
+	callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	return c.inner.ReturnConfirmedReservation(c.authenticated(callCtx), req)
 }
 
 func (c *inventoryClient) Close() error { return c.conn.Close() }
