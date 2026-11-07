@@ -1,6 +1,8 @@
 # Fulfillment Service
 
-คิวครัวและสถานะการรับสินค้าของ GelatoFlow — สร้าง ticket จาก event `order.placed`, ให้พนักงานเปลี่ยนสถานะ, แล้วส่ง event `fulfillment.order_ready` / `fulfillment.order_picked_up`
+คิวครัวและสถานะการรับสินค้าของ GelatoFlow — สร้าง ticket (`QUEUED`) จาก event `order.placed` แล้วส่ง `fulfillment.order_queued` พร้อมเลขคิว, ให้พนักงานเปลี่ยนสถานะ, แล้วส่ง event `fulfillment.order_ready` / `fulfillment.order_picked_up`
+
+Lifecycle: `QUEUED` → `PREPARING` → `READY_FOR_PICKUP` → `PICKED_UP`; `order.cancelled` เปลี่ยน ticket ที่ยัง `QUEUED` หรือ `PREPARING` เป็น `CANCELLED`
 
 Contract อยู่ที่ [`contracts/openapi/fulfillment-service.v1.yaml`](../contracts/openapi/fulfillment-service.v1.yaml) และ `contracts/events/fulfillment-*.schema.json`
 Stack: Go, Echo, pgx (PostgreSQL), amqp091-go (RabbitMQ, optional)
@@ -31,14 +33,18 @@ Stack: Go, Echo, pgx (PostgreSQL), amqp091-go (RabbitMQ, optional)
 
 | Method | Path | หมายเหตุ |
 | --- | --- | --- |
-| GET | `/api/v1/fulfillments?status=PREPARING,READY_FOR_PICKUP&pickup_from=...&pickup_to=...` | `STAFF`/`MANAGER`; เรียงตาม slot แล้วตาม queue; `pickup_from`/`pickup_to` (RFC3339, ช่วง `[from, to)`) เป็น optional ถ้าไม่ส่งจะได้ทุก ticket เหมือนเดิม |
+| GET | `/api/v1/fulfillments?status=QUEUED,PREPARING,READY_FOR_PICKUP&pickup_from=...&pickup_to=...` | `STAFF`/`MANAGER`; เรียงตาม slot แล้วตาม queue; `pickup_from`/`pickup_to` (RFC3339, ช่วง `[from, to)`) เป็น optional ถ้าไม่ส่งจะได้ทุก ticket เหมือนเดิม |
 | GET | `/api/v1/fulfillments/slots/capacity?slot_time=...` | ดู active ticket count ใน slot window 15 นาที |
 | GET | `/api/v1/fulfillments/{order_id}` | `STAFF`/`MANAGER` เห็นทุก ticket; `CUSTOMER` เห็นเฉพาะของ order ตัวเอง (ไม่ใช่ของตัวเอง → 404) |
 | GET | `/api/v1/fulfillments/{order_id}/history` | `MANAGER`; audit trail เรียงจากเก่าไปใหม่ |
 | PATCH | `/api/v1/fulfillments/{order_id}/status` | ต้องใช้บทบาท `STAFF` หรือ `MANAGER`; body `{"status":"READY_FOR_PICKUP"}` หรือ `PICKED_UP`; ข้ามขั้น → 409 `INVALID_TRANSITION` |
 | GET | `/health` | 503 `{"status":"degraded","database":"unreachable"}` เมื่อ DB ping ไม่ผ่าน (timeout 2s) หรือ `{"status":"degraded","broker":"disconnected"}` เมื่อตั้ง `RABBITMQ_URL` แต่ broker หลุด |
 
-Ticket ไม่ถูกสร้างผ่าน REST — สร้างจาก event `order.placed` เท่านั้น และ `order.cancelled` จะเปลี่ยน ticket ที่ยัง `PREPARING` เป็น `CANCELLED`
+`PATCH .../status` รับ `PREPARING` (จาก `QUEUED`, ไม่ส่ง event), `READY_FOR_PICKUP` (จาก `PREPARING`, ส่ง `fulfillment.order_ready`) และ `PICKED_UP` (จาก `READY_FOR_PICKUP`, ส่ง `fulfillment.order_picked_up`); ส่งสถานะเดิมซ้ำ = no-op
+
+Ticket ไม่ถูกสร้างผ่าน REST — สร้างจาก event `order.placed` เท่านั้น (สถานะเริ่มต้น `QUEUED`) และเขียน `fulfillment.order_queued` ลง outbox ใน transaction เดียวกับ ticket; `order.cancelled` จะเปลี่ยน ticket ที่ยัง `QUEUED` หรือ `PREPARING` เป็น `CANCELLED`
+
+`fulfillment.order_queued` บังคับ `customer_id` ถ้า `order.placed` ไม่มี `customer_id` (producer รุ่นเก่า) ticket ยังถูกสร้างแต่จะไม่ส่ง event นี้ (log ไว้) เพราะไม่มีลูกค้าให้แจ้ง; ticket เก่าที่ `customer_id` เป็น NULL ไม่กระทบ เพราะ event นี้ส่งเฉพาะตอนสร้าง ticket
 
 ## รันในเครื่อง
 
@@ -51,7 +57,8 @@ docker compose --env-file infra/.env \
 # service: http://localhost:8081   postgres: localhost:5435
 ```
 
-Migration ใน `migrations/` ถูก mount เข้า Postgres และรันครั้งแรกที่สร้าง volume (001 สร้างตารางเดิมของ assignment แล้ว 002 แทนที่ด้วย schema ปัจจุบัน)
+Migration ใน `migrations/` ถูก mount เข้า Postgres และรันครั้งแรกที่สร้าง volume (001 สร้างตารางเดิมของ assignment แล้ว 002 แทนที่ด้วย schema ปัจจุบัน) และ service รันทุกไฟล์ที่ยังไม่อยู่ใน `fulfillment_schema_migrations` ตอน start (`migrations.Apply`) ทุกไฟล์จึงต้องรันซ้ำได้
+005 เพิ่ม `QUEUED` ใน CHECK constraint ของ `fulfillments` และ `fulfillment_status_history` และเปลี่ยน default เป็น `QUEUED` โดยไม่แก้แถวเดิม (ticket ที่ `PREPARING` อยู่แล้วยังเป็น `PREPARING`) ใช้กับ database production ที่มีข้อมูลได้ตอน service start
 
 หรือรันตรง ๆ: `cp .env.example .env` แล้ว `go run ./cmd/api` (ต้องมี Postgres ที่รัน migration แล้ว)
 `RABBITMQ_URL` ว่าง = ไม่ใช้ broker; API ยังทำงานและ event จะค้างใน outbox จนกว่าจะเชื่อม broker
@@ -68,7 +75,7 @@ go test ./...
 # integration test ของ repository (ต้องมี Postgres ว่าง ๆ; test จะ TRUNCATE ตาราง)
 docker run -d --rm --name fulfillment-it-pg -e POSTGRES_PASSWORD=test -p 55432:5432 postgres:16-alpine
 FULFILLMENT_TEST_DATABASE_URL=postgres://postgres:test@localhost:55432/postgres?sslmode=disable \
-  go test -tags integration ./internal/repository/...
+  go test -p 1 -tags integration ./internal/repository/... ./migrations/...
 docker stop fulfillment-it-pg
 ```
 

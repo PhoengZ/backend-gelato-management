@@ -59,6 +59,7 @@ valid trace context when one exists and must not invent an invalid placeholder.
 | --- | --- | --- | --- | --- |
 | `com.gelatoflow.order.placed.v1` | `order.placed` | Order | Fulfillment, Notification, Analytics | Fat sale snapshot |
 | `com.gelatoflow.order.cancelled.v1` | `order.cancelled` | Order | Fulfillment, Notification, Analytics | Thin follow-up |
+| `com.gelatoflow.fulfillment.order-queued.v1` | `fulfillment.order_queued` | Fulfillment | Notification | Ticket snapshot (queue number, customer) |
 | `com.gelatoflow.fulfillment.order-ready.v1` | `fulfillment.order_ready` | Fulfillment | Notification | Thin follow-up |
 | `com.gelatoflow.fulfillment.order-picked-up.v1` | `fulfillment.order_picked_up` | Fulfillment | None in MVP | Thin follow-up |
 | `com.gelatoflow.inventory.batch-low-stock.v1` | `inventory.low_stock` | Batch Inventory | Notification | Inventory snapshot |
@@ -121,11 +122,15 @@ See [checkout flow](architecture/order-checkout.md).
 
 ### 3.2 OrderCancelled
 
-The current producer payload contains order_id and the generic reason
-ORDER_CANCELLED. Order first durably claims CANCEL_PENDING, then releases
-Inventory before committing CANCELLED and the outbox atomically. The claim
-blocks checkout and survives restart; retries use identical release facts.
-The original customer/payment-failure cause is not persisted. A definitive stock
+The producer payload contains order_id, customer_id and a persisted reason:
+ORDER_CANCELLED (customer or payment failure, not distinguished),
+RESERVATION_EXPIRED (Order's expiry worker) or STORE_CANCELLED (staff/manager
+cancellation of a paid, still queued order). Order first durably claims
+CANCEL_PENDING (or STORE_CANCEL_PENDING), then releases or returns Inventory
+before committing CANCELLED and the outbox atomically. The claim blocks checkout
+and survives restart; retries use identical facts. Only a store cancellation
+adds was_paid true with total_amount_minor, currency, items and paid_at (the
+order.placed time), which Analytics uses to reverse the sale. A definitive stock
 confirmation rejection also enters this cancellation workflow; Payment handles
 any provider refund. A repeated cancellation does not create another domain event.
 

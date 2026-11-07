@@ -164,7 +164,16 @@ The service acts as an event subscriber and listens on topic exchanges for:
 Triggered when an order is completed. Supports CloudEvents 1.0 schema with `snake_case` or `camelCase` payload.
 
 ### 2. `order.cancelled` / `OrderCancelled` (Exchange: `order`)
-Triggered when an order is cancelled, rolling back analytics records for that order date.
+Triggered when an order is cancelled. An unpaid cancellation (no `was_paid`, or
+`false`) was never counted, so it is only recorded as processed. When
+`was_paid` is `true` (store cancellation of a paid order), the service subtracts
+exactly what `order.placed` added for that order (gross sales, one order, scoops
+and per-flavor portions/revenue; average order value and waste rate are
+recomputed) from the day bucket of `paid_at`, not of the cancellation time. The
+subtraction and the order ID are written to `reversed_order_ids` of that day in
+one document update, so a redelivery cannot subtract twice even if the
+processed-event marker was lost. A paid cancellation without `paid_at` is
+rejected permanently.
 
 ### 3. `inventory.waste` / `WasteRecorded` (Exchange: `inventory`)
 Triggered when inventory is recorded as waste (expired, damaged, quality).

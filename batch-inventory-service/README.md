@@ -12,7 +12,24 @@ application service and transactions. Catalog metadata is never replicated.
 | REST | GET /api/v1/inventory/batches and /batches/{id} | Staff or Manager JWT |
 | REST | POST /api/v1/inventory/batches | Manager JWT |
 | REST | POST /api/v1/inventory/batches/{id}/waste | Staff or Manager JWT |
-| gRPC | CheckAvailability, ReservePortions, ConfirmReservation, ReleaseReservation | Dedicated Order service token |
+| gRPC | CheckAvailability, ReservePortions, ConfirmReservation, ReleaseReservation, ReturnConfirmedReservation | Dedicated Order service token |
+
+## Returning a confirmed reservation
+
+`ReturnConfirmedReservation` serves store cancellation of a paid order. It moves
+a CONFIRMED reservation to the terminal RETURNED status in one transaction: each
+allocation's sold portions return to available (movement `RETURNED`), or become
+waste with reason `EXPIRED` (movement `WASTED`, waste record and
+`inventory.waste` outbox event) when the batch has already expired. A key replay
+returns the original response; a different key for an already RETURNED
+reservation is a no-op, so stock moves once. Any other state is
+FAILED_PRECONDITION, and an order ID mismatch is NOT_FOUND. Release and confirm
+of a RETURNED reservation are FAILED_PRECONDITION.
+
+Migration `007_reservation_return.sql` widens the reservation status and
+movement kind checks only; existing rows are untouched. Run the migrator before
+starting the new binary, whose readiness requires the 007 marker. Old binaries
+keep working on the migrated schema because they never write the new values.
 
 Contracts are in `../contracts/`. Batch creation calls Catalog's existing
 `GetFlavor` gRPC before beginning its PostgreSQL transaction. Missing/archived

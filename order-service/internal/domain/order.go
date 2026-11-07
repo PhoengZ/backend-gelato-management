@@ -16,6 +16,17 @@ const (
 	StatusReadyForPickup    OrderStatus = "READY_FOR_PICKUP"
 	StatusCompleted         OrderStatus = "COMPLETED"
 	StatusCancelled         OrderStatus = "CANCELLED"
+	// StatusStoreCancelPending is the durable intent to cancel a PAID order on
+	// behalf of the store and return its confirmed stock to Inventory.
+	StatusStoreCancelPending OrderStatus = "STORE_CANCEL_PENDING"
+)
+
+// Cancellation reasons persisted with the claim. An empty reason predates the
+// column and keeps the generic ORDER_CANCELLED code.
+const (
+	ReasonOrderCancelled     = "ORDER_CANCELLED"
+	ReasonReservationExpired = "RESERVATION_EXPIRED"
+	ReasonStoreCancelled     = "STORE_CANCELLED"
 )
 
 type Order struct {
@@ -33,6 +44,8 @@ type Order struct {
 	Currency              string      `gorm:"not null;size:3" json:"currency"`
 	CheckoutSessionID     string      `gorm:"size:255" json:"-"`
 	CheckoutURL           string      `gorm:"type:text" json:"-"`
+	CancellationReason    string      `gorm:"size:32;not null;default:''" json:"-"`
+	PaidAt                *time.Time  `json:"-"`
 	Items                 []OrderItem `gorm:"foreignKey:OrderID;constraint:OnDelete:CASCADE" json:"items"`
 	CreatedAt             time.Time   `json:"created_at"`
 	UpdatedAt             time.Time   `json:"updated_at"`

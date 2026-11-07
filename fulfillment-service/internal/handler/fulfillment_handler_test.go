@@ -102,7 +102,9 @@ func TestUpdateStatus(t *testing.T) {
 	}{
 		{"ok", &fakeStore{}, "/fulfillments/" + id + "/status", `{"status":"READY_FOR_PICKUP"}`, http.StatusOK, ""},
 		{"bad uuid", &fakeStore{}, "/fulfillments/nope/status", `{"status":"PICKED_UP"}`, http.StatusBadRequest, "VALIDATION_ERROR"},
-		{"status not updatable", &fakeStore{}, "/fulfillments/" + id + "/status", `{"status":"PREPARING"}`, http.StatusBadRequest, "VALIDATION_ERROR"},
+		{"start preparing", &fakeStore{}, "/fulfillments/" + id + "/status", `{"status":"PREPARING"}`, http.StatusOK, ""},
+		{"queued not updatable", &fakeStore{}, "/fulfillments/" + id + "/status", `{"status":"QUEUED"}`, http.StatusBadRequest, "VALIDATION_ERROR"},
+		{"cancelled not updatable", &fakeStore{}, "/fulfillments/" + id + "/status", `{"status":"CANCELLED"}`, http.StatusBadRequest, "VALIDATION_ERROR"},
 		{"not found", &fakeStore{updateErr: repository.ErrNotFound}, "/fulfillments/" + id + "/status", `{"status":"PICKED_UP"}`, http.StatusNotFound, "NOT_FOUND"},
 		{"invalid transition", &fakeStore{updateErr: repository.ErrInvalidTransition}, "/fulfillments/" + id + "/status", `{"status":"PICKED_UP"}`, http.StatusConflict, "INVALID_TRANSITION"},
 	}
@@ -123,11 +125,11 @@ func TestUpdateStatus(t *testing.T) {
 
 func TestListStatusFilter(t *testing.T) {
 	store := &fakeStore{}
-	rec := do(t, store, http.MethodGet, "/fulfillments?status=PREPARING,READY_FOR_PICKUP", "")
+	rec := do(t, store, http.MethodGet, "/fulfillments?status=QUEUED,PREPARING,READY_FOR_PICKUP", "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d", rec.Code)
 	}
-	if len(store.gotStatus) != 2 || store.gotStatus[1] != models.StatusReady {
+	if len(store.gotStatus) != 3 || store.gotStatus[0] != models.StatusQueued || store.gotStatus[2] != models.StatusReady {
 		t.Errorf("filter = %v", store.gotStatus)
 	}
 

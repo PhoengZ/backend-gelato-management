@@ -30,7 +30,9 @@ memory (identifiers only, never persisted, bounded and expiring). This is a
 deliberate, temporary exception to rule 2 below. An order placed before the
 process started, or older than `ORDER_OWNER_TTL`, produces no notification. Replace
 the map with a `GetOrderDetails` call, or add `customer_id` to the thin events,
-once Order Service owner agrees.
+once Order Service owner agrees. `fulfillment.order_queued`, which drives the
+customer's `order.confirmed` notification, always carries `customer_id`, so the
+confirmation does not depend on this map.
 
 ## Boundary rules
 

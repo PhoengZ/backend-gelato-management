@@ -3,7 +3,7 @@ Use Case 2: Kitchen Fulfillment & Order Pickup Integration Test.
 Verifies:
 1. Kitchen queue listing with STAFF / MANAGER roles
 2. RBAC enforcement (CUSTOMER role receives 403 Forbidden)
-3. Ticket lifecycle progression (PREPARING -> READY_FOR_PICKUP -> PICKED_UP)
+3. Ticket lifecycle progression (QUEUED -> PREPARING -> READY_FOR_PICKUP -> PICKED_UP)
 4. Invalid transition rejection (409 Conflict)
 5. Audit logging and ticket querying
 """
@@ -52,7 +52,7 @@ class TestUC02KitchenPickup:
         api_client: ApiClient,
         staff_actor: Actor,
     ):
-        """Fulfillment status progresses from PREPARING to READY_FOR_PICKUP to PICKED_UP."""
+        """Fulfillment status progresses from QUEUED through PREPARING and READY_FOR_PICKUP to PICKED_UP."""
         # 1. Look for an existing pending ticket in queue
         list_res = api_client.get("/api/v1/fulfillments", actor=staff_actor)
         assert list_res.status_code == 200
@@ -70,7 +70,17 @@ class TestUC02KitchenPickup:
         order_id = ticket["order_id"]
         current_status = ticket["status"]
 
-        # 2. Advance to READY_FOR_PICKUP if PREPARING
+        # 2. Start preparing if QUEUED, then advance to READY_FOR_PICKUP
+        if current_status == "QUEUED":
+            start_res = api_client.patch(
+                f"/api/v1/fulfillments/{order_id}/status",
+                actor=staff_actor,
+                json_data={"status": "PREPARING"},
+            )
+            assert start_res.status_code == 200
+            assert start_res.json()["status"] == "PREPARING"
+            current_status = "PREPARING"
+
         if current_status == "PREPARING":
             advance_res = api_client.patch(
                 f"/api/v1/fulfillments/{order_id}/status",

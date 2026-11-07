@@ -53,10 +53,19 @@ func newService(p Pusher, ttl time.Duration, now func() time.Time) *Service {
 	}
 }
 
-// OrderPlaced records who owns the order and sends the customer a confirmation.
-// The confirmation has no queue number: Fulfillment assigns it later and only
-// publishes it in order.ready.
+// OrderPlaced records who owns the order. It pushes nothing: the customer's
+// confirmation comes from fulfillment.order_queued, which carries the queue
+// number, so the customer gets exactly one confirmation.
 func (s *Service) OrderPlaced(env events.Envelope, d events.OrderPlacedData) {
+	if !s.seen.markNew(env.ID) {
+		return
+	}
+	s.owners.put(d.OrderID, d.CustomerID)
+}
+
+// OrderQueued confirms the order to the customer with the queue number that
+// Fulfillment assigned when it created the ticket.
+func (s *Service) OrderQueued(env events.Envelope, d events.OrderQueuedData) {
 	if !s.seen.markNew(env.ID) {
 		return
 	}
@@ -68,11 +77,10 @@ func (s *Service) OrderPlaced(env events.Envelope, d events.OrderPlacedData) {
 		Message:    "Your gelato order is confirmed.",
 		OccurredAt: env.Time.UTC(),
 		Data: map[string]any{
-			"order_id":           d.OrderID,
-			"pickup_at":          d.PickupAt.UTC(),
-			"total_amount_minor": d.TotalAmountMinor,
-			"currency":           d.Currency,
-			"items":              d.Items,
+			"order_id":       d.OrderID,
+			"queue_number":   d.QueueNumber,
+			"pickup_at":      d.PickupAt.UTC(),
+			"pickup_slot_id": d.PickupSlotID,
 		},
 	})
 }

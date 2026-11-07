@@ -30,9 +30,29 @@ func (m *MockRepository) FindByDate(ctx context.Context, date string) (*models.A
 	defer m.mu.RUnlock()
 	if record, exists := m.Records[date]; exists {
 		cp := *record
+		cp.FlavorStats = append([]models.FlavorStat(nil), record.FlavorStats...)
+		cp.ReversedOrderIDs = append([]string(nil), record.ReversedOrderIDs...)
 		return &cp, nil
 	}
 	return nil, nil
+}
+
+// SaveReversal mirrors the Mongo guard: the write applies only while the
+// stored day has not yet recorded this order's reversal.
+func (m *MockRepository) SaveReversal(ctx context.Context, analytics *models.Analytics, orderID string) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if existing, ok := m.Records[analytics.Date]; ok {
+		for _, id := range existing.ReversedOrderIDs {
+			if id == orderID {
+				return false, nil
+			}
+		}
+	}
+	cp := *analytics
+	cp.ReversedOrderIDs = append(append([]string(nil), analytics.ReversedOrderIDs...), orderID)
+	m.Records[analytics.Date] = &cp
+	return true, nil
 }
 
 func (m *MockRepository) Save(ctx context.Context, analytics *models.Analytics) error {

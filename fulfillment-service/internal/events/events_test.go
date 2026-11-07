@@ -42,6 +42,42 @@ func TestOrderReadyEnvelope(t *testing.T) {
 	}
 }
 
+func TestOrderQueuedEnvelope(t *testing.T) {
+	d := OrderQueuedData{
+		OrderID: uuid.New(), CustomerID: uuid.New(), QueueNumber: "03",
+		PickupSlotID: uuid.New(), PickupAt: time.Date(2026, 9, 2, 15, 0, 0, 0, time.FixedZone("ICT", 7*3600)),
+	}
+	env, err := NewOrderQueued(time.Date(2026, 9, 2, 14, 31, 0, 0, time.UTC), d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if RoutingKeyOrderQueued != "fulfillment.order_queued" {
+		t.Errorf("routing key = %s", RoutingKeyOrderQueued)
+	}
+	body, _ := json.Marshal(env)
+
+	var m map[string]any
+	if err := json.Unmarshal(body, &m); err != nil {
+		t.Fatal(err)
+	}
+	if m["type"] != "com.gelatoflow.fulfillment.order-queued.v1" || m["source"] != "/gelatoflow/fulfillment-service" {
+		t.Errorf("envelope = %v", m)
+	}
+	data := m["data"].(map[string]any)
+	want := map[string]string{
+		"order_id": d.OrderID.String(), "customer_id": d.CustomerID.String(), "queue_number": "03",
+		"pickup_slot_id": d.PickupSlotID.String(), "pickup_at": "2026-09-02T08:00:00Z",
+	}
+	if len(data) != len(want) {
+		t.Errorf("data has %d fields, want exactly %d: %v", len(data), len(want), data)
+	}
+	for k, v := range want {
+		if data[k] != v {
+			t.Errorf("data.%s = %v, want %s", k, data[k], v)
+		}
+	}
+}
+
 func TestParseRejectsInvalid(t *testing.T) {
 	for name, body := range map[string]string{
 		"bad json":      `{`,

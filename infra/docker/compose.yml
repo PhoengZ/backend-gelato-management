@@ -357,6 +357,7 @@ services:
       PAYMENT_GRPC_URL: payment-service:50057
       PAYMENT_REQUEST_TOKEN: ${PAYMENT_REQUEST_TOKEN:?PAYMENT_REQUEST_TOKEN is required}
       PAYMENT_REQUEST_TIMEOUT: 5s
+      ORDER_EXPIRY_INTERVAL: ${ORDER_EXPIRY_INTERVAL:-15s}
     networks:
       - gelato_network
     depends_on:

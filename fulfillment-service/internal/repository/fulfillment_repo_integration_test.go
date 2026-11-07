@@ -94,6 +94,204 @@ func TestIntegrationPlacedStoresCustomerAndSourceEvent(t *testing.T) {
 	}
 }
 
+type outboxRow struct {
+	key string
+	env events.Envelope
+}
+
+func outboxRows(t *testing.T, pool *pgxpool.Pool) []outboxRow {
+	t.Helper()
+	rows, err := pool.Query(context.Background(), `SELECT routing_key, payload FROM outbox ORDER BY created_at`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var out []outboxRow
+	for rows.Next() {
+		var r outboxRow
+		var payload []byte
+		if err := rows.Scan(&r.key, &payload); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(payload, &r.env); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, r)
+	}
+	return out
+}
+
+func TestIntegrationPlacedCreatesQueuedTicketAndOrderQueuedEvent(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	orderID, customerID, eventID := uuid.New(), uuid.New(), uuid.New()
+	pickupAt := time.Date(2026, 10, 13, 14, 5, 0, 0, time.UTC)
+
+	if created, err := repo.CreateFromOrderPlaced(ctx, eventID, placedData(t, orderID, customerID, pickupAt)); err != nil || !created {
+		t.Fatalf("created=%v err=%v", created, err)
+	}
+	f, err := repo.GetByOrderID(ctx, orderID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Status != models.StatusQueued {
+		t.Fatalf("status = %s, want QUEUED", f.Status)
+	}
+	history, err := repo.GetHistory(ctx, f.ID)
+	if err != nil || len(history) != 1 || history[0].NewStatus != models.StatusQueued {
+		t.Fatalf("history = %+v err=%v", history, err)
+	}
+
+	rows := outboxRows(t, pool)
+	if len(rows) != 1 {
+		t.Fatalf("outbox rows = %d, want 1", len(rows))
+	}
+	r := rows[0]
+	if r.key != events.RoutingKeyOrderQueued || r.env.Type != events.TypeOrderQueued || r.env.Source != events.Source {
+		t.Fatalf("outbox row = %s %+v", r.key, r.env)
+	}
+	var d events.OrderQueuedData
+	if err := json.Unmarshal(r.env.Data, &d); err != nil {
+		t.Fatal(err)
+	}
+	want := events.OrderQueuedData{OrderID: orderID, CustomerID: customerID, QueueNumber: "01", PickupSlotID: f.PickupSlotID, PickupAt: pickupAt}
+	if d != want {
+		t.Fatalf("data = %+v, want %+v", d, want)
+	}
+
+	// A duplicate delivery writes nothing more.
+	if again, err := repo.CreateFromOrderPlaced(ctx, eventID, placedData(t, orderID, customerID, pickupAt)); err != nil || again {
+		t.Fatalf("duplicate: created=%v err=%v", again, err)
+	}
+	if n := len(outboxRows(t, pool)); n != 1 {
+		t.Fatalf("outbox rows after duplicate = %d, want 1", n)
+	}
+}
+
+func TestIntegrationPlacedWithoutCustomerSkipsOrderQueuedEvent(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	orderID := uuid.New()
+
+	if created, err := repo.CreateFromOrderPlaced(ctx, uuid.New(), placedData(t, orderID, uuid.Nil, time.Now().Add(time.Hour))); err != nil || !created {
+		t.Fatalf("created=%v err=%v", created, err)
+	}
+	if _, err := repo.GetByOrderID(ctx, orderID); err != nil {
+		t.Fatalf("ticket must still be created: %v", err)
+	}
+	if n := len(outboxRows(t, pool)); n != 0 {
+		t.Fatalf("outbox rows = %d, want 0 (no customer to address)", n)
+	}
+}
+
+func TestIntegrationStatusLifecycleFromQueued(t *testing.T) {
+	repo, pool := newTestRepo(t)
+	ctx := context.Background()
+	orderID := uuid.New()
+	if _, err := repo.CreateFromOrderPlaced(ctx, uuid.New(), placedData(t, orderID, uuid.New(), time.Now().Add(time.Hour))); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := repo.UpdateStatus(ctx, orderID, models.StatusReady); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("QUEUED -> READY_FOR_PICKUP err = %v, want ErrInvalidTransition", err)
+	}
+	f, err := repo.UpdateStatus(ctx, orderID, models.StatusPreparing)
+	if err != nil || f.Status != models.StatusPreparing {
+		t.Fatalf("QUEUED -> PREPARING: %+v err=%v", f, err)
+	}
+	if _, err := repo.UpdateStatus(ctx, orderID, models.StatusPreparing); err != nil {
+		t.Fatalf("same-status PATCH must be a no-op: %v", err)
+	}
+	// PREPARING publishes nothing; only the order_queued row from creation exists.
+	if rows := outboxRows(t, pool); len(rows) != 1 || rows[0].key != events.RoutingKeyOrderQueued {
+		t.Fatalf("outbox after PREPARING = %+v", rows)
+	}
+	if _, err := repo.UpdateStatus(ctx, orderID, models.StatusReady); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpdateStatus(ctx, orderID, models.StatusPickedUp); err != nil {
+		t.Fatal(err)
+	}
+	rows := outboxRows(t, pool)
+	if len(rows) != 3 || rows[1].key != events.RoutingKeyOrderReady || rows[2].key != events.RoutingKeyOrderPickedUp {
+		t.Fatalf("outbox keys = %+v", rows)
+	}
+	history, _ := repo.GetHistory(ctx, f.ID)
+	if len(history) != 4 || *history[1].OldStatus != models.StatusQueued || history[1].NewStatus != models.StatusPreparing {
+		t.Fatalf("history = %+v", history)
+	}
+}
+
+func TestIntegrationCancelQueuedAndPreparing(t *testing.T) {
+	repo, _ := newTestRepo(t)
+	ctx := context.Background()
+	queued, preparing, ready := uuid.New(), uuid.New(), uuid.New()
+	for _, o := range []uuid.UUID{queued, preparing, ready} {
+		if _, err := repo.CreateFromOrderPlaced(ctx, uuid.New(), placedData(t, o, uuid.New(), time.Now().Add(time.Hour))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := repo.UpdateStatus(ctx, preparing, models.StatusPreparing); err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range []models.Status{models.StatusPreparing, models.StatusReady} {
+		if _, err := repo.UpdateStatus(ctx, ready, s); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for name, tc := range map[string]struct {
+		order uuid.UUID
+		want  bool
+		after models.Status
+	}{
+		"queued":    {queued, true, models.StatusCancelled},
+		"preparing": {preparing, true, models.StatusCancelled},
+		"ready":     {ready, false, models.StatusReady},
+	} {
+		ok, err := repo.CancelByOrder(ctx, uuid.New(), tc.order)
+		if err != nil || ok != tc.want {
+			t.Errorf("%s: cancelled=%v err=%v, want %v", name, ok, err, tc.want)
+		}
+		f, _ := repo.GetByOrderID(ctx, tc.order)
+		if f.Status != tc.after {
+			t.Errorf("%s: status = %s, want %s", name, f.Status, tc.after)
+		}
+		if tc.want {
+			history, _ := repo.GetHistory(ctx, f.ID)
+			last := history[len(history)-1]
+			if last.NewStatus != models.StatusCancelled || last.OldStatus == nil {
+				t.Errorf("%s: last history = %+v", name, last)
+			}
+		}
+	}
+
+	queuedTicket, _ := repo.GetByOrderID(ctx, queued)
+	history, _ := repo.GetHistory(ctx, queuedTicket.ID)
+	if *history[len(history)-1].OldStatus != models.StatusQueued {
+		t.Errorf("queued cancel old_status = %s, want QUEUED", *history[len(history)-1].OldStatus)
+	}
+}
+
+func TestIntegrationSlotCapacityCountsQueued(t *testing.T) {
+	repo, _ := newTestRepo(t)
+	ctx := context.Background()
+	at := time.Date(2026, 10, 13, 14, 5, 0, 0, time.UTC)
+	a, b := uuid.New(), uuid.New()
+	for _, o := range []uuid.UUID{a, b} {
+		if _, err := repo.CreateFromOrderPlaced(ctx, uuid.New(), placedData(t, o, uuid.New(), at)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := repo.UpdateStatus(ctx, b, models.StatusPreparing); err != nil {
+		t.Fatal(err)
+	}
+	n, err := repo.GetSlotCapacity(ctx, at)
+	if err != nil || n != 2 {
+		t.Fatalf("active count = %d err=%v, want 2 (QUEUED + PREPARING)", n, err)
+	}
+}
+
 func TestIntegrationCancelBeforePlacedLeavesNoTicket(t *testing.T) {
 	repo, pool := newTestRepo(t)
 	ctx := context.Background()
@@ -139,7 +337,7 @@ func TestIntegrationListFilterAndOrder(t *testing.T) {
 
 	from, to := day, day.Add(24*time.Hour)
 	items, err := repo.List(ctx, models.ListFilter{
-		Statuses:   []models.Status{models.StatusPreparing},
+		Statuses:   []models.Status{models.StatusQueued},
 		PickupFrom: &from,
 		PickupTo:   &to,
 	})

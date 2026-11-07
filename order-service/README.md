@@ -22,9 +22,32 @@ versioned Inventory gRPC contract, and never accesses Inventory storage.
    while customer cancellation uses `POST /api/v1/orders/{id}/cancel`. Both release
    stock only after durably claiming `CANCEL_PENDING`, then commit cancellation
    and its `order.cancelled` outbox event. Inventory receives the persisted release
-   key and constant reason `ORDER_CANCELLED` from either endpoint.
+   key and reason `ORDER_CANCELLED` from either endpoint.
+5. An expiry worker (every `ORDER_EXPIRY_INTERVAL`, default `15s`, 1s–1h) pages
+   `PENDING_PAYMENT` orders whose `reservation_expires_at` has passed and claims
+   each under its row lock as `CANCEL_PENDING` with the persisted reason
+   `RESERVATION_EXPIRED`. An order a payment already claimed
+   (`PAYMENT_CONFIRMING`) is skipped. It then follows the same release and
+   `order.cancelled` path; a late payment for that order is rejected with 410.
+6. Staff or a manager calls `POST /api/v1/orders/{id}/store-cancel` to cancel a
+   `PAID` order before preparation. The handler requires `X-User-Role` `STAFF` or
+   `MANAGER` and a bearer token; Order reads the Fulfillment ticket with that
+   token and requires status `QUEUED` (missing or other status: 409
+   `ORDER_PREPARATION_STARTED`; Fulfillment unreachable: 503; token rejected by
+   Fulfillment: 403). Order claims `STORE_CANCEL_PENDING`, calls Inventory
+   `ReturnConfirmedReservation` with key `uuidv5(URL, "<order_id>/return")`, then
+   commits `CANCELLED` and an `order.cancelled` event with reason
+   `STORE_CANCELLED`, `was_paid: true`, the paid total, items and `paid_at`.
+   Order never calls Payment for this; refunds of store-cancelled orders are a
+   manual store process, and a duplicate payment callback returns 409, not 410.
+   A ticket that starts preparing between the check and the claim is still
+   cancelled by Fulfillment's `order.cancelled` consumer.
 
-Both intents use the existing `status` column; no columns or tables are added.
+All intents use the `status` column. AutoMigrate adds two columns to existing
+databases: `cancellation_reason` (NOT NULL, default `''`, so existing rows keep
+the generic `ORDER_CANCELLED`) and nullable `paid_at`, written with `PAID` and
+equal to the `order.placed` event time. Store cancellation of an order paid
+before `paid_at` existed reports its `updated_at` as `paid_at`.
 The first claim from `PENDING_PAYMENT` wins atomically. Checkout binding and the
 opposing workflow are blocked once either claim commits. A lifecycle worker
 resumes unfinished intents after restart, using the same Inventory keys and facts.
@@ -39,8 +62,9 @@ Inventory `FAILED_PRECONDITION`, including expired stock, moves it to
 and Payment must reconcile/refund the charge. Other unresolved dependency errors
 retain the intent and are logged for operator attention.
 
-The release request and cancellation event use the generic `ORDER_CANCELLED`
-reason; the original caller's cause is not persisted. Before rolling this out
+The release request and cancellation event use the persisted cancellation
+reason: `RESERVATION_EXPIRED` for expiry, otherwise the generic `ORDER_CANCELLED`
+(customer and payment-failure causes are not distinguished). Before rolling this out
 over an older deployment, reconcile any `PENDING_PAYMENT` rows whose Inventory
 release/confirmation already succeeded. Old release keys may have been used
 with `CUSTOMER_REQUEST` or `PAYMENT_FAILED`; replaying them with the new reason
@@ -99,7 +123,10 @@ confirms. Outbox delivery is at-least-once; consumers deduplicate CloudEvents by
 ## Integration requirements
 
 - The Gateway must verify JWT signature, issuer, audience and expiry, strip
-  client-supplied identity headers, then set `X-User-ID` from the verified `sub`.
+  client-supplied identity headers, then set `X-User-ID` from the verified `sub`
+  and `X-User-Role` from the verified `role` (both already implemented by
+  `api-gateway/internal/middleware`). Store cancellation trusts that role header;
+  Fulfillment additionally re-verifies the forwarded JWT.
   Direct public access to Order must be blocked until that Gateway behavior is
   deployed. Catalog receives the original Bearer token when present.
 - Configure Catalog gRPC and Inventory gRPC for isolated local networking. The

@@ -15,8 +15,9 @@ import (
 )
 
 // stream holds the connection open and writes one SSE frame per notification.
-// If Last-Event-ID is present in headers or query parameters, missed notifications
-// are replayed from the ring buffer before streaming live events.
+// Before streaming live events it replays from the ring buffer: notifications
+// after Last-Event-ID (header or query parameter) when one is given, or every
+// still-buffered notification for the user and role when none is given.
 func (h *Handler) stream(w http.ResponseWriter, r *http.Request) {
 	claims, err := h.authenticate(r)
 	if err != nil {
@@ -60,17 +61,26 @@ func (h *Handler) stream(w http.ResponseWriter, r *http.Request) {
 		lastEventIDStr = r.URL.Query().Get("lastEventId")
 	}
 
-	if lastEventIDStr != "" && h.buffer != nil {
-		if lastEventID, err := uuid.Parse(strings.TrimSpace(lastEventIDStr)); err == nil {
-			missed := h.buffer.ReplayFor(claims.UserID(), claims.Role, lastEventID)
-			for _, n := range missed {
-				if err := writeFrame(w, n); err != nil {
-					log.Printf("[sse] replay write failed, closing: %v", err)
-					return
-				}
-				flusher.Flush()
-				replayed[n.ID] = true
+	// Without an id the client is opening a fresh stream (first load or a page
+	// refresh), so it gets every still-buffered notification for the user and
+	// role. With an id it gets only what came after it. Clients dedupe by id.
+	replay := lastEventIDStr == ""
+	lastEventID := uuid.Nil
+	if !replay {
+		if id, err := uuid.Parse(strings.TrimSpace(lastEventIDStr)); err == nil {
+			lastEventID, replay = id, true
+		}
+	}
+
+	if replay && h.buffer != nil {
+		missed := h.buffer.ReplayFor(claims.UserID(), claims.Role, lastEventID)
+		for _, n := range missed {
+			if err := writeFrame(w, n); err != nil {
+				log.Printf("[sse] replay write failed, closing: %v", err)
+				return
 			}
+			flusher.Flush()
+			replayed[n.ID] = true
 		}
 	}
 

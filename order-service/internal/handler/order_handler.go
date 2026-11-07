@@ -118,6 +118,26 @@ func (h *OrderHandler) CancelOrder(c *fiber.Ctx) error {
 	return c.SendStatus(fiber.StatusNoContent)
 }
 
+// StoreCancelOrder lets staff or a manager cancel a paid order before
+// preparation. Identity and role come from the Gateway-injected X-User-ID and
+// X-User-Role headers, which the Gateway strips from client requests and sets
+// only from a verified JWT. The caller's bearer is forwarded to Fulfillment,
+// which re-verifies the role for its own read.
+func (h *OrderHandler) StoreCancelOrder(c *fiber.Ctx) error {
+	bearer := strings.TrimSpace(c.Get(fiber.HeaderAuthorization))
+	if _, ok := authenticatedUserID(c); !ok || !strings.HasPrefix(strings.ToLower(bearer), "bearer ") {
+		return writeError(c, &service.AppError{Code: "UNAUTHENTICATED", Message: "authenticated staff identity is required", HTTPStatus: 401})
+	}
+	if role := c.Get("X-User-Role"); role != "STAFF" && role != "MANAGER" {
+		return writeError(c, &service.AppError{Code: "FORBIDDEN", Message: "staff or manager role is required", HTTPStatus: 403})
+	}
+	ctx := client.WithUserAuthorization(c.UserContext(), bearer)
+	if err := h.svc.StoreCancelOrder(ctx, c.Params("id")); err != nil {
+		return writeError(c, err)
+	}
+	return c.SendStatus(fiber.StatusNoContent)
+}
+
 func authenticatedUserID(c *fiber.Ctx) (string, bool) {
 	id, err := uuid.Parse(c.Get("X-User-ID"))
 	if err != nil {

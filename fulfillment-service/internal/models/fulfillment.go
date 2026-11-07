@@ -7,10 +7,12 @@ import (
 )
 
 // Status is the fulfillment ticket lifecycle:
-// PREPARING -> READY_FOR_PICKUP -> PICKED_UP, or PREPARING -> CANCELLED.
+// QUEUED -> PREPARING -> READY_FOR_PICKUP -> PICKED_UP, and QUEUED or
+// PREPARING -> CANCELLED when the order is cancelled.
 type Status string
 
 const (
+	StatusQueued    Status = "QUEUED"
 	StatusPreparing Status = "PREPARING"
 	StatusReady     Status = "READY_FOR_PICKUP"
 	StatusPickedUp  Status = "PICKED_UP"
@@ -19,7 +21,7 @@ const (
 
 func (s Status) IsValid() bool {
 	switch s {
-	case StatusPreparing, StatusReady, StatusPickedUp, StatusCancelled:
+	case StatusQueued, StatusPreparing, StatusReady, StatusPickedUp, StatusCancelled:
 		return true
 	}
 	return false
@@ -27,12 +29,20 @@ func (s Status) IsValid() bool {
 
 // IsUpdatable reports whether staff may request this status through the API.
 func (s Status) IsUpdatable() bool {
-	return s == StatusReady || s == StatusPickedUp
+	return s == StatusPreparing || s == StatusReady || s == StatusPickedUp
+}
+
+// IsCancellable reports whether order.cancelled may still cancel a ticket in
+// this status (the kitchen has not finished it yet).
+func (s Status) IsCancellable() bool {
+	return s == StatusQueued || s == StatusPreparing
 }
 
 // CanTransition reports whether a ticket may move from one status to another.
 func CanTransition(from, to Status) bool {
 	switch {
+	case from == StatusQueued && to == StatusPreparing:
+		return true
 	case from == StatusPreparing && to == StatusReady:
 		return true
 	case from == StatusReady && to == StatusPickedUp:

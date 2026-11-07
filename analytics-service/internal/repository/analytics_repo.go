@@ -16,6 +16,10 @@ const AnalyticsCollectionName = "daily_aggregates"
 type AnalyticsRepository interface {
 	FindByDate(ctx context.Context, date string) (*models.Analytics, error)
 	Save(ctx context.Context, analytics *models.Analytics) error
+	// SaveReversal writes a day whose totals already subtract orderID's sale and
+	// records orderID in the same single-document update. It reports false and
+	// writes nothing when that order's reversal was already recorded.
+	SaveReversal(ctx context.Context, analytics *models.Analytics, orderID string) (bool, error)
 	FindByDateRange(ctx context.Context, startDate, endDate string) ([]models.Analytics, error)
 	EnsureIndexes(ctx context.Context) error
 }
@@ -75,6 +79,34 @@ func (r *analyticsRepository) Save(ctx context.Context, analytics *models.Analyt
 
 	_, err := r.collection.UpdateOne(ctx, filter, update, opts)
 	return err
+}
+
+func (r *analyticsRepository) SaveReversal(ctx context.Context, analytics *models.Analytics, orderID string) (bool, error) {
+	filter := bson.M{"date": analytics.Date, "reversed_order_ids": bson.M{"$ne": orderID}}
+	update := bson.M{
+		"$set": bson.M{
+			"date":         analytics.Date,
+			"financials":   analytics.Financials,
+			"operations":   analytics.Operations,
+			"waste_stats":  analytics.WasteStats,
+			"flavor_stats": analytics.FlavorStats,
+		},
+		"$addToSet": bson.M{"reversed_order_ids": orderID},
+	}
+	result, err := r.collection.UpdateOne(ctx, filter, update, options.Update().SetUpsert(true))
+	if mongo.IsDuplicateKeyError(err) {
+		// The day exists but did not match: either it already records this
+		// order, or another writer created it concurrently (retry later).
+		var existing models.Analytics
+		if findErr := r.collection.FindOne(ctx, bson.M{"date": analytics.Date, "reversed_order_ids": orderID}).Decode(&existing); findErr == nil {
+			return false, nil
+		}
+		return false, err
+	}
+	if err != nil {
+		return false, err
+	}
+	return result.ModifiedCount > 0 || result.UpsertedCount > 0, nil
 }
 
 func (r *analyticsRepository) FindByDateRange(ctx context.Context, startDate, endDate string) ([]models.Analytics, error) {

@@ -28,6 +28,7 @@ changes.
 | Order payment gRPC methods (proposed; Order server pending) | Order Service | Legacy PaymentIntent adapter |
 | `order.placed` event | Order Service | Fulfillment, Notification, Analytics |
 | `order.cancelled` event | Order Service | Fulfillment, Notification, Analytics |
+| `fulfillment.order_queued` event | Fulfillment Service | Notification Service |
 | `fulfillment.order_ready` event | Fulfillment Service | Notification Service |
 | `fulfillment.order_picked_up` event | Fulfillment Service | None in MVP |
 | `inventory.waste` event | Batch Inventory Service | Analytics Service |
@@ -93,6 +94,9 @@ reservation transition. V1 allows one reservation per order ID; a different key
 for that order is ALREADY_EXISTS. Confirm/Release require a matching order ID.
 TTL defaults to 10 minutes, capped by the earliest allocated batch expiry.
 Late confirmation is FAILED_PRECONDITION; release after expiry returns EXPIRED.
+ReturnConfirmedReservation moves a CONFIRMED reservation to the terminal RETURNED
+status for store cancellation of a paid order, returning sold portions to
+available (or waste for an expired batch). Other states are FAILED_PRECONDITION.
 Availability exceeding the proto int32 capacity is OUT_OF_RANGE.
 
 ## Order-orchestrated checkout
@@ -112,11 +116,19 @@ and frontend owners and end-to-end verification.
 
 Order REST v1.2 adds `CANCEL_PENDING` and `PAYMENT_CONFIRMING` status values.
 Order durably claims either workflow before contacting Inventory, blocks checkout
-for both, and resumes unfinished work in a lifecycle worker. No database columns
-are added. Release requests and cancellation events use the constant reason
-`ORDER_CANCELLED`, so different cancellation entry points replay identical facts.
+for both, and resumes unfinished work in a lifecycle worker. Release requests
+and cancellation events use `ORDER_CANCELLED` for customer and payment-failure
+cancellations, so those entry points replay identical facts.
 Review the enum additions and generic cancellation reason with affected owners;
-reconcile unfinished operations from older deployments before rollout. See the
+reconcile unfinished operations from older deployments before rollout.
+
+Order REST v1.3 adds STORE_CANCEL_PENDING and POST
+/api/v1/orders/{order_id}/store-cancel for STAFF or MANAGER. Order persists the
+cancellation reason: order.cancelled uses RESERVATION_EXPIRED for unpaid orders
+its expiry worker cancels and STORE_CANCELLED, with the optional paid facts
+(was_paid, total_amount_minor, currency, items, paid_at), for store
+cancellations. Refunds of store-cancelled orders are manual; Order does not call
+Payment for them. See the
 checkout architecture for recovery and payment-refund responsibilities.
 
 ## Legacy PaymentIntent integration
@@ -142,9 +154,14 @@ without an inbound request trace. Domain payload fields use `snake_case`, UUID
 resource IDs, RFC 3339 UTC timestamps, and integer minor-unit money.
 
 `OrderPlaced` is published to the `order` topic exchange with routing key
-`order.placed`. `OrderReady` and `OrderPickedUp` are published to the
-`fulfillment` topic exchange with routing keys `fulfillment.order_ready` and
-`fulfillment.order_picked_up`. `WasteRecorded` is published to the `inventory` topic exchange
+`order.placed`. `OrderQueued`, `OrderReady` and `OrderPickedUp` are published to the
+`fulfillment` topic exchange with routing keys `fulfillment.order_queued`,
+`fulfillment.order_ready` and `fulfillment.order_picked_up`. Fulfillment writes
+`OrderQueued` to its outbox in the same transaction that creates the ticket
+(status `QUEUED`) and assigns the queue number; it carries `customer_id`,
+`queue_number`, `pickup_slot_id` and `pickup_at` so Notification can confirm the
+order with its queue number. It is not published for an `order.placed` that has
+no `customer_id`. `WasteRecorded` is published to the `inventory` topic exchange
 with routing key `inventory.waste`.
 
 The Analytics implementation currently accepts the canonical waste routing key

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: GelatoFlow Order Service API
-  version: 1.2.0
+  version: 1.3.0
   description: Customer order creation and lifecycle API. Requests pass through the authenticated API Gateway.
 servers:
   - url: /
@@ -131,6 +131,61 @@ paths:
           $ref: '#/components/responses/DependencyUnavailable'
         '504':
           $ref: '#/components/responses/DependencyTimeout'
+  /api/v1/orders/{order_id}/store-cancel:
+    parameters:
+      - name: order_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      operationId: storeCancelOrder
+      summary: Cancel a paid order before preparation and return its stock
+      description: >-
+        Staff or a manager cancels a PAID order whose Fulfillment ticket is still
+        QUEUED. Order reads GET /api/v1/fulfillments/{order_id} with the caller's
+        bearer token; a missing ticket or any status other than QUEUED returns 409
+        ORDER_PREPARATION_STARTED, and an unreachable Fulfillment returns 503
+        FULFILLMENT_UNAVAILABLE. Order then durably claims STORE_CANCEL_PENDING,
+        calls Inventory ReturnConfirmedReservation and commits CANCELLED with an
+        order.cancelled event (reason STORE_CANCELLED, was_paid true). A failed
+        Inventory call or local commit leaves the intent for background recovery,
+        which does not re-check Fulfillment. Repeating the request for a
+        store-cancelled order returns 204. The card payment is not refunded
+        automatically; refunds of store-cancelled orders are a manual store process.
+        The Gateway sets X-User-ID and X-User-Role from the verified JWT and strips
+        client-supplied identity headers.
+      security:
+        - bearerAuth: []
+      x-required-roles: [STAFF, MANAGER]
+      responses:
+        '204':
+          description: Order cancelled and its stock returned to Inventory
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: The caller is not staff or a manager
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: >-
+            ORDER_PREPARATION_STARTED when the ticket is missing or no longer
+            QUEUED; ORDER_STATE_CONFLICT when the order is not PAID.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          $ref: '#/components/responses/DependencyUnavailable'
+        '504':
+          $ref: '#/components/responses/DependencyTimeout'
   /api/v1/orders/{order_id}/payment-succeeded:
     parameters:
       - name: order_id
@@ -148,8 +203,11 @@ paths:
         stock. Ambiguous failures retain the intent for recovery and return 409 or
         503; Payment retries them and must not refund. A definitive Inventory
         FAILED_PRECONDITION moves the order to CANCEL_PENDING and returns 410, as
-        does a callback for a CANCEL_PENDING or CANCELLED order. 410 means the order
-        can never be paid, and Payment must refund the charge.
+        does a callback for an unpaid CANCEL_PENDING or CANCELLED order, including
+        one the expiry worker cancelled. 410 means the order can never be paid, and
+        Payment must refund the charge. A callback for a STORE_CANCEL_PENDING or
+        store-cancelled order returns 409, because that order was paid and its
+        refund is handled manually.
       security:
         - paymentServiceToken: []
       responses:
@@ -330,11 +388,13 @@ components:
           format: date-time
         status:
           type: string
-          enum: [PENDING_PAYMENT, CANCEL_PENDING, PAYMENT_CONFIRMING, PAID, PREPARING, READY_FOR_PICKUP, COMPLETED, CANCELLED]
+          enum: [PENDING_PAYMENT, CANCEL_PENDING, PAYMENT_CONFIRMING, STORE_CANCEL_PENDING, PAID, PREPARING, READY_FOR_PICKUP, COMPLETED, CANCELLED]
           description: >-
-            CANCEL_PENDING and PAYMENT_CONFIRMING are durable workflow intents.
-            Neither permits checkout navigation. Poll GET Order while either is
-            present; background recovery completes the Inventory transition.
+            CANCEL_PENDING, PAYMENT_CONFIRMING and STORE_CANCEL_PENDING are durable
+            workflow intents. None permits checkout navigation. Poll GET Order while
+            one is present; background recovery completes the Inventory transition.
+            An unpaid order still PENDING_PAYMENT after reservation_expires_at is
+            cancelled automatically by Order's expiry worker.
         reservation_expires_at:
           type: string
           format: date-time

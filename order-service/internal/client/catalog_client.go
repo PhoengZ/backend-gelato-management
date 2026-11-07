@@ -23,6 +23,12 @@ func WithUserAuthorization(ctx context.Context, bearer string) context.Context {
 	return context.WithValue(ctx, authorizationKey{}, bearer)
 }
 
+// UserAuthorization returns the caller's bearer header stored by WithUserAuthorization.
+func UserAuthorization(ctx context.Context) (string, bool) {
+	bearer, ok := ctx.Value(authorizationKey{}).(string)
+	return bearer, ok && bearer != ""
+}
+
 type catalogClient struct {
 	conn  *grpc.ClientConn
 	inner catalogv1.CatalogServiceClient

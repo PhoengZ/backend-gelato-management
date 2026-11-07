@@ -11,6 +11,10 @@ service InventoryService {
   rpc ReservePortions(ReservePortionsRequest) returns (ReservePortionsResponse);
   rpc ConfirmReservation(ConfirmReservationRequest) returns (ConfirmReservationResponse);
   rpc ReleaseReservation(ReleaseReservationRequest) returns (ReleaseReservationResponse);
+  // ReturnConfirmedReservation moves a CONFIRMED reservation to RETURNED when a
+  // paid order is cancelled by the store. Each allocation's sold portions become
+  // available again, or wasted when the batch has expired.
+  rpc ReturnConfirmedReservation(ReturnConfirmedReservationRequest) returns (ReturnConfirmedReservationResponse);
 }
 
 message PortionRequest {
@@ -53,6 +57,8 @@ enum ReservationStatus {
   RESERVATION_STATUS_CONFIRMED = 2;
   RESERVATION_STATUS_RELEASED = 3;
   RESERVATION_STATUS_EXPIRED = 4;
+  // Terminal: confirmed (sold) portions were returned to stock or waste.
+  RESERVATION_STATUS_RETURNED = 5;
 }
 
 message Reservation {
@@ -86,5 +92,16 @@ message ConfirmReservationResponse {
 }
 
 message ReleaseReservationResponse {
+  Reservation reservation = 1;
+}
+
+message ReturnConfirmedReservationRequest {
+  string reservation_id = 1;
+  string order_id = 2;
+  string idempotency_key = 3;
+  string reason = 4;
+}
+
+message ReturnConfirmedReservationResponse {
   Reservation reservation = 1;
 }

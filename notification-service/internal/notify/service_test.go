@@ -40,31 +40,60 @@ func env() events.Envelope {
 	return events.Envelope{ID: uuid.New(), Time: time.Date(2026, 9, 2, 14, 55, 0, 0, time.UTC)}
 }
 
-func TestOrderReadyRoutesToCustomerLearnedFromOrderPlaced(t *testing.T) {
+func TestOrderPlacedRecordsOwnerWithoutPushing(t *testing.T) {
 	p := &fakePusher{}
 	s := New(p, time.Hour)
 	orderID, customerID := uuid.New(), uuid.New()
 
 	s.OrderPlaced(env(), events.OrderPlacedData{OrderID: orderID, CustomerID: customerID, TotalAmountMinor: 1250, Currency: "THB"})
-	s.OrderReady(env(), events.OrderReadyData{OrderID: orderID, QueueNumber: "01"})
+	if len(p.users) != 0 {
+		t.Fatalf("order.placed pushed %d notifications, want 0 (confirmation comes from fulfillment.order_queued)", len(p.users))
+	}
 
-	if len(p.users) != 2 {
-		t.Fatalf("pushes = %d, want 2 (confirmation + ready)", len(p.users))
+	s.OrderReady(env(), events.OrderReadyData{OrderID: orderID, QueueNumber: "01"})
+	if len(p.users) != 1 || p.users[0].user != customerID || p.users[0].n.Type != TypeOrderReady {
+		t.Fatalf("pushes = %+v, want order.ready to the owner learned from order.placed", p.users)
 	}
-	if p.users[0].n.Type != TypeOrderConfirmed || p.users[1].n.Type != TypeOrderReady {
-		t.Errorf("types = %s, %s", p.users[0].n.Type, p.users[1].n.Type)
-	}
-	for _, push := range p.users {
-		if push.user != customerID {
-			t.Errorf("%s sent to %s, want %s", push.n.Type, push.user, customerID)
-		}
-	}
-	data := p.users[1].n.Data.(map[string]any)
-	if data["queue_number"] != "01" {
+	if data := p.users[0].n.Data.(map[string]any); data["queue_number"] != "01" {
 		t.Errorf("ready data = %v", data)
 	}
-	if _, has := p.users[0].n.Data.(map[string]any)["queue_number"]; has {
-		t.Error("confirmation must not invent a queue number")
+}
+
+func TestOrderQueuedConfirmsWithQueueNumber(t *testing.T) {
+	p := &fakePusher{}
+	s := New(p, time.Hour)
+	e := env()
+	d := events.OrderQueuedData{
+		OrderID: uuid.New(), CustomerID: uuid.New(), QueueNumber: "03", PickupSlotID: uuid.New(),
+		PickupAt: time.Date(2026, 9, 2, 22, 0, 0, 0, time.FixedZone("ICT", 7*3600)),
+	}
+
+	s.OrderQueued(e, d)
+	s.OrderQueued(e, d) // at-least-once redelivery of the same event id
+
+	if len(p.users) != 1 {
+		t.Fatalf("pushes = %d, want 1", len(p.users))
+	}
+	push := p.users[0]
+	if push.user != d.CustomerID {
+		t.Errorf("sent to %s, want %s", push.user, d.CustomerID)
+	}
+	n := push.n
+	if n.ID != e.ID || n.Type != TypeOrderConfirmed || n.Message != "Your gelato order is confirmed." || !n.OccurredAt.Equal(e.Time) {
+		t.Errorf("notification = %+v", n)
+	}
+	data := n.Data.(map[string]any)
+	want := map[string]any{
+		"order_id": d.OrderID, "queue_number": "03", "pickup_slot_id": d.PickupSlotID,
+		"pickup_at": time.Date(2026, 9, 2, 15, 0, 0, 0, time.UTC),
+	}
+	if len(data) != len(want) {
+		t.Errorf("data = %v, want exactly %v", data, want)
+	}
+	for k, v := range want {
+		if data[k] != v {
+			t.Errorf("data.%s = %v, want %v", k, data[k], v)
+		}
 	}
 }
 
@@ -107,8 +136,8 @@ func TestOwnerExpiresAfterTTL(t *testing.T) {
 	now = now.Add(2 * time.Hour)
 	s.OrderReady(env(), events.OrderReadyData{OrderID: orderID})
 
-	if len(p.users) != 1 {
-		t.Errorf("pushes = %d, want only the confirmation", len(p.users))
+	if len(p.users) != 0 {
+		t.Errorf("pushes = %d, want 0 once the owner has expired", len(p.users))
 	}
 }
 
@@ -116,10 +145,10 @@ func TestDuplicateEventIsNotPushedTwice(t *testing.T) {
 	p := &fakePusher{}
 	s := New(p, time.Hour)
 	e := env()
-	d := events.OrderPlacedData{OrderID: uuid.New(), CustomerID: uuid.New()}
+	d := events.OrderReadyData{OrderID: uuid.New(), CustomerID: uuid.New(), QueueNumber: "02"}
 
-	s.OrderPlaced(e, d)
-	s.OrderPlaced(e, d) // at-least-once redelivery of the same event id
+	s.OrderReady(e, d)
+	s.OrderReady(e, d) // at-least-once redelivery of the same event id
 
 	if len(p.users) != 1 {
 		t.Errorf("pushes = %d, want 1", len(p.users))

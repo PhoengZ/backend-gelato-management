@@ -81,16 +81,17 @@ class TestFulfillmentNFR:
         assert res.status_code == 200, res.text
         items = res.json()["items"]
         assert len(items) == 1
-        assert items[0]["new_status"] == "PREPARING"
+        assert items[0]["new_status"] == "QUEUED"
         assert items[0]["source_event_id"] == event_id
 
-        ready = api_client.patch(
-            f"/api/v1/fulfillments/{order_id}/status", actor=staff_actor, json_data={"status": "READY_FOR_PICKUP"}
-        )
-        assert ready.status_code == 200, ready.text
+        for status in ("PREPARING", "READY_FOR_PICKUP"):
+            res = api_client.patch(
+                f"/api/v1/fulfillments/{order_id}/status", actor=staff_actor, json_data={"status": status}
+            )
+            assert res.status_code == 200, res.text
 
         items = api_client.get(path, actor=manager_actor).json()["items"]
-        assert [i["new_status"] for i in items] == ["PREPARING", "READY_FOR_PICKUP"]
+        assert [i["new_status"] for i in items] == ["QUEUED", "PREPARING", "READY_FOR_PICKUP"]
         assert items[1]["actor_id"] == staff_actor.user_id
         assert "source_event_id" not in items[1]
 

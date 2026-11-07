@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -223,12 +224,13 @@ func (r *FulfillmentRepository) CreateFromOrderPlaced(ctx context.Context, event
 		return false, err
 	}
 
+	queueNumber := fmt.Sprintf("%02d", seq)
 	var fulfillmentID uuid.UUID
 	err = tx.QueryRow(ctx, `
 		INSERT INTO fulfillments (order_id, customer_id, pickup_slot_id, queue_seq, queue_number, pickup_at, status, items)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		RETURNING id`,
-		d.OrderID, customerID, slotID, seq, fmt.Sprintf("%02d", seq), d.PickupAt.UTC(), models.StatusPreparing, itemsJSON).Scan(&fulfillmentID)
+		d.OrderID, customerID, slotID, seq, queueNumber, d.PickupAt.UTC(), models.StatusQueued, itemsJSON).Scan(&fulfillmentID)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
@@ -242,16 +244,46 @@ func (r *FulfillmentRepository) CreateFromOrderPlaced(ctx context.Context, event
 	_, err = tx.Exec(ctx, `
 		INSERT INTO fulfillment_status_history (id, fulfillment_id, old_status, new_status, actor_id, source_event_id, created_at)
 		VALUES (gen_random_uuid(), $1, NULL, $2, NULL, $3, now())`,
-		fulfillmentID, models.StatusPreparing, eventID)
+		fulfillmentID, models.StatusQueued, eventID)
 	if err != nil {
+		return false, err
+	}
+
+	// fulfillment.order_queued requires customer_id. order.placed always carries
+	// it today; an order without one has nobody to notify, so the ticket is still
+	// created but no event is written.
+	if customerID == nil {
+		log.Printf("[repository] order %s has no customer_id; ticket created without fulfillment.order_queued", d.OrderID)
+		return true, tx.Commit(ctx)
+	}
+	env, err := events.NewOrderQueued(time.Now(), events.OrderQueuedData{
+		OrderID: d.OrderID, CustomerID: *customerID, QueueNumber: queueNumber,
+		PickupSlotID: slotID, PickupAt: d.PickupAt,
+	})
+	if err != nil {
+		return false, err
+	}
+	if err := insertOutbox(ctx, tx, events.RoutingKeyOrderQueued, env); err != nil {
 		return false, err
 	}
 
 	return true, tx.Commit(ctx)
 }
 
-// CancelByOrder cancels a ticket that is still PREPARING. Tickets that are
-// already ready or picked up are left unchanged. For an order with no ticket
+// insertOutbox stores an event for the relay inside the caller's transaction.
+func insertOutbox(ctx context.Context, tx pgx.Tx, routingKey string, env events.Envelope) error {
+	payload, err := json.Marshal(env)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx,
+		`INSERT INTO outbox (id, routing_key, payload) VALUES ($1, $2, $3)`,
+		env.ID, routingKey, payload)
+	return err
+}
+
+// CancelByOrder cancels a ticket that is still QUEUED or PREPARING. Tickets that
+// are already ready or picked up are left unchanged. For an order with no ticket
 // yet, a tombstone stops a late order.placed from creating one.
 func (r *FulfillmentRepository) CancelByOrder(ctx context.Context, eventID, orderID uuid.UUID) (cancelled bool, err error) {
 	tx, err := r.db.Begin(ctx)
@@ -268,11 +300,17 @@ func (r *FulfillmentRepository) CancelByOrder(ctx context.Context, eventID, orde
 	}
 
 	var fID uuid.UUID
+	var oldStatus models.Status
 	err = tx.QueryRow(ctx, `
-		UPDATE fulfillments SET status = $2, updated_at = now()
-		WHERE order_id = $1 AND status = $3
-		RETURNING id`,
-		orderID, models.StatusCancelled, models.StatusPreparing).Scan(&fID)
+		WITH old AS (
+			SELECT id, status FROM fulfillments
+			WHERE order_id = $1 AND status = ANY($3::text[])
+			FOR UPDATE
+		)
+		UPDATE fulfillments f SET status = $2, updated_at = now()
+		FROM old WHERE f.id = old.id
+		RETURNING f.id, old.status`,
+		orderID, models.StatusCancelled, []string{string(models.StatusQueued), string(models.StatusPreparing)}).Scan(&fID, &oldStatus)
 	if errors.Is(err, pgx.ErrNoRows) {
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO cancelled_orders (order_id, event_id)
@@ -289,7 +327,7 @@ func (r *FulfillmentRepository) CancelByOrder(ctx context.Context, eventID, orde
 	_, err = tx.Exec(ctx, `
 		INSERT INTO fulfillment_status_history (id, fulfillment_id, old_status, new_status, actor_id, source_event_id, created_at)
 		VALUES (gen_random_uuid(), $1, $2, $3, NULL, $4, now())`,
-		fID, models.StatusPreparing, models.StatusCancelled, eventID)
+		fID, oldStatus, models.StatusCancelled, eventID)
 	if err != nil {
 		return false, err
 	}
@@ -318,8 +356,9 @@ func (r *FulfillmentRepository) PurgeExpired(ctx context.Context, now time.Time)
 	return total, nil
 }
 
-// UpdateStatus moves a ticket to READY_FOR_PICKUP or PICKED_UP and writes the
-// matching event to the outbox in the same transaction. Repeating the current
+// UpdateStatus moves a ticket to PREPARING, READY_FOR_PICKUP or PICKED_UP. The
+// last two write the matching event to the outbox in the same transaction;
+// PREPARING publishes nothing. Repeating the current
 // status returns the ticket without publishing again.
 func (r *FulfillmentRepository) UpdateStatus(ctx context.Context, orderID uuid.UUID, to models.Status) (models.Fulfillment, error) {
 	tx, err := r.db.Begin(ctx)
@@ -365,6 +404,12 @@ func (r *FulfillmentRepository) UpdateStatus(ctx context.Context, orderID uuid.U
 	var env events.Envelope
 	var routingKey string
 	switch to {
+	case models.StatusPreparing:
+		// Kitchen started the order; no event is defined for this step.
+		if err := tx.Commit(ctx); err != nil {
+			return models.Fulfillment{}, err
+		}
+		return updated, nil
 	case models.StatusReady:
 		routingKey = events.RoutingKeyOrderReady
 		env, err = events.NewOrderReady(now, events.OrderReadyData{
@@ -379,14 +424,7 @@ func (r *FulfillmentRepository) UpdateStatus(ctx context.Context, orderID uuid.U
 	if err != nil {
 		return models.Fulfillment{}, err
 	}
-
-	payload, err := json.Marshal(env)
-	if err != nil {
-		return models.Fulfillment{}, err
-	}
-	if _, err := tx.Exec(ctx,
-		`INSERT INTO outbox (id, routing_key, payload) VALUES ($1, $2, $3)`,
-		env.ID, routingKey, payload); err != nil {
+	if err := insertOutbox(ctx, tx, routingKey, env); err != nil {
 		return models.Fulfillment{}, err
 	}
 
@@ -396,8 +434,8 @@ func (r *FulfillmentRepository) UpdateStatus(ctx context.Context, orderID uuid.U
 	return updated, nil
 }
 
-// GetSlotCapacity returns the active ticket count (PREPARING or READY_FOR_PICKUP)
-// for the 15-minute slot window corresponding to slotTime.
+// GetSlotCapacity returns the active ticket count (QUEUED, PREPARING or
+// READY_FOR_PICKUP) for the 15-minute slot window corresponding to slotTime.
 func (r *FulfillmentRepository) GetSlotCapacity(ctx context.Context, slotTime time.Time) (int, error) {
 	startsAt := slotTime.UTC().Truncate(SlotLength)
 	slotID := uuid.NewSHA1(slotNamespace, []byte(startsAt.Format(time.RFC3339)))
@@ -406,8 +444,8 @@ func (r *FulfillmentRepository) GetSlotCapacity(ctx context.Context, slotTime ti
 	err := r.db.QueryRow(ctx, `
 		SELECT COUNT(*)
 		FROM fulfillments
-		WHERE pickup_slot_id = $1 AND status IN ($2, $3)`,
-		slotID, models.StatusPreparing, models.StatusReady).Scan(&count)
+		WHERE pickup_slot_id = $1 AND status IN ($2, $3, $4)`,
+		slotID, models.StatusQueued, models.StatusPreparing, models.StatusReady).Scan(&count)
 	if err != nil {
 		return 0, err
 	}

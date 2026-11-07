@@ -29,13 +29,14 @@ const (
 // bindings maps each exchange to the routing keys Notification consumes.
 var bindings = map[string][]string{
 	OrderExchange:       {events.RoutingKeyOrderPlaced, events.RoutingKeyOrderCancel},
-	FulfillmentExchange: {events.RoutingKeyOrderReady},
+	FulfillmentExchange: {events.RoutingKeyOrderQueued, events.RoutingKeyOrderReady},
 	InventoryExchange:   {events.RoutingKeyBatchLowStock, events.RoutingKeyBatchExpiring},
 }
 
 // Events is what the consumer needs to apply incoming events.
 type Events interface {
 	OrderPlaced(env events.Envelope, d events.OrderPlacedData)
+	OrderQueued(env events.Envelope, d events.OrderQueuedData)
 	OrderReady(env events.Envelope, d events.OrderReadyData)
 	OrderCancelled(env events.Envelope, d events.OrderCancelledData)
 	BatchLowStock(env events.Envelope, d events.BatchLowStockData)
@@ -61,6 +62,16 @@ func Dispatch(h Events, body []byte) (retry bool, err error) {
 			return false, errors.New("order.placed payload missing order_id or customer_id")
 		}
 		h.OrderPlaced(env, d)
+
+	case events.TypeOrderQueued:
+		var d events.OrderQueuedData
+		if err := json.Unmarshal(env.Data, &d); err != nil {
+			return false, err
+		}
+		if d.OrderID == uuid.Nil || d.CustomerID == uuid.Nil {
+			return false, errors.New("order-queued payload missing order_id or customer_id")
+		}
+		h.OrderQueued(env, d)
 
 	case events.TypeOrderReady:
 		var d events.OrderReadyData

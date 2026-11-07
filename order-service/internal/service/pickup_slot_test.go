@@ -7,6 +7,7 @@ import (
 	"time"
 
 	paymentv1 "order-service/gen/payment/v1"
+	"order-service/internal/client"
 
 	"github.com/google/uuid"
 )
@@ -20,6 +21,10 @@ type mockFulfillmentClient struct {
 func (m *mockFulfillmentClient) CheckSlotCapacity(_ context.Context, _ time.Time) (int, error) {
 	m.calls++
 	return m.capacity, m.err
+}
+
+func (m *mockFulfillmentClient) GetTicket(context.Context, string) (*client.Ticket, error) {
+	return nil, errors.New("not used by slot tests")
 }
 
 func TestPickupSlotAlignment(t *testing.T) {

@@ -27,6 +27,24 @@ func TestPaymentConfiguration(t *testing.T) {
 	}
 }
 
+func TestOrderExpiryIntervalDefaultsAndOverrides(t *testing.T) {
+	setCheckoutEnv(t)
+	cfg, err := Load()
+	if err != nil || cfg.OrderExpiryInterval != 15*time.Second {
+		t.Fatalf("default expiry interval = %v, %v", cfg.OrderExpiryInterval, err)
+	}
+	t.Setenv("ORDER_EXPIRY_INTERVAL", "1m")
+	if cfg, err = Load(); err != nil || cfg.OrderExpiryInterval != time.Minute {
+		t.Fatalf("override = %v, %v", cfg.OrderExpiryInterval, err)
+	}
+	for _, invalid := range []string{"0s", "-1s", "soon", "500ms", "2h"} {
+		t.Setenv("ORDER_EXPIRY_INTERVAL", invalid)
+		if _, err := Load(); err == nil {
+			t.Fatalf("invalid ORDER_EXPIRY_INTERVAL %q accepted", invalid)
+		}
+	}
+}
+
 func TestRejectsInvalidPaymentConfiguration(t *testing.T) {
 	for _, input := range []struct{ key, value string }{
 		{"PAYMENT_GRPC_URL", ""}, {"PAYMENT_GRPC_URL", "localhost:99999"},
