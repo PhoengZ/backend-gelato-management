@@ -59,7 +59,7 @@ func (r *lifecycleRepo) BeginTransition(_ context.Context, id string, target dom
 func (r *lifecycleRepo) PendingTransitions(_ context.Context, afterID string, _ int) ([]domain.Order, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.order != nil && r.order.ID > afterID && (r.order.Status == "CANCEL_PENDING" || r.order.Status == "PAYMENT_CONFIRMING") {
+	if r.order != nil && r.order.ID > afterID && (r.order.Status == "CANCEL_PENDING" || r.order.Status == "PAYMENT_CONFIRMING" || r.order.Status == "STORE_CANCEL_PENDING") {
 		return []domain.Order{*r.order}, nil
 	}
 	return nil, nil
@@ -76,11 +76,26 @@ func (r *lifecycleRepo) RejectPaymentConfirmation(_ context.Context, id string) 
 }
 
 func (r *lifecycleRepo) MarkCancelled(_ context.Context, id string, event *domain.OutboxEvent) error {
-	return r.finish(id, "CANCEL_PENDING", domain.StatusCancelled, event)
+	from := domain.OrderStatus("CANCEL_PENDING")
+	r.mu.Lock()
+	if r.order != nil && r.order.Status == domain.StatusStoreCancelPending {
+		from = domain.StatusStoreCancelPending
+	}
+	r.mu.Unlock()
+	return r.finish(id, from, domain.StatusCancelled, event)
 }
 
-func (r *lifecycleRepo) MarkPaidWithOutbox(_ context.Context, id string, event *domain.OutboxEvent) error {
-	return r.finish(id, "PAYMENT_CONFIRMING", domain.StatusPaid, event)
+func (r *lifecycleRepo) MarkPaidWithOutbox(_ context.Context, id string, paidAt time.Time, event *domain.OutboxEvent) error {
+	err := r.finish(id, "PAYMENT_CONFIRMING", domain.StatusPaid, event)
+	if err == nil {
+		r.mu.Lock()
+		if r.order.PaidAt == nil {
+			paid := paidAt.UTC()
+			r.order.PaidAt = &paid
+		}
+		r.mu.Unlock()
+	}
+	return err
 }
 
 func (r *lifecycleRepo) finish(id string, from, to domain.OrderStatus, event *domain.OutboxEvent) error {

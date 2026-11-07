@@ -25,6 +25,7 @@ type Config struct {
 	PaymentRequestToken   string
 	PaymentRequestTimeout time.Duration
 	FulfillmentURL        string
+	OrderExpiryInterval   time.Duration
 }
 
 func Load() (Config, error) {
@@ -68,6 +69,11 @@ func Load() (Config, error) {
 	cfg.PaymentRequestTimeout, timeoutErr = time.ParseDuration(value("PAYMENT_REQUEST_TIMEOUT", "5s"))
 	if timeoutErr != nil || cfg.PaymentRequestTimeout <= 0 || cfg.PaymentRequestTimeout > 30*time.Second {
 		return Config{}, errors.New("PAYMENT_REQUEST_TIMEOUT must be positive and at most 30s")
+	}
+	var expiryErr error
+	cfg.OrderExpiryInterval, expiryErr = time.ParseDuration(value("ORDER_EXPIRY_INTERVAL", "15s"))
+	if expiryErr != nil || cfg.OrderExpiryInterval < time.Second || cfg.OrderExpiryInterval > time.Hour {
+		return Config{}, errors.New("ORDER_EXPIRY_INTERVAL must be a duration between 1s and 1h")
 	}
 	return cfg, nil
 }
