@@ -59,6 +59,7 @@ valid trace context when one exists and must not invent an invalid placeholder.
 | --- | --- | --- | --- | --- |
 | `com.gelatoflow.order.placed.v1` | `order.placed` | Order | Fulfillment, Notification, Analytics | Fat sale snapshot |
 | `com.gelatoflow.order.cancelled.v1` | `order.cancelled` | Order | Fulfillment, Notification, Analytics | Thin follow-up |
+| `com.gelatoflow.fulfillment.order-queued.v1` | `fulfillment.order_queued` | Fulfillment | Notification | Ticket snapshot (queue number, customer) |
 | `com.gelatoflow.fulfillment.order-ready.v1` | `fulfillment.order_ready` | Fulfillment | Notification | Thin follow-up |
 | `com.gelatoflow.fulfillment.order-picked-up.v1` | `fulfillment.order_picked_up` | Fulfillment | None in MVP | Thin follow-up |
 | `com.gelatoflow.inventory.batch-low-stock.v1` | `inventory.low_stock` | Batch Inventory | Notification | Inventory snapshot |

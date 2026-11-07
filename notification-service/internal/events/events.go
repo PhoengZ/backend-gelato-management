@@ -17,12 +17,14 @@ const (
 
 	TypeOrderPlaced    = "com.gelatoflow.order.placed.v1"
 	TypeOrderCancelled = "com.gelatoflow.order.cancelled.v1"
+	TypeOrderQueued    = "com.gelatoflow.fulfillment.order-queued.v1"
 	TypeOrderReady     = "com.gelatoflow.fulfillment.order-ready.v1"
 	TypeBatchLowStock  = "com.gelatoflow.inventory.batch-low-stock.v1"
 	TypeBatchExpiring  = "com.gelatoflow.inventory.batch-expiring.v1"
 
 	RoutingKeyOrderPlaced   = "order.placed"
 	RoutingKeyOrderCancel   = "order.cancelled"
+	RoutingKeyOrderQueued   = "fulfillment.order_queued"
 	RoutingKeyOrderReady    = "fulfillment.order_ready"
 	RoutingKeyBatchLowStock = "inventory.low_stock"
 	RoutingKeyBatchExpiring = "inventory.expiring"
@@ -47,8 +49,18 @@ type OrderItem struct {
 	Portions   int       `json:"portions"`
 }
 
-// OrderPlacedData is the order.placed payload. It is the only event that
-// carries customer_id, so it is also how Notification learns who owns an order.
+// OrderQueuedData is the fulfillment.order_queued payload, published when
+// Fulfillment creates the ticket and assigns its queue number.
+type OrderQueuedData struct {
+	OrderID      uuid.UUID `json:"order_id"`
+	CustomerID   uuid.UUID `json:"customer_id"`
+	QueueNumber  string    `json:"queue_number"`
+	PickupSlotID uuid.UUID `json:"pickup_slot_id"`
+	PickupAt     time.Time `json:"pickup_at"`
+}
+
+// OrderPlacedData is the order.placed payload. Notification uses it to learn who
+// owns an order, for later events that may lack customer_id.
 type OrderPlacedData struct {
 	OrderID          uuid.UUID   `json:"order_id"`
 	CustomerID       uuid.UUID   `json:"customer_id"`

@@ -11,6 +11,7 @@ import (
 
 type recorder struct {
 	placed    []events.OrderPlacedData
+	queued    []events.OrderQueuedData
 	ready     []events.OrderReadyData
 	cancelled []events.OrderCancelledData
 	lowStock  []events.BatchLowStockData
@@ -19,6 +20,9 @@ type recorder struct {
 
 func (r *recorder) OrderPlaced(_ events.Envelope, d events.OrderPlacedData) {
 	r.placed = append(r.placed, d)
+}
+func (r *recorder) OrderQueued(_ events.Envelope, d events.OrderQueuedData) {
+	r.queued = append(r.queued, d)
 }
 func (r *recorder) OrderReady(_ events.Envelope, d events.OrderReadyData) {
 	r.ready = append(r.ready, d)
@@ -74,6 +78,21 @@ func TestDispatchOrderReadyContractExample(t *testing.T) {
 	}
 }
 
+func TestDispatchOrderQueuedContractExample(t *testing.T) {
+	r := &recorder{}
+	if retry, err := Dispatch(r, contractExample(t, "fulfillment-order-queued.v1.json")); err != nil || retry {
+		t.Fatalf("Dispatch() = retry %v, err %v", retry, err)
+	}
+	if len(r.queued) != 1 {
+		t.Fatalf("queued events = %d, want 1", len(r.queued))
+	}
+	got := r.queued[0]
+	if got.QueueNumber != "01" || got.CustomerID.String() != "f47ac10b-58cc-4372-a567-0e02b2c3d479" ||
+		got.PickupSlotID.String() != "b4a2f6c8-2f0e-4c3a-8a57-6f0f6f3a9d21" || got.PickupAt.IsZero() {
+		t.Errorf("unexpected payload: %+v", got)
+	}
+}
+
 func TestDispatchOrderCancelledContractExample(t *testing.T) {
 	r := &recorder{}
 	if retry, err := Dispatch(r, contractExample(t, "order-cancelled.v1.json")); err != nil || retry {
@@ -126,6 +145,8 @@ func TestDispatchDropsMalformedMessages(t *testing.T) {
 		"missing id":         []byte(`{"specversion":"1.0","type":"t","data":{}}`),
 		"placed no customer": envelope(events.TypeOrderPlaced, `{"order_id":"8d29d6cf-bd4d-48ca-9e4f-dcd8ec54e594"}`),
 		"ready no order":     envelope(events.TypeOrderReady, `{"queue_number":"01"}`),
+		"queued no customer": envelope(events.TypeOrderQueued, `{"order_id":"8d29d6cf-bd4d-48ca-9e4f-dcd8ec54e594","queue_number":"01"}`),
+		"queued no order":    envelope(events.TypeOrderQueued, `{"customer_id":"8d29d6cf-bd4d-48ca-9e4f-dcd8ec54e594","queue_number":"01"}`),
 		"cancelled no order": envelope(events.TypeOrderCancelled, `{"reason":"x"}`),
 		"bad payload type":   envelope(events.TypeOrderReady, `{"order_id":42}`),
 	}
@@ -139,7 +160,7 @@ func TestDispatchDropsMalformedMessages(t *testing.T) {
 			if retry {
 				t.Error("malformed messages must not be retried")
 			}
-			if len(r.placed)+len(r.ready)+len(r.cancelled) != 0 {
+			if len(r.placed)+len(r.queued)+len(r.ready)+len(r.cancelled) != 0 {
 				t.Error("malformed message must not reach the handler")
 			}
 		})
@@ -309,5 +330,32 @@ func TestSetupTopologyDLXAndDLQ(t *testing.T) {
 	}
 	if dlxArg, exists := consumerArgs["x-dead-letter-exchange"]; !exists || dlxArg != DeadLetterExchange {
 		t.Errorf("expected x-dead-letter-exchange=%s in %s arguments, got %v", DeadLetterExchange, ConsumerQueue, dlxArg)
+	}
+}
+
+func TestSetupTopologyBindsConsumedRoutingKeys(t *testing.T) {
+	mockCh := newMockChannel()
+	if err := SetupTopology(mockCh); err != nil {
+		t.Fatalf("SetupTopology failed: %v", err)
+	}
+	want := []mockBinding{
+		{queue: ConsumerQueue, exchange: OrderExchange, key: "order.placed"},
+		{queue: ConsumerQueue, exchange: OrderExchange, key: "order.cancelled"},
+		{queue: ConsumerQueue, exchange: FulfillmentExchange, key: "fulfillment.order_queued"},
+		{queue: ConsumerQueue, exchange: FulfillmentExchange, key: "fulfillment.order_ready"},
+		{queue: ConsumerQueue, exchange: InventoryExchange, key: "inventory.low_stock"},
+		{queue: ConsumerQueue, exchange: InventoryExchange, key: "inventory.expiring"},
+	}
+	for _, w := range want {
+		found := false
+		for _, b := range mockCh.bindings {
+			if b == w {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("missing binding %s -> %s with key %s", w.queue, w.exchange, w.key)
+		}
 	}
 }

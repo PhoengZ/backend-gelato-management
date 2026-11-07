@@ -5,7 +5,8 @@ info:
   description: >-
     Real-time in-app notifications over Server-Sent Events. Notification is
     stateless: it consumes `order.placed`, `order.cancelled`,
-    `fulfillment.order_ready`, `inventory.low_stock` and `inventory.expiring`
+    `fulfillment.order_queued`, `fulfillment.order_ready`, `inventory.low_stock`
+    and `inventory.expiring`
     from RabbitMQ and pushes a frame to the connected users it applies to. It
     owns no business data and exposes no operation for other services to call.
 
@@ -105,8 +106,10 @@ components:
     NotificationType:
       type: string
       description: >-
-        `order.confirmed` (from `order.placed`), `order.ready` (from
+        `order.confirmed` (from `fulfillment.order_queued`, sent once per order
+        and carrying the queue number), `order.ready` (from
         `fulfillment.order_ready`) and `order.cancelled` go to the order owner.
+        `order.placed` only records the order owner and pushes nothing.
         `inventory.low_stock` and `inventory.expiring` go to STAFF and MANAGER.
       enum:
         - order.confirmed
@@ -116,40 +119,28 @@ components:
         - inventory.expiring
     OrderConfirmedData:
       type: object
+      additionalProperties: false
       description: >-
-        No queue number: Fulfillment assigns it later and it is delivered in
-        `order.ready`.
-      required: [order_id, pickup_at, total_amount_minor, currency, items]
+        Sent when Fulfillment has queued the order. The queue number is scoped
+        to the pickup slot.
+      required: [order_id, queue_number, pickup_at, pickup_slot_id]
       properties:
         order_id:
           type: string
           format: uuid
+        queue_number:
+          type: string
+          description: Display string allocated by Fulfillment, scoped to the pickup slot.
+          example: '01'
         pickup_at:
           type: string
           format: date-time
-        total_amount_minor:
-          type: integer
-          format: int64
-          description: Total in minor units, for example satang.
-        currency:
+        pickup_slot_id:
           type: string
-          example: THB
-        items:
-          type: array
-          items:
-            type: object
-            required: [flavor_id, flavor_name, portions]
-            properties:
-              flavor_id:
-                type: string
-                format: uuid
-              flavor_name:
-                type: string
-              portions:
-                type: integer
-                minimum: 1
+          format: uuid
     OrderReadyData:
       type: object
+      additionalProperties: false
       required: [order_id, queue_number, pickup_slot_id]
       properties:
         order_id:

@@ -12,7 +12,7 @@ Service นี้ **stateless**: ไม่มี database ไม่ถือข�
 | ส่วน | สถานะ |
 | --- | --- |
 | `GET /api/v1/notifications/stream` (SSE, Bearer JWT, keep-alive) | ทำแล้ว (unit/httptest ผ่าน) |
-| Consumer `order.placed`, `order.cancelled`, `fulfillment.order_ready`, `inventory.low_stock`, `inventory.expiring` + dedupe ด้วย event `id` (in-memory) | ทำแล้ว (unit test ผ่าน) |
+| Consumer `order.placed`, `order.cancelled`, `fulfillment.order_queued`, `fulfillment.order_ready`, `inventory.low_stock`, `inventory.expiring` + dedupe ด้วย event `id` (in-memory) | ทำแล้ว (unit test ผ่าน) |
 | RabbitMQ user `notification_service` + permission ใน `infra/rabbitmq/definitions.json`, compose, `.env.example` | เพิ่มแล้ว |
 | Reconnect RabbitMQ อัตโนมัติ (backoff 1s → 30s) และ `/health` ตอบ 503 เมื่อ broker หลุด | ทำแล้ว (unit test ผ่าน) |
 | ปิด SSE stream เมื่อ JWT หมดอายุ (ส่ง `: token-expired` แล้วปิด) | ทำแล้ว (unit test ผ่าน) |
@@ -27,7 +27,8 @@ Service นี้ **stateless**: ไม่มี database ไม่ถือข�
 
 | Event | Notification `type` | ผู้รับ |
 | --- | --- | --- |
-| `order.placed` | `order.confirmed` | ลูกค้าเจ้าของ order (`customer_id`) |
+| `order.placed` | — (จำเจ้าของ order อย่างเดียว ไม่ push) | — |
+| `fulfillment.order_queued` | `order.confirmed` (มี `queue_number`, `pickup_at`, `pickup_slot_id`) | ลูกค้าเจ้าของ order (`customer_id` ใน event) |
 | `fulfillment.order_ready` | `order.ready` (มี `queue_number`) | ลูกค้าเจ้าของ order |
 | `order.cancelled` | `order.cancelled` (มี `reason`) | ลูกค้าเจ้าของ order |
 | `inventory.low_stock` | `inventory.low_stock` | STAFF, MANAGER |
@@ -35,7 +36,7 @@ Service นี้ **stateless**: ไม่มี database ไม่ถือข�
 
 ## ข้อจำกัดที่ต้องรู้
 
-- **ไม่มี queue number ใน confirmation**: `order.placed` ไม่มี queue number (Fulfillment เป็นคนออกให้ภายหลัง) ลูกค้าจะเห็นเลขคิวใน notification `order.ready` แทน
+- **Confirmation มาจาก Fulfillment**: `order.confirmed` ส่งครั้งเดียวต่อ order ตอนได้ `fulfillment.order_queued` (Fulfillment สร้าง ticket และออกเลขคิวแล้ว) `order.placed` ไม่ push อะไร จึงไม่มี confirmation ซ้ำ ถ้า Fulfillment ล่มหรือ event ยังค้างใน outbox ลูกค้าจะได้ confirmation ช้าลงตามนั้น
 - **การหาว่า order เป็นของใคร**: `order.ready` และ `order.cancelled` ไม่มี `customer_id` service จึงจำ `order_id → customer_id` จาก `order.placed` ไว้ใน memory (หมดอายุตาม `ORDER_OWNER_TTL`, จำกัดจำนวน) ถ้า service restart หรือ order เก่ากว่า TTL จะไม่ส่ง popup (log `no known owner`) ทางแก้ถาวรคือเรียก Order gRPC `GetOrderDetails` หรือเพิ่ม `customer_id` ใน thin event — ต้องคุยกับเจ้าของ Order
 - **ส่งแบบ best effort**: ถ้า reconnect ภายใน 5 นาทีพร้อม `Last-Event-ID` จะได้ notification ที่พลาดไป แต่ถ้านานกว่านั้นหรือ service restart จะหาย ฝั่ง frontend ควรยัง poll `GET /api/v1/orders/{id}/status` เป็น fallback
 - **รันได้ 1 replica เท่านั้น**: ทุก instance ใช้ `notification_queue` ร่วมกัน (competing consumers) event หนึ่งจะไปถึงแค่ instance เดียว และ order owner map กับ replay buffer อยู่ใน memory ของแต่ละ process ถ้าจะ scale ต้องเปลี่ยนเป็น queue ต่อ instance ก่อน
@@ -84,7 +85,7 @@ docker compose --env-file infra/.env \
 
 หรือรันตรง ๆ: `cp .env.example .env` แล้ว `go run ./cmd/api`
 
-Topology ถูกประกาศโดย service ตอนเริ่ม: exchange `order`, `fulfillment`, `inventory` (topic, durable) และ queue `notification_queue` bind กับ `order.placed`, `order.cancelled`, `fulfillment.order_ready`, `inventory.low_stock`, `inventory.expiring`
+Topology ถูกประกาศโดย service ตอนเริ่ม: exchange `order`, `fulfillment`, `inventory` (topic, durable) และ queue `notification_queue` bind กับ `order.placed`, `order.cancelled`, `fulfillment.order_queued`, `fulfillment.order_ready`, `inventory.low_stock`, `inventory.expiring`
 
 ## ทดลองกับ broker
 
