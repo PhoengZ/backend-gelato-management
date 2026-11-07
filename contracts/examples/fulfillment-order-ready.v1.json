@@ -8,6 +8,7 @@
   "data": {
     "order_id": "8d29d6cf-bd4d-48ca-9e4f-dcd8ec54e594",
     "queue_number": "01",
-    "pickup_slot_id": "b4a2f6c8-2f0e-4c3a-8a57-6f0f6f3a9d21"
+    "pickup_slot_id": "b4a2f6c8-2f0e-4c3a-8a57-6f0f6f3a9d21",
+    "customer_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479"
   }
 }

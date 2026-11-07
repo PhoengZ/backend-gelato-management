@@ -146,7 +146,7 @@ services:
       PORT: "8080"
       MONGO_URI: mongodb://${MONGO_INITDB_ROOT_USERNAME}:${MONGO_INITDB_ROOT_PASSWORD}@analytics-mongodb:27017/analytics?authSource=admin
       RABBITMQ_URL: amqp://analytics_service:${ANALYTICS_RABBITMQ_PASSWORD:-password123}@rabbitmq:5672/gelato_vhost
-      # Order Service does not expose gRPC yet; cancellation enrichment fails until it does.
+      # Order Service does not expose gRPC yet, so enrichment reads through this address fail.
       ORDER_SERVICE_GRPC_ADDR: order-service:50054
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       JWT_ISSUER: ${JWT_ISSUER:-gelatoflow-auth}
@@ -352,6 +352,8 @@ services:
       ORDER_SERVICE_TOKEN: ${ORDER_SERVICE_TOKEN:?ORDER_SERVICE_TOKEN is required}
       CATALOG_GRPC_URL: catalog-service:50052
       PAYMENT_SERVICE_TOKEN: ${PAYMENT_SERVICE_TOKEN:?PAYMENT_SERVICE_TOKEN is required}
+      PICKUP_TIMEZONE: ${PICKUP_TIMEZONE:-Asia/Bangkok}
+      MAX_PORTIONS_PER_ORDER: ${MAX_PORTIONS_PER_ORDER:-20}
       PAYMENT_GRPC_URL: payment-service:50057
       PAYMENT_REQUEST_TOKEN: ${PAYMENT_REQUEST_TOKEN:?PAYMENT_REQUEST_TOKEN is required}
       PAYMENT_REQUEST_TIMEOUT: 5s

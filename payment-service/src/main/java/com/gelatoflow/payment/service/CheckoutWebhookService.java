@@ -1,6 +1,5 @@
 package com.gelatoflow.payment.service;
 
-import com.gelatoflow.payment.client.order.OrderCallbackPort;
 import com.gelatoflow.payment.client.stripe.CheckoutWebhookPort;
 import com.gelatoflow.payment.config.OrderCallbackProperties;
 import com.gelatoflow.payment.config.PaymentProperties;
@@ -25,13 +24,13 @@ public class CheckoutWebhookService {
           "checkout.session.async_payment_failed",
           "checkout.session.expired");
   private final CheckoutWebhookPort stripe;
-  private final OrderCallbackPort orders;
+  private final OrderCallbackClient orders;
   private final boolean enabled;
   private final boolean liveMode;
 
   public CheckoutWebhookService(
       CheckoutWebhookPort stripe,
-      OrderCallbackPort orders,
+      OrderCallbackClient orders,
       OrderCallbackProperties callbacks,
       PaymentProperties properties) {
     this.stripe = stripe;
@@ -61,7 +60,8 @@ public class CheckoutWebhookService {
           || !"succeeded".equals(intent.getStatus())
           || !session.getAmountTotal().equals(intent.getAmountReceived())) throw unreconciled();
       // Ignore an old failure once the provider confirms payment succeeded.
-      if (success) orders.succeeded(session.getMetadata().get("order_id"));
+      if (success)
+        orders.notifyPaymentSucceeded(session.getMetadata().get("order_id"), intent.getId());
       return;
     }
     if (!"unpaid".equals(session.getPaymentStatus())) throw unreconciled();
@@ -92,7 +92,7 @@ public class CheckoutWebhookService {
         || (intent != null
             && !Set.of("requires_payment_method", "canceled").contains(intent.getStatus())))
       throw unreconciled();
-    orders.failed(session.getMetadata().get("order_id"));
+    orders.notifyPaymentFailed(session.getMetadata().get("order_id"));
   }
 
   private void validateSession(String id, Session session) {

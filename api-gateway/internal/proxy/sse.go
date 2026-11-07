@@ -2,7 +2,6 @@ package proxy
 
 import (
 	"bufio"
-	"io"
 	"strings"
 	"time"
 
@@ -61,6 +60,9 @@ func (p *SSEProxy) Handler() fiber.Handler {
 			req.SetBody(body)
 		}
 
+		// An abandoned stream cannot be reused: its upstream handler is still writing.
+		req.SetConnectionClose()
+
 		err := p.client.Do(req, resp)
 		if err != nil {
 			fasthttp.ReleaseRequest(req)
@@ -107,9 +109,8 @@ func (p *SSEProxy) Handler() fiber.Handler {
 		// Stream response body chunk-by-chunk with immediate flushing
 		c.Context().SetBodyStreamWriter(func(w *bufio.Writer) {
 			defer func() {
-				if closer, ok := bodyStream.(io.Closer); ok {
-					_ = closer.Close()
-				}
+				// ReleaseResponse closes bodyStream exactly once. Closing it here as
+				// well returns the upstream connection to the pool twice.
 				fasthttp.ReleaseRequest(req)
 				fasthttp.ReleaseResponse(resp)
 			}()

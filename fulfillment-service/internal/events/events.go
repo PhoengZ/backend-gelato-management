@@ -40,9 +40,10 @@ type Envelope struct {
 }
 
 type OrderReadyData struct {
-	OrderID      uuid.UUID `json:"order_id"`
-	QueueNumber  string    `json:"queue_number"`
-	PickupSlotID uuid.UUID `json:"pickup_slot_id"`
+	OrderID      uuid.UUID  `json:"order_id"`
+	CustomerID   *uuid.UUID `json:"customer_id,omitempty"`
+	QueueNumber  string     `json:"queue_number"`
+	PickupSlotID uuid.UUID  `json:"pickup_slot_id"`
 }
 
 type OrderPickedUpData struct {

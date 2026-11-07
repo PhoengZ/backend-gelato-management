@@ -83,11 +83,13 @@ the retained REST adapter in the same process.
 ## Delivery, late payment and remaining boundary limits
 
 Timeouts, connection failures and any callback response except 204 return 503 so
-Stripe retries. In particular, a 409 becomes `ORDER_PAYMENT_CONFLICT`; it is not
-acknowledged as successful processing and no automatic refund is claimed.
-Operator reconciliation is still needed if stock expired or Order was canceled
-after Stripe accepted a charge. Payment sends verified late success to Order
-rather than suppressing it based on its local clock.
+Stripe retries. In particular, a 409 becomes `ORDER_PAYMENT_CONFLICT`; the order
+may still become PAID, so it is retried and never refunded. A 410 means stock
+expired or the order was cancelled after Stripe accepted the charge: Payment
+refunds the PaymentIntent with a deterministic idempotency key, and acknowledges
+the webhook only after the refund succeeds, so a failed refund is retried by
+Stripe. Payment sends verified late success to Order rather than suppressing it
+based on its local clock.
 
 New Sessions persist `amount_minor` and uppercase `currency` in both Session and
 PaymentIntent metadata. Sessions created before this increment do not contain
@@ -101,8 +103,8 @@ or durably deduplicate provider event IDs, and its public GET does not expose th
 bound Session ID. Payment verifies Stripe's Session/intent facts but cannot
 independently compare them to Order's private durable binding through this
 contract. State/Inventory operations provide replay handling; permanent event
-deduplication, richer binding validation and durable refund/reconciliation remain
-shared follow-up work. No Order, shared contract or Inventory code changes in
+deduplication, richer binding validation and reconciliation for a refund that
+keeps failing after Stripe stops retrying remain shared follow-up work. No Order, shared contract or Inventory code changes in
 this increment. Real Stripe-to-Order end-to-end execution must still be verified
 with the demo environment.
 

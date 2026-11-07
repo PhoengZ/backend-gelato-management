@@ -12,6 +12,8 @@ import (
 )
 
 type Config struct {
+	PickupTimezone        string
+	MaxPortionsPerOrder   int32
 	Port                  string
 	DatabaseURL           string
 	RabbitMQURL           string
@@ -39,6 +41,12 @@ func Load() (Config, error) {
 		PaymentRequestToken:   value("PAYMENT_REQUEST_TOKEN", ""),
 		FulfillmentURL:        value("FULFILLMENT_SERVICE_URL", "http://fulfillment-service:8080"),
 	}
+	cfg.PickupTimezone = value("PICKUP_TIMEZONE", "Asia/Bangkok")
+	maxPortions, err := strconv.ParseInt(value("MAX_PORTIONS_PER_ORDER", "20"), 10, 32)
+	if err != nil || maxPortions < 0 {
+		return Config{}, errors.New("MAX_PORTIONS_PER_ORDER must be a non-negative integer")
+	}
+	cfg.MaxPortionsPerOrder = int32(maxPortions)
 	if cfg.Port == "" || strings.ContainsAny(cfg.Port, ":/\\") {
 		return Config{}, errors.New("PORT must be a port number")
 	}

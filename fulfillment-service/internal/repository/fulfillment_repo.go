@@ -368,7 +368,7 @@ func (r *FulfillmentRepository) UpdateStatus(ctx context.Context, orderID uuid.U
 	case models.StatusReady:
 		routingKey = events.RoutingKeyOrderReady
 		env, err = events.NewOrderReady(now, events.OrderReadyData{
-			OrderID: updated.OrderID, QueueNumber: updated.QueueNumber, PickupSlotID: updated.PickupSlotID,
+			OrderID: updated.OrderID, CustomerID: updated.CustomerID, QueueNumber: updated.QueueNumber, PickupSlotID: updated.PickupSlotID,
 		})
 	case models.StatusPickedUp:
 		routingKey = events.RoutingKeyOrderPickedUp

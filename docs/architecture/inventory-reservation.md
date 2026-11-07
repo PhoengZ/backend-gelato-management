@@ -114,7 +114,8 @@ Payment success first claims PAYMENT_CONFIRMING from PENDING_PAYMENT under the
 same Order row lock, so cancellation and confirmation cannot both claim a pending
 order. Confirmation retries retain that intent on ambiguous failures. A definitive
 FAILED_PRECONDITION moves it to CANCEL_PENDING for release, without marking PAID
-or emitting order.placed. Payment remains responsible for refunds/reconciliation.
+or emitting order.placed, and returns 410 PAYMENT_REJECTED. Payment refunds the
+charge on 410 only; a 409 can still end in PAID, so Payment retries it instead.
 
 | Condition on release | Reservation result | Portion movement |
 | --- | --- | --- |
@@ -129,8 +130,9 @@ need a separate design.
 
 Inventory's expiry worker settles stock, but Order has no automatic expiry worker
 and can remain PENDING_PAYMENT. A late ConfirmReservation returns a conflict;
-Order must not mark PAID or emit order.placed. Payment reconciliation/refund remains
-required. Order cancellation currently does not close a Stripe Checkout Session.
+Order must not mark PAID or emit order.placed, and Payment refunds on the resulting
+410. Order cancellation currently does not close a Stripe Checkout Session, so a
+customer can still pay it; that charge is also rejected with 410 and refunded.
 
 Inventory waste and its transactional outbox commit together, then publication
 occurs asynchronously. See [checkout boundary](order-checkout.md) and

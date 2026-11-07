@@ -1,0 +1,7 @@
+{
+  "tool_name": "Bash",
+  "tool_input_preview": "{\"command\":\"cat /private/tmp/claude-501/-Users-dewwts-backend-gelato-management/374f9f83-2a65-4ea7-9a2a-2b0c700f4707/tasks/b28bw2xst.output | tail -30; curl -s -m3 localhost:8080/health\",\"description\"...",
+  "error": "Exit code 7\n Container batch-inventory-service  Started\n Container payment-service  Waiting\n Container order-postgres  Waiting\n Container rabbitmq  Waiting\n Container batch-inventory-service  Waiting\n Container catalog-service  Waiting\n Container order-postgres  Healthy\n Container rabbitmq  Healthy\n Container catalog-service  Healthy\n Container payment-service  Error\n Container batch-inventory-service  Healthy\ndependency failed to start: container payment-service is unhealthy\napi-gateway\tCreated...",
+  "timestamp": "2026-11-04T15:31:50.353Z",
+  "retry_count": 1
+}

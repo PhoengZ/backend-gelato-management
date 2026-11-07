@@ -54,6 +54,11 @@
           "type": "string",
           "minLength": 1,
           "description": "Stable reason code. The set of codes is owned by Order Service."
+        },
+        "customer_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Customer to notify. Optional for events published before this field existed."
         }
       }
     }

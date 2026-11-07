@@ -18,9 +18,7 @@ func main() {
 	}
 
 	// Initialize Fiber app
-	app := fiber.New(fiber.Config{
-		AppName: "API Gateway",
-	})
+	app := fiber.New(router.AppConfig(cfg))
 
 	// Setup middlewares
 	app.Use(logger.New())
