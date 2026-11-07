@@ -60,7 +60,8 @@ public class CheckoutWebhookService {
           || !"succeeded".equals(intent.getStatus())
           || !session.getAmountTotal().equals(intent.getAmountReceived())) throw unreconciled();
       // Ignore an old failure once the provider confirms payment succeeded.
-      if (success) orders.notifyPaymentSucceeded(session.getMetadata().get("order_id"), intent.getId());
+      if (success)
+        orders.notifyPaymentSucceeded(session.getMetadata().get("order_id"), intent.getId());
       return;
     }
     if (!"unpaid".equals(session.getPaymentStatus())) throw unreconciled();
