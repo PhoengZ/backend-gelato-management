@@ -7,6 +7,7 @@
   "datacontenttype": "application/json",
   "data": {
     "order_id": "8d29d6cf-bd4d-48ca-9e4f-dcd8ec54e594",
-    "reason": "CUSTOMER_REQUEST"
+    "reason": "CUSTOMER_REQUEST",
+    "customer_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479"
   }
 }

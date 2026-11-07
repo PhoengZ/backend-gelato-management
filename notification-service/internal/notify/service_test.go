@@ -172,3 +172,16 @@ func TestOwnerMapEvictsOldestBeyondCapacity(t *testing.T) {
 		t.Error("newest order should be kept")
 	}
 }
+
+func TestOrderEventsRouteByCustomerIDWithoutOrderPlaced(t *testing.T) {
+	p := &fakePusher{}
+	s := New(p, time.Hour)
+	customer := uuid.New()
+
+	s.OrderCancelled(env(), events.OrderCancelledData{OrderID: uuid.New(), CustomerID: customer})
+	s.OrderReady(env(), events.OrderReadyData{OrderID: uuid.New(), QueueNumber: "07", CustomerID: customer})
+
+	if len(p.users) != 2 || p.users[0].user != customer || p.users[1].user != customer {
+		t.Fatalf("pushed to %v, want the event customer twice", p.users)
+	}
+}

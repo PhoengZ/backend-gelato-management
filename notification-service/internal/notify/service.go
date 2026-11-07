@@ -82,7 +82,7 @@ func (s *Service) OrderReady(env events.Envelope, d events.OrderReadyData) {
 	if !s.seen.markNew(env.ID) {
 		return
 	}
-	s.toOrderOwner(d.OrderID, hub.Notification{
+	s.toOrderOwner(d.OrderID, d.CustomerID, hub.Notification{
 		ID:         env.ID,
 		Type:       TypeOrderReady,
 		Message:    "Your gelato order is ready for pickup!",
@@ -100,7 +100,7 @@ func (s *Service) OrderCancelled(env events.Envelope, d events.OrderCancelledDat
 	if !s.seen.markNew(env.ID) {
 		return
 	}
-	s.toOrderOwner(d.OrderID, hub.Notification{
+	s.toOrderOwner(d.OrderID, d.CustomerID, hub.Notification{
 		ID:         env.ID,
 		Type:       TypeOrderCancelled,
 		Message:    "Your gelato order was cancelled.",
@@ -149,14 +149,17 @@ func (s *Service) BatchExpiring(env events.Envelope, d events.BatchExpiringData)
 	}, auth.RoleStaff, auth.RoleManager)
 }
 
-// toOrderOwner routes n to the customer who placed the order. An unknown order
-// (placed before this process started, or past the TTL) is logged and skipped:
-// retrying cannot help, and the customer can still poll the order status.
-func (s *Service) toOrderOwner(orderID uuid.UUID, n hub.Notification) {
-	customerID, ok := s.owners.get(orderID)
-	if !ok {
-		log.Printf("[notify] no known owner for order %s, dropping %s", orderID, n.Type)
-		return
+// toOrderOwner routes n to the event's customer. Events published before
+// customer_id existed fall back to the mapping learned from order.placed; an order
+// unknown to both is logged and skipped because retrying cannot help.
+func (s *Service) toOrderOwner(orderID, customerID uuid.UUID, n hub.Notification) {
+	if customerID == uuid.Nil {
+		owner, ok := s.owners.get(orderID)
+		if !ok {
+			log.Printf("[notify] no known owner for order %s, dropping %s", orderID, n.Type)
+			return
+		}
+		customerID = owner
 	}
 	s.pusher.PushToUser(customerID, n)
 }

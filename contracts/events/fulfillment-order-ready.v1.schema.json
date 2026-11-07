@@ -58,6 +58,11 @@
         "pickup_slot_id": {
           "type": "string",
           "format": "uuid"
+        },
+        "customer_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Customer to notify. Optional for events published before this field existed."
         }
       }
     }

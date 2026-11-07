@@ -62,13 +62,17 @@ type OrderPlacedData struct {
 type OrderCancelledData struct {
 	OrderID uuid.UUID `json:"order_id"`
 	Reason  string    `json:"reason"`
+	// CustomerID is optional so events published before it existed still decode.
+	CustomerID uuid.UUID `json:"customer_id"`
 }
 
-// OrderReadyData is the fulfillment.order_ready payload. It has no customer_id.
+// OrderReadyData is the fulfillment.order_ready payload.
 type OrderReadyData struct {
 	OrderID      uuid.UUID `json:"order_id"`
 	QueueNumber  string    `json:"queue_number"`
 	PickupSlotID uuid.UUID `json:"pickup_slot_id"`
+	// CustomerID is optional so events published before it existed still decode.
+	CustomerID uuid.UUID `json:"customer_id"`
 }
 
 // BatchLowStockData is the inventory.low_stock payload. docs/event-schema-spec.md
