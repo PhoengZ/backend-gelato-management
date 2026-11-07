@@ -16,6 +16,9 @@ type Analytics struct {
 	Operations  Operations         `bson:"operations" json:"operations"`
 	WasteStats  WasteStats         `bson:"waste_stats" json:"waste_stats"`
 	FlavorStats []FlavorStat       `bson:"flavor_stats" json:"flavor_stats"`
+	// ReversedOrderIDs lists paid orders whose sales were already subtracted
+	// from this day, so a redelivered cancellation never subtracts twice.
+	ReversedOrderIDs []string `bson:"reversed_order_ids,omitempty" json:"-"`
 }
 
 type Financials struct {
@@ -213,9 +216,16 @@ type OrderCancelledEvent struct {
 	Data        OrderCancelledData `json:"data"`
 }
 
+// OrderCancelledData carries the paid facts only when WasPaid is true; they
+// equal what order.placed reported for the same order.
 type OrderCancelledData struct {
-	OrderID string `json:"orderId"`
-	Reason  string `json:"reason"`
+	OrderID          string            `json:"orderId"`
+	Reason           string            `json:"reason"`
+	WasPaid          bool              `json:"was_paid"`
+	TotalAmountMinor int64             `json:"total_amount_minor"`
+	Currency         string            `json:"currency"`
+	Items            []OrderPlacedItem `json:"items"`
+	PaidAt           string            `json:"paid_at"`
 }
 
 func (c *OrderCancelledData) UnmarshalJSON(b []byte) error {
