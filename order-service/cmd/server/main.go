@@ -76,7 +76,14 @@ func run() error {
 	}
 	defer pub.Close()
 
-	var svcOpts []service.Option
+	svcOpts := []service.Option{service.WithMaxPortionsPerOrder(cfg.MaxPortionsPerOrder)}
+	if cfg.PickupTimezone != "" {
+		pickupLocation, locErr := time.LoadLocation(cfg.PickupTimezone)
+		if locErr != nil {
+			return errors.New("PICKUP_TIMEZONE: " + locErr.Error())
+		}
+		svcOpts = append(svcOpts, service.WithSameDayPickup(pickupLocation))
+	}
 	if cfg.FulfillmentURL != "" {
 		ful, fulErr := client.NewFulfillmentClient(cfg.FulfillmentURL, 5*time.Second)
 		if fulErr == nil {

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -266,14 +267,17 @@ func TestCancellationAndPaymentClaimOneWinner(t *testing.T) {
 			case <-time.After(3 * time.Second):
 				t.Fatal("winning workflow did not reach Inventory")
 			}
-			var loser error
 			if cancelFirst {
-				loser = s.ConfirmPayment(context.Background(), r.order.ID)
+				// Cancellation won, so this charge can never be honoured: Payment must refund.
+				loser := s.ConfirmPayment(context.Background(), r.order.ID)
+				if appErr, ok := loser.(*AppError); !ok || appErr.HTTPStatus != 410 {
+					t.Errorf("expected losing payment to be rejected: %v", loser)
+				}
 			} else {
-				loser = s.CancelOrder(context.Background(), r.order.ID, "PAYMENT_FAILED")
-			}
-			if appErr, ok := loser.(*AppError); !ok || appErr.HTTPStatus != 409 {
-				t.Errorf("expected losing workflow conflict: %v", loser)
+				loser := s.CancelOrder(context.Background(), r.order.ID, "PAYMENT_FAILED")
+				if appErr, ok := loser.(*AppError); !ok || appErr.HTTPStatus != 409 {
+					t.Errorf("expected losing cancellation conflict: %v", loser)
+				}
 			}
 			// A checkout response captured before the claim cannot bind afterward.
 			if _, err := r.BindCheckout(context.Background(), r.order.ID, "cs_stale", sessionResponse().CheckoutUrl); !errors.Is(err, repository.ErrInvalidTransition) {
@@ -408,5 +412,84 @@ func TestLifecycleWorkerContinuesBeyondFailedFirstPage(t *testing.T) {
 	}
 	if r.pages != 2 {
 		t.Fatal("failed orders starved later page")
+	}
+}
+
+func assertPaymentRejected(t *testing.T, err error) {
+	t.Helper()
+	var appErr *AppError
+	if !errors.As(err, &appErr) || appErr.HTTPStatus != 410 || appErr.Code != "PAYMENT_REJECTED" {
+		t.Fatalf("error = %#v, want 410 PAYMENT_REJECTED", err)
+	}
+}
+
+func TestExpiredConfirmationRejectsPaymentDefinitively(t *testing.T) {
+	r := &lifecycleRepo{}
+	r.order = lifecycleOrder()
+	i := &lifecycleInventory{confirm: func(*inventoryv1.ConfirmReservationRequest) (*inventoryv1.ConfirmReservationResponse, error) {
+		return nil, status.Error(codes.FailedPrecondition, "reservation expired")
+	}}
+	s := &orderService{repo: r, inventory: i}
+	assertPaymentRejected(t, s.ConfirmPayment(context.Background(), r.order.ID))
+}
+
+func TestPaymentAfterCancellationIsRejectedDefinitively(t *testing.T) {
+	for _, current := range []domain.OrderStatus{domain.StatusCancelPending, domain.StatusCancelled} {
+		r := &lifecycleRepo{}
+		r.order = lifecycleOrder()
+		r.order.Status = current
+		s := &orderService{repo: r, inventory: &lifecycleInventory{}}
+		assertPaymentRejected(t, s.ConfirmPayment(context.Background(), r.order.ID))
+	}
+}
+
+// An order that may still become PAID, or was fulfilled, must never look refundable.
+func TestAmbiguousPaymentConflictsAreNotRejections(t *testing.T) {
+	r := &lifecycleRepo{}
+	r.order = lifecycleOrder()
+	i := &lifecycleInventory{confirm: func(*inventoryv1.ConfirmReservationRequest) (*inventoryv1.ConfirmReservationResponse, error) {
+		return nil, status.Error(codes.Aborted, "lock contention")
+	}}
+	s := &orderService{repo: r, inventory: i}
+	var appErr *AppError
+	if err := s.ConfirmPayment(context.Background(), r.order.ID); !errors.As(err, &appErr) || appErr.HTTPStatus != 409 {
+		t.Fatalf("aborted confirm error = %#v, want 409", err)
+	}
+	if r.order.Status != domain.StatusPaymentConfirming {
+		t.Fatalf("status = %s, want the intent retained", r.order.Status)
+	}
+
+	for _, current := range []domain.OrderStatus{domain.StatusPreparing, domain.StatusReadyForPickup, domain.StatusCompleted} {
+		fulfilled := &lifecycleRepo{}
+		fulfilled.order = lifecycleOrder()
+		fulfilled.order.Status = current
+		s := &orderService{repo: fulfilled, inventory: &lifecycleInventory{}}
+		if err := s.ConfirmPayment(context.Background(), fulfilled.order.ID); !errors.As(err, &appErr) || appErr.HTTPStatus != 409 {
+			t.Fatalf("%s error = %#v, want 409", current, err)
+		}
+	}
+}
+
+func TestCancellationEventNamesTheCustomer(t *testing.T) {
+	r := &lifecycleRepo{}
+	r.order = lifecycleOrder()
+	r.order.CustomerID = uuid.NewString()
+	i := &lifecycleInventory{release: func(*inventoryv1.ReleaseReservationRequest) (*inventoryv1.ReleaseReservationResponse, error) {
+		return &inventoryv1.ReleaseReservationResponse{Reservation: &inventoryv1.Reservation{}}, nil
+	}}
+	s := &orderService{repo: r, inventory: i}
+	if err := s.CancelOrder(context.Background(), r.order.ID, "CUSTOMER_REQUEST"); err != nil {
+		t.Fatal(err)
+	}
+	var event struct {
+		Data struct {
+			CustomerID string `json:"customer_id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(r.events[0].Payload, &event); err != nil {
+		t.Fatal(err)
+	}
+	if event.Data.CustomerID != r.order.CustomerID {
+		t.Fatalf("customer_id = %q, want %q", event.Data.CustomerID, r.order.CustomerID)
 	}
 }

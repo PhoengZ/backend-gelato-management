@@ -62,6 +62,22 @@ func WithFulfillmentClient(ful client.Fulfillment) Option {
 	}
 }
 
+// WithSameDayPickup only accepts a pickup on the current calendar day in loc.
+func WithSameDayPickup(loc *time.Location) Option {
+	return func(s *orderService) { s.pickupLocation = loc }
+}
+
+// WithMaxPortionsPerOrder caps the portions one order can hold. Zero means no cap.
+func WithMaxPortionsPerOrder(max int32) Option {
+	return func(s *orderService) { s.maxPortionsPerOrder = max }
+}
+
+func sameCalendarDay(a, b time.Time, loc *time.Location) bool {
+	ay, am, ad := a.In(loc).Date()
+	by, bm, bd := b.In(loc).Date()
+	return ay == by && am == bm && ad == bd
+}
+
 func WithMaxSlotCapacity(max int) Option {
 	return func(s *orderService) {
 		s.maxSlotCapacity = max
@@ -69,12 +85,14 @@ func WithMaxSlotCapacity(max int) Option {
 }
 
 type orderService struct {
-	repo            repository.OrderRepository
-	inventory       client.Inventory
-	catalog         client.Catalog
-	payment         client.Payment
-	fulfillment     client.Fulfillment
-	maxSlotCapacity int
+	pickupLocation      *time.Location
+	maxPortionsPerOrder int32
+	repo                repository.OrderRepository
+	inventory           client.Inventory
+	catalog             client.Catalog
+	payment             client.Payment
+	fulfillment         client.Fulfillment
+	maxSlotCapacity     int
 }
 
 func NewOrderService(repo repository.OrderRepository, inv client.Inventory, cat client.Catalog, pay client.Payment, opts ...Option) (Service, error) {
@@ -184,17 +202,36 @@ func (s *orderService) placeOrder(ctx context.Context, input CreateOrderInput, i
 	if !input.PickupAt.After(time.Now().UTC()) {
 		return nil, badRequest("pickup_at must be a future RFC 3339 timestamp")
 	}
+	if s.pickupLocation != nil && !sameCalendarDay(time.Now(), pickupUTC, s.pickupLocation) {
+		return nil, &AppError{Code: "PICKUP_NOT_SAME_DAY", Message: "pickup_at must be today", HTTPStatus: 400}
+	}
+	if s.maxPortionsPerOrder > 0 {
+		var total int64
+		for _, portions := range items {
+			total += int64(portions)
+		}
+		if total > int64(s.maxPortionsPerOrder) {
+			return nil, &AppError{Code: "PORTIONS_LIMIT_EXCEEDED", Message: "order exceeds the portion limit", HTTPStatus: 400}
+		}
+	}
 
 	maxCapacity := s.maxSlotCapacity
 	if maxCapacity <= 0 {
 		maxCapacity = DefaultPickupSlotMaxCapacity
 	}
-	if currentCount, err := s.repo.CountOrdersInSlot(ctx, pickupUTC); err == nil && int(currentCount) >= maxCapacity {
+	currentCount, err := s.repo.CountOrdersInSlot(ctx, pickupUTC)
+	if err != nil {
+		return nil, dependencyError("ORDER_STORAGE_UNAVAILABLE", err)
+	}
+	if int(currentCount) >= maxCapacity {
 		return nil, conflict("SLOT_CAPACITY_EXCEEDED", "pickup slot capacity exceeded")
 	}
 	if s.fulfillment != nil {
 		capacity, err := s.fulfillment.CheckSlotCapacity(ctx, pickupUTC)
-		if err == nil && capacity >= maxCapacity {
+		if err != nil {
+			return nil, dependencyError("FULFILLMENT_UNAVAILABLE", err)
+		}
+		if capacity >= maxCapacity {
 			return nil, conflict("SLOT_CAPACITY_EXCEEDED", "pickup slot capacity exceeded")
 		}
 	}
@@ -299,7 +336,7 @@ func (s *orderService) ConfirmPayment(ctx context.Context, orderID string) error
 	order, err := s.repo.BeginTransition(ctx, orderID, domain.StatusPaymentConfirming)
 	if err != nil {
 		if errors.Is(err, repository.ErrInvalidTransition) {
-			return conflict("ORDER_STATE_CONFLICT", "order is not awaiting payment")
+			return s.paymentStateError(ctx, orderID)
 		}
 		return mapRepositoryError(err)
 	}
@@ -310,6 +347,19 @@ func (s *orderService) ConfirmPayment(ctx context.Context, orderID string) error
 		return conflict("ORDER_STATE_CONFLICT", "order is not awaiting payment")
 	}
 	return s.finishPayment(ctx, order)
+}
+
+// paymentStateError separates an order that can never be paid, whose charge
+// Payment must refund, from any state where a refund could be wrong.
+func (s *orderService) paymentStateError(ctx context.Context, orderID string) error {
+	order, err := s.repo.Get(ctx, orderID)
+	if err != nil {
+		return mapRepositoryError(err)
+	}
+	if order.Status == domain.StatusCancelPending || order.Status == domain.StatusCancelled {
+		return paymentRejected()
+	}
+	return conflict("ORDER_STATE_CONFLICT", "order is not awaiting payment")
 }
 
 func (s *orderService) finishPayment(ctx context.Context, order *domain.Order) error {
@@ -323,6 +373,7 @@ func (s *orderService) finishPayment(ctx context.Context, order *domain.Order) e
 			if saveErr := s.repo.RejectPaymentConfirmation(ctx, order.ID); saveErr != nil {
 				return dependencyError("ORDER_STORAGE_UNAVAILABLE", saveErr)
 			}
+			return paymentRejected()
 		}
 		return mapGRPCError("INVENTORY", err)
 	}
@@ -371,7 +422,7 @@ func (s *orderService) finishCancellation(ctx context.Context, order *domain.Ord
 		return mapGRPCError("INVENTORY", err)
 	}
 	eventID := uuid.NewString()
-	payload, err := json.Marshal(cloudEvent{SpecVersion: "1.0", ID: eventID, Source: "/gelatoflow/order-service", Type: "com.gelatoflow.order.cancelled.v1", Time: time.Now().UTC(), DataContentType: "application/json", Data: map[string]string{"order_id": order.ID, "reason": cancellationReason}})
+	payload, err := json.Marshal(cloudEvent{SpecVersion: "1.0", ID: eventID, Source: "/gelatoflow/order-service", Type: "com.gelatoflow.order.cancelled.v1", Time: time.Now().UTC(), DataContentType: "application/json", Data: map[string]string{"order_id": order.ID, "customer_id": order.CustomerID, "reason": cancellationReason}})
 	if err != nil {
 		return dependencyError("ORDER_EVENT_ENCODING_FAILED", err)
 	}
@@ -508,6 +559,10 @@ func mapRepositoryError(err error) error {
 func badRequest(message string) error {
 	return &AppError{Code: "INVALID_ARGUMENT", Message: message, HTTPStatus: 400}
 }
+func paymentRejected() error {
+	return &AppError{Code: "PAYMENT_REJECTED", Message: "order can no longer accept this payment", HTTPStatus: 410}
+}
+
 func conflict(code, message string) error {
 	return &AppError{Code: code, Message: message, HTTPStatus: 409}
 }

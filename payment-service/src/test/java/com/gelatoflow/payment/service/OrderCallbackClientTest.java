@@ -60,33 +60,50 @@ class OrderCallbackClientTest {
   }
 
   @Test
-  void conflictCatchesExceptionAndImmediatelyTriggersRefund() {
-    doThrow(
-            new ApiException(
-                HttpStatus.SERVICE_UNAVAILABLE,
-                "ORDER_PAYMENT_CONFLICT",
-                "Order rejected the payment transition; reconciliation is required"))
-        .when(mockCallbackPort)
-        .succeeded(ORDER);
+  void definitiveRejectionRefundsThePayment() {
+    doThrow(rejection()).when(mockCallbackPort).succeeded(ORDER);
 
     assertThatCode(() -> client.notifyPaymentSucceeded(ORDER, PAYMENT_INTENT_ID))
         .doesNotThrowAnyException();
 
-    verify(mockCallbackPort).succeeded(ORDER);
     verify(mockRefundService).refund(PAYMENT_INTENT_ID);
   }
 
   @Test
-  void httpConflictStatusAlsoTriggersRefund() {
-    doThrow(new ApiException(HttpStatus.CONFLICT, "CONFLICT", "Reservation expired"))
-        .when(mockCallbackPort)
-        .succeeded(ORDER);
+  void ambiguousConflictIsRetriedWithoutARefund() {
+    var conflict =
+        new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "ORDER_PAYMENT_CONFLICT", "reconcile");
+    doThrow(conflict).when(mockCallbackPort).succeeded(ORDER);
 
-    assertThatCode(() -> client.notifyPaymentSucceeded(ORDER, PAYMENT_INTENT_ID))
-        .doesNotThrowAnyException();
+    assertThatThrownBy(() -> client.notifyPaymentSucceeded(ORDER, PAYMENT_INTENT_ID))
+        .isSameAs(conflict);
 
-    verify(mockCallbackPort).succeeded(ORDER);
-    verify(mockRefundService).refund(PAYMENT_INTENT_ID);
+    verifyNoInteractions(mockRefundService);
+  }
+
+  @Test
+  void rejectionWithoutAPaymentIntentIsNotAcknowledged() {
+    var rejection = rejection();
+    doThrow(rejection).when(mockCallbackPort).succeeded(ORDER);
+
+    assertThatThrownBy(() -> client.notifyPaymentSucceeded(ORDER, null)).isSameAs(rejection);
+
+    verifyNoInteractions(mockRefundService);
+  }
+
+  @Test
+  void failedRefundIsNotAcknowledgedSoStripeRetries() {
+    var providerDown = new ApiException(HttpStatus.BAD_GATEWAY, "PAYMENT_PROVIDER_ERROR", "down");
+    doThrow(rejection()).when(mockCallbackPort).succeeded(ORDER);
+    doThrow(providerDown).when(mockRefundService).refund(PAYMENT_INTENT_ID);
+
+    assertThatThrownBy(() -> client.notifyPaymentSucceeded(ORDER, PAYMENT_INTENT_ID))
+        .isSameAs(providerDown);
+  }
+
+  private ApiException rejection() {
+    return new ApiException(
+        HttpStatus.SERVICE_UNAVAILABLE, HttpOrderCallbackClient.PAYMENT_REJECTED, "rejected");
   }
 
   @Test
@@ -122,13 +139,13 @@ class OrderCallbackClientTest {
   }
 
   @Test
-  void endToEndHttp409ResponseCatchesConflictAndTriggersRefund() throws Exception {
-    serverResponseCode = new AtomicInteger(409);
+  void endToEndHttp410ResponseTriggersRefund() throws Exception {
+    serverResponseCode = new AtomicInteger(410);
     server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
     server.createContext(
         "/",
         exchange -> {
-          byte[] body = "{\"error\":\"reservation_expired\"}".getBytes(StandardCharsets.UTF_8);
+          byte[] body = "{\"code\":\"PAYMENT_REJECTED\"}".getBytes(StandardCharsets.UTF_8);
           exchange.sendResponseHeaders(serverResponseCode.get(), body.length);
           try (var os = exchange.getResponseBody()) {
             os.write(body);
@@ -143,7 +160,7 @@ class OrderCallbackClientTest {
 
     OrderCallbackClient liveClient = new OrderCallbackClient(httpClient, mockRefundService);
 
-    // Call notifyPaymentSucceeded against real HTTP server returning 409
+    // Call notifyPaymentSucceeded against real HTTP server returning 410
     assertThatCode(() -> liveClient.notifyPaymentSucceeded(ORDER, PAYMENT_INTENT_ID))
         .doesNotThrowAnyException();
 

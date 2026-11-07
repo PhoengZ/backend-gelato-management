@@ -11,7 +11,10 @@ paths:
       operationId: createOrder
       summary: Create an order, reserve portions and start Stripe checkout
       description: >-
-        Order persists the pending order before asking Payment for an idempotent
+        A deployment can restrict pickup_at to the current day in its pickup timezone
+        (400 PICKUP_NOT_SAME_DAY) and cap portions per order (400
+        PORTIONS_LIMIT_EXCEEDED). Order persists the pending order before asking
+        Payment for an idempotent
         Checkout Session. Retry the same body and Idempotency-Key after an
         unavailable/timeout response; no additional order or stock hold is created.
         A pending, unexpired order returns checkout_url. Replays of CANCEL_PENDING,
@@ -142,9 +145,11 @@ paths:
       description: >-
         Internal Payment Service callback; the route must not be exposed without
         service authentication. Order claims PAYMENT_CONFIRMING before confirming
-        stock. Ambiguous failures retain the intent for recovery. A definitive
-        Inventory FAILED_PRECONDITION moves it to CANCEL_PENDING and returns 409;
-        Payment must reconcile or refund the charge.
+        stock. Ambiguous failures retain the intent for recovery and return 409 or
+        503; Payment retries them and must not refund. A definitive Inventory
+        FAILED_PRECONDITION moves the order to CANCEL_PENDING and returns 410, as
+        does a callback for a CANCEL_PENDING or CANCELLED order. 410 means the order
+        can never be paid, and Payment must refund the charge.
       security:
         - paymentServiceToken: []
       responses:
@@ -156,6 +161,12 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '410':
+          description: Order can never be paid; Payment must refund the charge
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '503':
           $ref: '#/components/responses/DependencyUnavailable'
         '504':

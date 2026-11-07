@@ -1,8 +1,9 @@
 # Order-orchestrated Stripe checkout
 
 Status: Order checkout, Payment's inbound Checkout Session gRPC/Stripe adapter,
-and Checkout webhook reporting are implemented; durable reconciliation/refunds
-and deployed end-to-end verification remain pending. The boundary requires Order,
+Checkout webhook reporting and refunds of rejected late payments are implemented;
+reconciliation of a refund that keeps failing and deployed end-to-end verification
+remain pending. The boundary requires Order,
 Payment, Gateway and frontend owner review before shared deployment.
 
 ## Ownership and transport
@@ -82,8 +83,8 @@ pending. A browser success redirect never marks an order paid.
   Idempotent replays of workflow intents and terminal orders return current state
   without checkout_url.
 - Stripe's session expiry may differ from Inventory's stock deadline. Payment
-  must handle expired-session UX and reconcile/refund a charge whose stock can
-  no longer be confirmed. Order's ConfirmReservation still rejects expired stock.
+  must handle expired-session UX and refunds a charge whose stock can no longer
+  be confirmed. Order's ConfirmReservation still rejects expired stock.
 
 ## Cancellation, stock release and provider session
 
@@ -113,8 +114,8 @@ intent even though the request did not return 204.
 The lifecycle worker also resumes PAYMENT_CONFIRMING after ambiguous confirmation
 or local PAID/outbox failures. It uses the persisted confirmation key and never
 reopens checkout. An authoritative Inventory FAILED_PRECONDITION moves that
-intent to CANCEL_PENDING; the callback returns 409 and Payment must durably
-reconcile/refund the charge. Other dependency errors retain the intent for retry
+intent to CANCEL_PENDING; the callback returns 410 and Payment refunds the
+charge. Other dependency errors retain the intent for retry
 and operator attention. Recovery pages by order ID and continues past failed
 orders, so a failed page does not starve later work.
 
@@ -134,9 +135,8 @@ flowchart TD
 There is no Order-to-Payment cancel-session RPC in the current contract or code.
 The existing URL can remain payable after stock release, and a browser cancel
 redirect is not automatically an Order cancellation. A late success for
-CANCEL_PENDING or CANCELLED is rejected; a late success after Inventory expiry
-cannot confirm stock. Payment
-must durably reconcile/refund such charges. Inventory expires holds independently,
+CANCEL_PENDING or CANCELLED is rejected with 410; a late success after Inventory
+expiry cannot confirm stock and also returns 410. Payment refunds such charges. Inventory expires holds independently,
 but Order has no worker that automatically changes its pending status.
 
 See [detailed sequence and state diagrams](../sequence-diagram.md) and
@@ -153,8 +153,8 @@ authenticated HTTP callbacks. Frontend uses the new checkout_url instead of
 calling the old public PaymentIntent endpoint. See
 [Payment integration](payment-integration.md) for the incremental migration.
 
-This change does not claim a working Stripe end-to-end integration, refund
-automation or Order gRPC reads for Analytics.
+This change does not claim a working Stripe end-to-end integration or Order gRPC
+reads for Analytics.
 REST clients must handle CANCEL_PENDING and PAYMENT_CONFIRMING without checkout
 navigation and poll until finalization. Review these enum additions and the
 generic cancellation event reason with affected service and frontend owners.

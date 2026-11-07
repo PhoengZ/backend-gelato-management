@@ -16,6 +16,8 @@ import org.springframework.stereotype.Component;
 
 @Component
 public class HttpOrderCallbackClient implements OrderCallbackPort, AutoCloseable {
+  public static final String PAYMENT_REJECTED = "ORDER_PAYMENT_REJECTED";
+
   private final OrderCallbackProperties properties;
   private final HttpClient client;
 
@@ -54,6 +56,12 @@ public class HttpOrderCallbackClient implements OrderCallbackPort, AutoCloseable
       // Only status is part of this contract. Close without draining an unbounded
       // error body; the request deadline bounds waiting for response headers.
       try (var body = response.body()) {
+        if (response.statusCode() == 410) {
+          throw new ApiException(
+              HttpStatus.SERVICE_UNAVAILABLE,
+              PAYMENT_REJECTED,
+              "Order can no longer accept this payment; it must be refunded");
+        }
         if (response.statusCode() == 409) {
           throw new ApiException(
               HttpStatus.SERVICE_UNAVAILABLE,

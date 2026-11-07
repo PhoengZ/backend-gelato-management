@@ -113,4 +113,18 @@ class RefundServiceTest {
               });
     }
   }
+
+  @Test
+  void alreadyRefundedChargeCountsAsDoneSoWebhookRetriesSettle() {
+    var alreadyRefunded =
+        new com.stripe.exception.InvalidRequestException(
+            "already refunded", null, "req_1", "charge_already_refunded", 400, null);
+    try (MockedStatic<Refund> refund = mockStatic(Refund.class)) {
+      refund
+          .when(() -> Refund.create(any(RefundCreateParams.class), any(RequestOptions.class)))
+          .thenThrow(alreadyRefunded);
+
+      assertThat(refundService.refund("pi_done")).isNull();
+    }
+  }
 }

@@ -168,8 +168,9 @@ No Payment image is assumed to have been published to the team's registry.
 Order can call the inbound Checkout RPC and receive verified results through
 its existing HTTP callbacks. Only Payment code/configuration changes in this
 increment. The current Order boundary has no provider event ID or exposed bound
-Session ID; durable event deduplication, richer binding verification and late
-payment reconciliation/refunds remain pending. Follow [WEBHOOK.md](WEBHOOK.md).
+Session ID; durable event deduplication and richer binding verification remain
+pending. Late payments that Order rejects are refunded automatically. Follow
+[WEBHOOK.md](WEBHOOK.md).
 The legacy PaymentIntent flow still requires its owner to implement the
 canonical GetOrderDetails, BindPaymentIntent and ReportPaymentResult RPCs,
 machine authentication, durable deduplication, Inventory orchestration and

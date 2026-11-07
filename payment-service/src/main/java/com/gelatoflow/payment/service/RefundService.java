@@ -26,7 +26,7 @@ public class RefundService {
    * 'refund-{paymentIntentId}' to prevent duplicate refunds.
    *
    * @param paymentIntentId Stripe PaymentIntent ID
-   * @return the created or replayed Refund object
+   * @return the created or replayed Refund, or null if the charge was already refunded
    */
   public Refund refund(String paymentIntentId) {
     if (paymentIntentId == null || paymentIntentId.isBlank()) {
@@ -64,6 +64,10 @@ public class RefundService {
           "REFUND_CONFLICT",
           "Refund request conflicts with a previous attempt");
     } catch (StripeException e) {
+      if ("charge_already_refunded".equals(e.getCode())) {
+        log.info("PaymentIntent {} was already refunded", paymentIntentId);
+        return null;
+      }
       log.error(
           "Failed to create refund for PaymentIntent {}: {}", paymentIntentId, e.getMessage());
       if (Integer.valueOf(409).equals(e.getStatusCode())) {

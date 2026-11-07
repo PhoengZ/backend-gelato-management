@@ -7,6 +7,7 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.gelatoflow.payment.client.order.HttpOrderCallbackClient;
 import com.gelatoflow.payment.client.order.OrderCallbackPort;
 import com.gelatoflow.payment.client.order.OrderPort;
 import com.gelatoflow.payment.client.stripe.CheckoutWebhookPort;
@@ -26,10 +27,11 @@ class CheckoutWebhookServiceTest {
   OrderCallbackPort callbacks = mock(OrderCallbackPort.class);
   OrderPort legacyOrders = mock(OrderPort.class);
   StripePort legacyStripe = mock(StripePort.class);
+  RefundService refunds = mock(RefundService.class);
   CheckoutWebhookService checkout =
       new CheckoutWebhookService(
           stripe,
-          callbacks,
+          new OrderCallbackClient(callbacks, refunds),
           new OrderCallbackProperties(true, "https://order.example", TOKEN, false, 1000),
           properties());
   WebhookService webhooks =
@@ -54,6 +56,21 @@ class CheckoutWebhookServiceTest {
     receive("checkout.session.async_payment_succeeded");
     verify(callbacks, times(3)).succeeded(ORDER);
     verifyNoInteractions(legacyOrders, legacyStripe);
+  }
+
+  @Test
+  void paidSessionRejectedByOrderRefundsThePaymentIntent() throws Exception {
+    var session = paidSession();
+    doReturn(session).when(stripe).retrieve("cs_test_fixture");
+    doThrow(
+            new ApiException(
+                HttpStatus.SERVICE_UNAVAILABLE, HttpOrderCallbackClient.PAYMENT_REJECTED, "x"))
+        .when(callbacks)
+        .succeeded(ORDER);
+
+    receive("checkout.session.completed");
+
+    verify(refunds).refund(session.getPaymentIntentObject().getId());
   }
 
   @Test

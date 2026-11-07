@@ -116,6 +116,15 @@ class HttpOrderCallbackClientTest {
   }
 
   @Test
+  void only410IsADefinitivePaymentRejection() {
+    response.set(410);
+    assertThatThrownBy(() -> client.succeeded(ORDER))
+        .isInstanceOfSatisfying(
+            ApiException.class,
+            e -> assertThat(e.code()).isEqualTo(HttpOrderCallbackClient.PAYMENT_REJECTED));
+  }
+
+  @Test
   void timeoutConnectionFailureAndInvalidIdsDoNotAcknowledgeTheWebhook() {
     assertThatThrownBy(() -> client.succeeded("../other")).isInstanceOf(ApiException.class);
     assertThat(calls.get()).isZero();

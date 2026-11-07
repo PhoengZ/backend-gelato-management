@@ -20,6 +20,8 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
+func (*checkoutRepo) CountOrdersInSlot(context.Context, time.Time) (int64, error) { return 0, nil }
+
 type checkoutRepo struct {
 	repository.OrderRepository
 	mu        sync.Mutex
